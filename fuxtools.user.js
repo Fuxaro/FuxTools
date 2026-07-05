@@ -50,6 +50,10 @@
   let lastUpdateCheckAt = 0;
   const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
+  // Wird beim Schliessen des Modals waehrend einer laufenden Umbenennung gesetzt,
+  // damit die Umbenennungs-Schleife stoppt statt im Hintergrund weiterzulaufen.
+  let renameCancelled = false;
+
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
 
@@ -332,6 +336,12 @@
     // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
     pageJQuery(modal).on("show.bs.modal", () => renderMainMenu());
+
+    // Schliessen waehrend einer laufenden Umbenennung (X oben, Klick daneben, Escape)
+    // soll die Umbenennung stoppen statt einfach im Hintergrund weiterzulaufen.
+    pageJQuery(modal).on("hide.bs.modal", () => {
+      renameCancelled = true;
+    });
   }
 
   function getCurrentUsername() {
@@ -1042,7 +1052,7 @@
     pageJQuery(modal).modal("hide");
   }
 
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack }) {
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, mismatchedItems }) {
     const body = document.getElementById("vehicle-naming-modal-body");
 
     // Pro Wache zusammenfassen, statt jedes einzelne Fahrzeug aufzulisten
@@ -1063,6 +1073,25 @@
       `;
     }
 
+    let mismatchBlock = "";
+    if (mismatchedItems && mismatchedItems.length) {
+      const mismatchList = mismatchedItems
+        .slice(0, 5)
+        .map(item => `Fahrzeug ${item.id}: erwartet "${item.newName}"`)
+        .join("\n");
+      mismatchBlock = `
+        <p class="text-warning" style="margin-top:10px;">
+          <b>Achtung: Bei ${mismatchedItems.length} Fahrzeug(en) weicht der Name laut Server vom erwarteten
+          Namen ab</b> (z.B. durch serverseitige Kürzung/Filterung). Erste ${Math.min(5, mismatchedItems.length)}:
+        </p>
+        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(mismatchList)}</pre>
+      `;
+    }
+
+    const cancelledNote = cancelled
+      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten Fahrzeugen.</p>`
+      : "";
+
     const retryButton =
       failedItems && failedItems.length
         ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">
@@ -1072,6 +1101,7 @@
         : "";
 
     body.innerHTML = `
+      ${cancelledNote}
       <p>
         <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
         <b>${done} Fahrzeug(e) ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
@@ -1079,6 +1109,7 @@
       </p>
       <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
       ${errorBlock}
+      ${mismatchBlock}
       <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
       <div class="form-group" style="margin-top: 12px;">
         ${retryButton}
@@ -1086,7 +1117,7 @@
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schliessen</button>
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
 
@@ -1116,32 +1147,79 @@
     throw lastError;
   }
 
-  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsanzeige) und zeigt
-  // am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut versuchen"-Button
-  // mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
+  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu
+  // fluten, aber deutlich kuerzer als frueher (700ms), um bei vielen Fahrzeugen
+  // spuerbar schneller durchzukommen.
+  const RENAME_DELAY_MS = 400;
+
+  // Nach dem Umbenennen einmal die tatsaechlichen Namen vom Server abgleichen -
+  // eine erfolgreiche HTTP-Antwort beweist nicht zwingend, dass der Name im Spiel
+  // wirklich wie gewuenscht uebernommen wurde (z.B. serverseitige Kuerzung/Filterung).
+  async function verifyRenamedVehicles(doneItems) {
+    if (!doneItems.length) return [];
+    try {
+      const vehicles = await fetchJSON("/api/vehicles");
+      const captionById = new Map(vehicles.map(v => [String(v.id), v.caption]));
+      return doneItems.filter(item => captionById.get(String(item.id)) !== item.newName);
+    } catch (e) {
+      console.warn("[FuxTools] Überprüfung nach dem Umbenennen fehlgeschlagen:", e);
+      return [];
+    }
+  }
+
+  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsanzeige, Abbrechen-
+  // Button und Abschluss-Verifikation) und zeigt am Ende die Abschluss-Ansicht.
+  // Wird auch fuer den "erneut versuchen"-Button mit nur den zuvor fehlgeschlagenen
+  // Eintraegen wiederverwendet.
   async function executeRenamePlan(plan, verb, goBack) {
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p id="vn-exec-status" style="font-weight: bold; white-space: pre-wrap;"></p>`;
+    renameCancelled = false;
+
+    body.innerHTML = `
+      <p id="vn-exec-status" style="font-weight: bold; white-space: pre-wrap;"></p>
+      <div class="progress" style="margin: 8px 0 12px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
+      </div>
+      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+      </button>
+    `;
     const progressEl = document.getElementById("vn-exec-status");
+    const progressBarEl = document.getElementById("vn-exec-progress-bar");
+    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
+      renameCancelled = true;
+    });
 
     let done = 0;
+    const doneItems = [];
     const failedItems = [];
     const errors = [];
+    let cancelled = false;
 
-    for (const item of plan) {
-      progressEl.textContent = `${done + failedItems.length + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+    for (let i = 0; i < plan.length; i++) {
+      if (renameCancelled) {
+        cancelled = true;
+        break;
+      }
+      const item = plan[i];
+      progressEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+      progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
       try {
         await renameVehicleWithRetry(item.id, item.newName);
         done++;
+        doneItems.push(item);
       } catch (e) {
         console.error("[FuxTools] Fehler bei Fahrzeug", item.id, e);
         failedItems.push(item);
         if (errors.length < 5) errors.push(`Fahrzeug ${item.id} (${item.newName}): ${e.message}`);
       }
-      await sleep(700);
+      if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
     }
 
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack });
+    progressEl.textContent = "Überprüfe Ergebnis ...";
+    const mismatchedItems = await verifyRenamedVehicles(doneItems);
+
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, mismatchedItems });
   }
 
   async function runRenaming(selectedStations) {
