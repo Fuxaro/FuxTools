@@ -540,6 +540,17 @@
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
       window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
+      // Tampermonkeys Install-Dialog laeuft im neuen Tab - von hier aus koennen wir
+      // nicht wissen, wann/ob dort bestaetigt wurde. Also Button anbieten, mit dem
+      // man diese Seite manuell neu laedt, sobald die Installation durch ist.
+      const statusEl = document.getElementById("vn-update-status");
+      statusEl.innerHTML = `
+        <span class="text-muted">Neuer Tab geoeffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestaetigen. Danach hier neu laden:</span><br>
+        <button id="vn-btn-reload-page" type="button" class="btn btn-warning" style="margin-top:6px;">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
+        </button>
+      `;
+      document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
     });
 
     document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
@@ -1187,7 +1198,36 @@
       return;
     }
 
-    await executeRenamePlan(plan, "umbenannt", () => renderNameForm(selectedStations));
+    renderRenameConfirmation(selectedStations, plan);
+  }
+
+  // Letzter Bestaetigungsschritt vor dem eigentlichen Umbenennen: zeigt nochmal ein
+  // Beispiel aus dem fertigen Plan und laesst zwischen Umbenennen/Zurueck waehlen,
+  // bevor irgendetwas im Spiel geaendert wird.
+  function renderRenameConfirmation(selectedStations, plan) {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const exampleName = plan.length ? plan[0].newName : "-";
+
+    body.innerHTML = `
+      <p>Bereit zum Umbenennen von <b>${plan.length}</b> Fahrzeug(en) in <b>${selectedStations.length}</b> Wache(n).</p>
+      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
+        Vorschau: <b>${escapeHtml(exampleName)}</b>
+      </div>
+      <p class="text-muted" style="font-size:12px;">Wirklich umbenennen, oder nochmal zurueck zu den Einstellungen?</p>
+      <div class="form-group">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", () => renderNameForm(selectedStations));
+    document.getElementById("vn-btn-confirm-run").addEventListener("click", () => {
+      executeRenamePlan(plan, "umbenannt", () => renderNameForm(selectedStations));
+    });
   }
 
   //////////////////////////////////////////////////
