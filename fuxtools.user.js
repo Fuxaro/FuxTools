@@ -38,21 +38,10 @@
   // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
   // Wechseln angezeigt wird. Muss manuell pro Branch synchron mit CHANNEL,
   // @updateURL/@downloadURL im Header oben gehalten werden.
-  const CHANNEL = "beta";
+  const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
-
-  // Hintergrund-Update-Check: wird beim Start und bei jedem Oeffnen des Hauptmenues
-  // ausgeloest (gedrosselt), Ergebnis erscheint als Hinweis im Footer.
-  let modalFooterEl = null;
-  let availableUpdateVersion = null;
-  let lastUpdateCheckAt = 0;
-  const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
-
-  // Wird beim Schliessen des Modals waehrend einer laufenden Umbenennung gesetzt,
-  // damit die Umbenennungs-Schleife stoppt statt im Hintergrund weiterzulaufen.
-  let renameCancelled = false;
 
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
