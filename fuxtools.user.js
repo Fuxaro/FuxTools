@@ -42,6 +42,13 @@
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
+  // Hintergrund-Update-Check: wird beim Start und bei jedem Oeffnen des Hauptmenues
+  // ausgeloest (gedrosselt), Ergebnis erscheint als Hinweis im Footer.
+  let modalFooterEl = null;
+  let availableUpdateVersion = null;
+  let lastUpdateCheckAt = 0;
+  const UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1000;
+
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
 
@@ -270,9 +277,9 @@
 
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
-    modalFooter.style.cssText = "text-align:right; font-size:11px; color:#888; padding:6px 12px;";
-    const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
-    modalFooter.textContent = `FuxTools v${SCRIPT_VERSION}${channelSuffix} \u00b7 \u00a9 Fuxaro \u00b7 CC BY-NC-SA 4.0`;
+    modalFooter.style.cssText = "text-align:left; font-size:11px; color:#888; padding:6px 12px;";
+    modalFooterEl = modalFooter;
+    renderFooter();
 
     const modalContent = document.createElement("div");
     modalContent.className = "modal-content";
@@ -327,6 +334,7 @@
   let currentMode = "rename"; // "rename" oder "reset"
 
   function renderMainMenu() {
+    checkForUpdateInBackground(); // gedrosselt, blockiert das Rendern nicht (kein await)
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was moechtest du tun?` : "Was moechtest du tun?";
@@ -367,8 +375,42 @@
   }
 
   //////////////////////////////////////////////////
-  // Einstellungen: Kanal-Info + manueller Update-Check
+  // Einstellungen: Kanal-Info + Update-Check (manuell und im Hintergrund)
   //////////////////////////////////////////////////
+
+  function renderFooter() {
+    if (!modalFooterEl) return;
+    const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
+    const updateBadge = availableUpdateVersion
+      ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold; margin-right:8px;">Update verfuegbar (v${escapeHtml(availableUpdateVersion)})</a>`
+      : "";
+    modalFooterEl.innerHTML = `${updateBadge}FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0`;
+  }
+
+  async function fetchRemoteVersion() {
+    const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const match = text.match(/@version\s+([\d.]+)/);
+    if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
+    return match[1];
+  }
+
+  // Gedrosselter Hintergrund-Check (max. alle UPDATE_CHECK_INTERVAL_MS), wird beim
+  // Start und bei jedem Oeffnen des Hauptmenues angestossen. Fehler bleiben still
+  // (kein Popup) - der Footer-Hinweis ist nur ein Bonus, kein kritischer Pfad.
+  async function checkForUpdateInBackground() {
+    const now = Date.now();
+    if (now - lastUpdateCheckAt < UPDATE_CHECK_INTERVAL_MS) return;
+    lastUpdateCheckAt = now;
+    try {
+      const remoteVersion = await fetchRemoteVersion();
+      availableUpdateVersion = isNewerVersion(remoteVersion, SCRIPT_VERSION) ? remoteVersion : null;
+    } catch (e) {
+      console.warn("[FuxTools] Hintergrund-Update-Check fehlgeschlagen:", e);
+    }
+    renderFooter();
+  }
 
   // Einfacher numerischer Vergleich fuer Versionsnummern wie "0.1.4" (kein Semver mit
   // Vorabversionen, reicht fuer unser X.Y.Z-Schema).
@@ -449,22 +491,20 @@
       const statusEl = document.getElementById("vn-update-status");
       statusEl.innerHTML = `<em>Suche nach Updates ...</em>`;
       try {
-        const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        const match = text.match(/@version\s+([\d.]+)/);
-        if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
-        const remoteVersion = match[1];
+        const remoteVersion = await fetchRemoteVersion();
 
         if (isNewerVersion(remoteVersion, SCRIPT_VERSION)) {
+          availableUpdateVersion = remoteVersion;
           statusEl.innerHTML = `
             <span class="text-success"><b>Update verfuegbar: v${escapeHtml(remoteVersion)}</b></span><br>
             <a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener">Script oeffnen, um zu aktualisieren</a>
             (Tampermonkey zeigt dann den Installations-/Update-Dialog).
           `;
         } else {
+          availableUpdateVersion = null;
           statusEl.innerHTML = `<span class="text-success">Du bist bereits aktuell (v${escapeHtml(SCRIPT_VERSION)}).</span>`;
         }
+        renderFooter();
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Suchen nach Updates: ${escapeHtml(e.message)}</span>`;
       }
@@ -897,7 +937,14 @@
     });
   }
 
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems }) {
+  function closeModal() {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).modal("hide");
+  }
+
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack }) {
     const body = document.getElementById("vehicle-naming-modal-body");
 
     // Pro Wache zusammenfassen, statt jedes einzelne Fahrzeug aufzulisten
@@ -937,14 +984,20 @@
       <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
       <div class="form-group" style="margin-top: 12px;">
         ${retryButton}
-        <button id="vn-btn-finish" type="button" class="btn btn-primary">Beenden</button>
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+        </button>
+        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenue</button>
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schliessen</button>
       </div>
     `;
 
-    document.getElementById("vn-btn-finish").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     if (failedItems && failedItems.length) {
       document.getElementById("vn-btn-retry").addEventListener("click", () => {
-        executeRenamePlan(failedItems, verb);
+        executeRenamePlan(failedItems, verb, goBack);
       });
     }
   }
@@ -968,7 +1021,7 @@
   // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsanzeige) und zeigt
   // am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut versuchen"-Button
   // mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  async function executeRenamePlan(plan, verb) {
+  async function executeRenamePlan(plan, verb, goBack) {
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p id="vn-exec-status" style="font-weight: bold; white-space: pre-wrap;"></p>`;
     const progressEl = document.getElementById("vn-exec-status");
@@ -990,7 +1043,7 @@
       await sleep(700);
     }
 
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems });
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack });
   }
 
   async function runRenaming(selectedStations) {
@@ -1079,7 +1132,7 @@
       return;
     }
 
-    await executeRenamePlan(plan, "umbenannt");
+    await executeRenamePlan(plan, "umbenannt", () => renderNameForm(selectedStations));
   }
 
   //////////////////////////////////////////////////
@@ -1126,7 +1179,7 @@
       return;
     }
 
-    await executeRenamePlan(plan, "zurueckgesetzt");
+    await executeRenamePlan(plan, "zurueckgesetzt", () => renderResetScreen(selectedStations));
   }
 
   //////////////////////////////////////////////////
@@ -1142,6 +1195,7 @@
     await migrateLegacyIndexedDbNames();
     await Promise.all([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
     addMenuEntry();
+    checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
   }
 
   main();
