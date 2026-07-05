@@ -1,17 +1,20 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.1.4
+// @version     0.2.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
-// @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
+// @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
-// @updateURL   https://raw.githubusercontent.com/Fuxaro/Fuxtools/main/fuxtools.user.js
-// @downloadURL https://raw.githubusercontent.com/Fuxaro/Fuxtools/main/fuxtools.user.js
+// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
+// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @run-at      document-idle
-// @grant       none
+// @grant       GM.setValue
+// @grant       GM.getValue
+// @grant       GM.deleteValue
+// @grant       unsafeWindow
 // ==/UserScript==
 
 // -----------------------------------------------------------------------------
@@ -29,7 +32,7 @@
 
 (async function () {
   // WICHTIG: muss manuell synchron mit dem @version-Wert im Header oben gehalten werden
-  const SCRIPT_VERSION = "0.1.4";
+  const SCRIPT_VERSION = "0.2.0";
 
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
   // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
@@ -41,8 +44,6 @@
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
   const modalId = "vehicle-naming-modal";
-  const databaseName = "CustomVehicleNaming";
-  const objectStoreName = "main";
   const cacheKeyVehicleTypes = "vehicleTypes";
 
   let vehicleTypeCaptions = {};
@@ -69,44 +70,72 @@
   }
 
   //////////////////////////////////////////////////
-  // IndexedDB (wie im Wachenbauplaene-Script)
+  // Speicher ueber Tampermonkey (GM.setValue/GM.getValue) statt IndexedDB.
+  // Vorteil: haengt am Script, nicht an der Website-Origin - Einstellungen/Namen
+  // bleiben so auch zwischen www.leitstellenspiel.de und polizei.leitstellenspiel.de
+  // (getrennte Origins, getrennte IndexedDBs) erhalten und ueberleben ein "Cookies/
+  // Website-Daten loeschen" im Browser.
   //////////////////////////////////////////////////
 
-  function openDB() {
-    return new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(databaseName, 1);
-
-      request.onerror = () => reject("Failed to open the database");
-      request.onsuccess = event => resolve(event.target.result);
-      request.onupgradeneeded = event => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains(objectStoreName)) {
-          db.createObjectStore(objectStoreName);
-        }
-      };
-    });
-  }
-
   async function storeData(data, key) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([objectStoreName], "readwrite");
-      const store = tx.objectStore(objectStoreName);
-      const request = store.put(data, key);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject("Failed to store data");
-    });
+    await GM.setValue(key, data);
   }
 
   async function retrieveData(key) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([objectStoreName], "readonly");
-      const store = tx.objectStore(objectStoreName);
-      const request = store.get(key);
-      request.onsuccess = event => resolve(event.target.result);
-      request.onerror = () => reject("Failed to retrieve data");
+    return await GM.getValue(key, undefined);
+  }
+
+  // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
+  // Einstellungen + Fahrzeugtyp-Cache) - fuer den "Speicher loeschen"-Button in den
+  // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
+  async function clearAllStoredData() {
+    await GM.deleteValue("names");
+    await GM.deleteValue(cacheKeyVehicleTypes);
+
+    // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
+    // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
+    // Namen aus der Legacy-Datenbank wiederherstellen.
+    await new Promise(resolve => {
+      const request = window.indexedDB.deleteDatabase("CustomVehicleNaming");
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
     });
+  }
+
+  // Einmalige Migration: alte IndexedDB-Daten (Vor-GM-Speicher-Versionen) uebernehmen,
+  // falls im neuen GM-Speicher noch nichts unter "names" liegt. Laeuft fehlerfrei durch,
+  // auch wenn die alte Datenbank gar nicht existiert (z.B. bei Neuinstallation).
+  async function migrateLegacyIndexedDbNames() {
+    try {
+      const alreadyMigrated = await GM.getValue("names", undefined);
+      if (alreadyMigrated !== undefined) return;
+
+      const db = await new Promise((resolve, reject) => {
+        const request = window.indexedDB.open("CustomVehicleNaming", 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = () => {}; // keine alte DB vorhanden - nichts zu migrieren
+      });
+
+      if (!db.objectStoreNames.contains("main")) {
+        db.close();
+        return;
+      }
+
+      const legacyNames = await new Promise((resolve, reject) => {
+        const tx = db.transaction(["main"], "readonly");
+        const store = tx.objectStore("main");
+        const request = store.get("names");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+
+      if (legacyNames) await GM.setValue("names", legacyNames);
+    } catch (e) {
+      console.warn("[FuxTools] Migration aus altem IndexedDB-Speicher fehlgeschlagen (ignoriert):", e);
+    }
   }
 
   async function fetchAndStoreData(url, key) {
@@ -175,12 +204,12 @@
     // Schritt 1: das interne Formular-Fragment holen (enthaelt authenticity_token,
     // _method-Feld fuer PATCH/PUT, Formular-Action etc.)
     const res = await fetch(`/vehicles/${vehicleId}/editName`, { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`Formular fuer Fahrzeug ${vehicleId} nicht ladbar (${res.status})`);
+    if (!res.ok) throw new Error(`Formular für Fahrzeug ${vehicleId} nicht ladbar (${res.status})`);
     const html = await res.text();
 
     // Wichtig: NICHT ins Dokument einhaengen und NICHT per form.submit()/trigger('submit')
-    // abschicken - das fuehrt zu einer echten Seiten-Navigation (siehe Bug-Report) und
-    // bricht die restliche Umbenennungs-Schleife ab.
+    // abschicken - das fuehrt zu einer echten Seiten-Navigation und bricht die
+    // restliche Umbenennungs-Schleife ab.
     const container = document.createElement("div");
     container.innerHTML = html;
 
@@ -190,7 +219,7 @@
     const form =
       container.querySelector(`#vehicle_form_${vehicleId}`) ||
       container.querySelector("form");
-    if (!input || !form) throw new Error(`Formular-Elemente fuer Fahrzeug ${vehicleId} nicht gefunden.`);
+    if (!input || !form) throw new Error(`Formular-Elemente für Fahrzeug ${vehicleId} nicht gefunden.`);
 
     input.value = newName;
 
@@ -210,7 +239,7 @@
       },
     });
 
-    if (!res2.ok) throw new Error(`Speichern fuer Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
+    if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
   }
 
   //////////////////////////////////////////////////
@@ -260,9 +289,9 @@
 
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
-    modalFooter.style.cssText = "text-align:right; font-size:11px; color:#888; padding:6px 12px;";
-    const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
-    modalFooter.textContent = `FuxTools v${SCRIPT_VERSION}${channelSuffix} \u00b7 \u00a9 Fuxaro \u00b7 CC BY-NC-SA 4.0`;
+    modalFooter.style.cssText = "display:flex; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
+    modalFooterEl = modalFooter;
+    renderFooter();
 
     const modalContent = document.createElement("div");
     modalContent.className = "modal-content";
@@ -292,7 +321,16 @@
     // startet - so wird das Hauptmenue gesetzt, bevor ueberhaupt etwas sichtbar ist.
     // (shown.bs.modal wuerde erst NACH der Animation feuern und kurz den alten
     // Inhalt vom letzten Mal aufblitzen lassen.)
-    $(modal).on("show.bs.modal", () => renderMainMenu());
+    // Seiten-jQuery ueber unsafeWindow: seit @grant nicht mehr "none" ist, laeuft das
+    // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).on("show.bs.modal", () => renderMainMenu());
+
+    // Schliessen waehrend einer laufenden Umbenennung (X oben, Klick daneben, Escape)
+    // soll die Umbenennung stoppen statt einfach im Hintergrund weiterzulaufen.
+    pageJQuery(modal).on("hide.bs.modal", () => {
+      renameCancelled = true;
+    });
   }
 
   function getCurrentUsername() {
@@ -314,9 +352,10 @@
   let currentMode = "rename"; // "rename" oder "reset"
 
   function renderMainMenu() {
+    checkForUpdateInBackground(); // gedrosselt, blockiert das Rendern nicht (kein await)
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
-    const greeting = username ? `Hey ${escapeHtml(username)}, was moechtest du tun?` : "Was moechtest du tun?";
+    const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
     body.innerHTML = `
       <p>${greeting}</p>
       <div class="list-group">
@@ -326,15 +365,15 @@
         </button>
         <button type="button" class="list-group-item" id="vn-menu-reset">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-          &nbsp; Fahrzeuge zuruecksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
+          &nbsp; Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
         </button>
         <button type="button" class="list-group-item disabled" id="vn-menu-stations" disabled>
           <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
-          &nbsp; Wachen umbenennen <span class="text-muted">(bald verfuegbar)</span>
+          &nbsp; Wachen umbenennen <span class="text-muted">(bald verfügbar)</span>
         </button>
         <button type="button" class="list-group-item disabled" id="vn-menu-leitstellen" disabled>
           <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
-          &nbsp; Leitstellen umbenennen <span class="text-muted">(bald verfuegbar)</span>
+          &nbsp; Leitstellen umbenennen <span class="text-muted">(bald verfügbar)</span>
         </button>
         <button type="button" class="list-group-item" id="vn-menu-settings">
           <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
@@ -354,8 +393,45 @@
   }
 
   //////////////////////////////////////////////////
-  // Einstellungen: Kanal-Info + manueller Update-Check
+  // Einstellungen: Kanal-Info + Update-Check (manuell und im Hintergrund)
   //////////////////////////////////////////////////
+
+  function renderFooter() {
+    if (!modalFooterEl) return;
+    const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
+    const updateBadge = availableUpdateVersion
+      ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold;">Update verfügbar (v${escapeHtml(availableUpdateVersion)})</a>`
+      : "";
+    // margin-left:auto auf der Versions-Span schiebt sie an den rechten Rand, egal ob
+    // der Update-Hinweis davor existiert oder nicht (robuster als space-between mit
+    // einem Platzhalter-Element, das je nach Inhalt/Whitespace die Verteilung kippt).
+    modalFooterEl.innerHTML = `${updateBadge}<span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
+  }
+
+  async function fetchRemoteVersion() {
+    const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const match = text.match(/@version\s+([\d.]+)/);
+    if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
+    return match[1];
+  }
+
+  // Gedrosselter Hintergrund-Check (max. alle UPDATE_CHECK_INTERVAL_MS), wird beim
+  // Start und bei jedem Oeffnen des Hauptmenues angestossen. Fehler bleiben still
+  // (kein Popup) - der Footer-Hinweis ist nur ein Bonus, kein kritischer Pfad.
+  async function checkForUpdateInBackground() {
+    const now = Date.now();
+    if (now - lastUpdateCheckAt < UPDATE_CHECK_INTERVAL_MS) return;
+    lastUpdateCheckAt = now;
+    try {
+      const remoteVersion = await fetchRemoteVersion();
+      availableUpdateVersion = isNewerVersion(remoteVersion, SCRIPT_VERSION) ? remoteVersion : null;
+    } catch (e) {
+      console.warn("[FuxTools] Hintergrund-Update-Check fehlgeschlagen:", e);
+    }
+    renderFooter();
+  }
 
   // Einfacher numerischer Vergleich fuer Versionsnummern wie "0.1.4" (kein Semver mit
   // Vorabversionen, reicht fuer unser X.Y.Z-Schema).
@@ -376,7 +452,6 @@
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-menu">&larr; Hauptmenue</a></p>
       <p>
         Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
         <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
@@ -392,7 +467,15 @@
         <button id="vn-btn-check-update" type="button" class="btn btn-primary">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen
         </button>
+        <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen
+        </button>
       </div>
+      <p class="text-muted" style="font-size:11px; margin-top:-4px;">
+        Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
+        die Versionsnummer nicht geändert hat - praktisch beim Testen auf dem Beta-Kanal, ohne
+        jedes Mal die Version hochzählen zu müssen.
+      </p>
       <div id="vn-update-status" style="margin-top: 10px;"></div>
 
       <hr>
@@ -400,7 +483,7 @@
       <p class="text-muted" style="font-size:12px;">
         ${
           CHANNEL === "beta"
-            ? "Zurueck zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
+            ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
             : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
         }
       </p>
@@ -409,37 +492,74 @@
         ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
       </a>
       <p class="text-muted" style="font-size:11px; margin-top:6px;">
-        Oeffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
-        Update dieses Scripts und fragt einmal um Bestaetigung - danach laeuft der neue Kanal
+        Öffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
+        Update dieses Scripts und fragt einmal um Bestätigung - danach läuft der neue Kanal
         inklusive Auto-Update, bis du hier erneut wechselst.
       </p>
+
+      <hr>
+      <p><b>Speicher löschen</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
+        Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.
+      </p>
+      <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
+      </button>
+      <div id="vn-clear-status" style="margin-top:10px;"></div>
+
+      <hr>
+      <div class="form-group">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
     `;
 
-    document.getElementById("vn-back-to-menu").addEventListener("click", e => {
-      e.preventDefault();
-      renderMainMenu();
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+
+    document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
+      const confirmed = confirm(
+        "Achtung: Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen, " +
+          "Namens-Bausteine-Einstellungen) unwiderruflich gelöscht - als wäre das Script gerade " +
+          "neu installiert worden. Fortfahren?"
+      );
+      if (!confirmed) return;
+
+      const statusEl = document.getElementById("vn-clear-status");
+      statusEl.innerHTML = `<em>Speicher wird gelöscht ...</em>`;
+      try {
+        await clearAllStoredData();
+        statusEl.innerHTML = `<span class="text-success">Erledigt. Seite wird neu geladen ...</span>`;
+        location.reload();
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler beim Löschen: ${escapeHtml(e.message)}</span>`;
+      }
+    });
+
+    document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
+      renderReloadOnlyScreen();
+      window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
     });
 
     document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-update-status");
       statusEl.innerHTML = `<em>Suche nach Updates ...</em>`;
       try {
-        const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        const match = text.match(/@version\s+([\d.]+)/);
-        if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
-        const remoteVersion = match[1];
+        const remoteVersion = await fetchRemoteVersion();
 
         if (isNewerVersion(remoteVersion, SCRIPT_VERSION)) {
+          availableUpdateVersion = remoteVersion;
           statusEl.innerHTML = `
-            <span class="text-success"><b>Update verfuegbar: v${escapeHtml(remoteVersion)}</b></span><br>
-            <a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener">Script oeffnen, um zu aktualisieren</a>
+            <span class="text-success"><b>Update verfügbar: v${escapeHtml(remoteVersion)}</b></span><br>
+            <a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener">Script öffnen, um zu aktualisieren</a>
             (Tampermonkey zeigt dann den Installations-/Update-Dialog).
           `;
         } else {
+          availableUpdateVersion = null;
           statusEl.innerHTML = `<span class="text-success">Du bist bereits aktuell (v${escapeHtml(SCRIPT_VERSION)}).</span>`;
         }
+        renderFooter();
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Suchen nach Updates: ${escapeHtml(e.message)}</span>`;
       }
@@ -538,27 +658,26 @@
       .join("");
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-menu">&larr; Hauptmenue</a></p>
-      <p>Waehle die Leitstelle(n) aus:</p>
+      <p>Wähle die Leitstelle(n) aus:</p>
       <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
         ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
       </div>
       <div class="form-group" style="margin-top: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
         <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">
           Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
         </button>
       </div>
     `;
 
-    document.getElementById("vn-back-to-menu").addEventListener("click", e => {
-      e.preventDefault();
-      renderMainMenu();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
 
     document.getElementById("vn-btn-next-leitstelle").addEventListener("click", () => {
       const ids = [...body.querySelectorAll(".vn-leitstelle-check:checked")].map(el => el.value);
       if (!ids.length) {
-        alert("Bitte mindestens eine Leitstelle auswaehlen.");
+        alert("Bitte mindestens eine Leitstelle auswählen.");
         return;
       }
       selectedLeitstelleIds = ids;
@@ -606,7 +725,7 @@
             <span class="text-muted">(${catStations.length} Wachen)</span>
             <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">
               <input type="checkbox" class="vn-category-master" data-category="${escapeHtml(cat)}">
-              alle auswaehlen
+              alle auswählen
             </label>
           </div>
           <div id="${collapseId}" class="panel-collapse collapse">
@@ -619,22 +738,21 @@
       .join("");
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-leitstelle">&larr; Leitstellen-Auswahl</a></p>
-      <p>Waehle die Wachen aus, deren Fahrzeuge du umbenennen moechtest (Kategorie anklicken zum Auf-/Zuklappen):</p>
+      <p>Wähle die Wachen aus, deren Fahrzeuge du umbenennen möchtest (Kategorie anklicken zum Auf-/Zuklappen):</p>
       <div style="max-height: 460px; overflow-y: auto; padding: 4px;">
         ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}
       </div>
       <div class="form-group" style="margin-top: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
         <button id="vn-btn-next" type="button" class="btn btn-primary">
           Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
         </button>
       </div>
     `;
 
-    document.getElementById("vn-back-to-leitstelle").addEventListener("click", e => {
-      e.preventDefault();
-      renderLeitstelleSelection();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", renderLeitstelleSelection);
 
     // "alle auswaehlen" Checkbox pro Kategorie
     body.querySelectorAll(".vn-category-master").forEach(master => {
@@ -664,7 +782,7 @@
     document.getElementById("vn-btn-next").addEventListener("click", () => {
       const selectedIds = [...body.querySelectorAll(".vn-station-check:checked")].map(el => el.value);
       if (!selectedIds.length) {
-        alert("Bitte mindestens eine Wache auswaehlen.");
+        alert("Bitte mindestens eine Wache auswählen.");
         return;
       }
       const selected = stations.filter(s => selectedIds.includes(s.id));
@@ -680,17 +798,32 @@
   // Schritt 2: Namen pro Wache + Fahrzeugtyp vergeben
   //////////////////////////////////////////////////
 
+  // Text1/Text2 kommen mit einem Beispielwert vorausgefuellt, sind aber standardmaessig
+  // deaktiviert - so sieht man sofort, wie die Bausteine funktionieren, ohne dass beim
+  // ersten Ausfuehren versehentlich "DE"/"-SH-" mit umbenannt wird.
   const defaultTemplate = {
     useText1: false,
-    text1: "",
+    text1: "DE",
     useType: true,
     useText2: false,
-    text2: "",
+    text2: "-SH-",
     useNumber: true,
   };
 
   function getTemplate() {
     return Object.assign({}, defaultTemplate, namesStore.__template || {});
+  }
+
+  // Setzt einen Namen aus den Bausteinen zusammen - gemeinsam genutzt von der
+  // Live-Vorschau und dem eigentlichen Umbenennen, damit beide immer exakt
+  // dasselbe Ergebnis anzeigen/erzeugen.
+  function composeName(tpl, enteredName, caption, nr, padding) {
+    const segments = [];
+    if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
+    if (tpl.useType) segments.push(enteredName || caption);
+    if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
+    if (tpl.useNumber) segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
+    return segments.join(" ") || enteredName || caption;
   }
 
   function renderNameForm(selectedStations) {
@@ -711,61 +844,88 @@
       }
     }
 
+    // Checkbox pro Zeile waehlt aus, ob der Typ ueberhaupt umbenannt wird. Das
+    // Textfeld ist immer optional (leer = offizieller Fahrzeugtypname) - fuer rein
+    // manuelle volle Namen (z.B. "STW -SH-") einfach Text 1/Text 2 unten deaktivieren
+    // und den gewuenschten Namen direkt hier eintragen.
     const typeRows = [...byType.entries()]
       .sort((a, b) => a[1].caption.localeCompare(b[1].caption))
       .map(([typeId, info]) => {
         const savedName = namesStore[typeId] || "";
         return `
-        <div class="form-group vn-type-row" data-type="${typeId}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-          <label style="flex: 0 0 220px; margin: 0;">${escapeHtml(info.caption)} <span class="text-muted">(${info.count}x insgesamt)</span></label>
-          <input type="text" class="form-control vn-name-input" placeholder="Name eingeben, z.B. LF" value="${escapeHtml(savedName)}" style="flex:1;">
+        <div class="form-group vn-type-row" data-type="${typeId}" data-caption="${escapeHtml(info.caption)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+          <label style="flex: 0 0 24px; margin: 0;">
+            <input type="checkbox" class="vn-type-include" checked>
+          </label>
+          <label style="flex: 0 0 196px; margin: 0;">${escapeHtml(info.caption)} <span class="text-muted">(${info.count}x insgesamt)</span></label>
+          <input type="text" class="form-control vn-name-input" placeholder="eigenes Kürzel (optional), sonst Fahrzeugtypname" value="${escapeHtml(savedName)}" style="flex:1;">
         </div>`;
       })
       .join("");
 
     body.innerHTML = `
-      <p class="text-muted">${selectedStations.length} Wache(n) ausgewaehlt.</p>
+      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>
+
       <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
         <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>
-        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;">
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
-          </label>
-          <input type="text" id="vn-text1" class="form-control input-sm" style="width:140px;" placeholder="z.B. Bereitschaft" value="${escapeHtml(tpl.text1)}">
-
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
-          </label>
-
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
-          </label>
-          <input type="text" id="vn-text2" class="form-control input-sm" style="width:140px;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
-
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-number" ${tpl.useNumber ? "checked" : ""}> Nummer
-          </label>
+        <div style="display:grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap:4px 10px; align-items:end;">
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
+            </label>
+            <input type="text" id="vn-text1" class="form-control input-sm" style="width:100%;" placeholder="z.B. DE" value="${escapeHtml(tpl.text1)}">
+          </div>
+          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
+            </label>
+          </div>
+          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
+            </label>
+            <input type="text" id="vn-text2" class="form-control input-sm" style="width:100%;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
+          </div>
         </div>
-        <p class="text-muted" style="font-size:11px; margin:8px 0 0;">
-          Reihenfolge im Namen: Text 1 &rarr; Fahrzeugtyp-Name &rarr; Text 2 &rarr; Nummer. Deaktivierte oder leere
-          Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
+        <p class="text-muted" style="font-size:11px; margin:10px 0 0;">
+          Deaktivierte oder leere Bausteine werden übersprungen, die Nummer kommt immer ans Ende.
+          Text 1/Text 2 gelten global für alle ausgewählten Fahrzeugtypen.
+        </p>
+        <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
+          Für einen komplett manuellen, freien Namen: Text 1 und Text 2 hier deaktivieren und den
+          gewünschten Namen direkt ins Kürzel-Feld pro Fahrzeugtyp unten eintragen.
         </p>
       </fieldset>
-      <p class="text-muted">Der Name pro Fahrzeugtyp gilt fuer alle ausgewaehlten Wachen. Nummeriert wird trotzdem <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer). Leeres Feld = Typ wird nicht angefasst, auch wenn "Fahrzeugtyp-Name" oben deaktiviert ist.</p>
+
+      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
+        Vorschau: <b id="vn-preview-text">-</b>
+      </div>
+
+      <p class="text-muted" style="font-size:11px;">
+        Häkchen pro Zeile wählt aus, welche Fahrzeugtypen überhaupt umbenannt werden. Das
+        Kürzel-Textfeld ist nur relevant, wenn "Fahrzeugtyp-Name" oben aktiv ist (leer = offizieller
+        Fahrzeugtypname) - sonst ist es ausgegraut und wirkungslos.
+      </p>
       <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
         ${typeRows}
       </fieldset>
       <div class="form-inline" style="margin: 10px 0;">
+        <label style="margin-right: 16px; display:inline-flex; align-items:center; gap:4px;" id="vn-number-toggle-wrap">
+          <input type="checkbox" id="vn-use-number" ${tpl.useNumber ? "checked" : ""}> Nummer anhängen
+        </label>
         <label style="margin-right: 16px;">Start-Nummer
           <input type="number" id="vn-start-nr" class="form-control input-sm" value="1" style="width:70px; margin-left:6px;">
         </label>
         <label>
-          <input type="checkbox" id="vn-padding" checked> Fuehrende Nullen (01, 02, ...)
+          <input type="checkbox" id="vn-padding" checked> Führende Nullen (01, 02, ...)
         </label>
       </div>
+      <p class="text-muted" style="font-size:11px;">Nummeriert wird <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer).</p>
       <div class="form-group">
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-run" type="button" class="btn btn-success">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Fahrzeuge umbenennen
@@ -793,7 +953,7 @@
       document.getElementById(id).addEventListener("change", persistTemplate);
     });
 
-    // Nummer-Felder ausgrauen, wenn der Baustein "Nummer" deaktiviert ist
+    // Nummer-Felder ausgrauen, wenn "Nummer anhaengen" deaktiviert ist
     const useNumberCheckbox = document.getElementById("vn-use-number");
     const startNrInput = document.getElementById("vn-start-nr");
     const paddingCheckbox = document.getElementById("vn-padding");
@@ -804,6 +964,49 @@
     }
     useNumberCheckbox.addEventListener("change", syncNumberControls);
     syncNumberControls();
+
+    // Kuerzel-Felder pro Typ ausgrauen, wenn "Fahrzeugtyp-Name" oben deaktiviert ist -
+    // sie wirken sich dann auf den Namen nicht aus, sollen also auch nicht aktiv aussehen.
+    const useTypeCheckbox = document.getElementById("vn-use-type");
+    function syncTypeNameInputs() {
+      const enabled = useTypeCheckbox.checked;
+      body.querySelectorAll(".vn-name-input").forEach(input => {
+        input.disabled = !enabled;
+        // explizite Inline-Styles statt uns auf CSS von der Seite zu verlassen -
+        // so ist der ausgegraute Zustand immer sichtbar, egal welches Theme aktiv ist.
+        input.style.backgroundColor = enabled ? "" : "#eee";
+        input.style.color = enabled ? "" : "#999";
+        input.style.cursor = enabled ? "" : "not-allowed";
+        input.placeholder = enabled ? "eigenes Kürzel (optional), sonst Fahrzeugtypname" : "wird nicht verwendet (Fahrzeugtyp-Name oben deaktiviert)";
+      });
+    }
+    useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
+    syncTypeNameInputs();
+
+    // Live-Vorschau: zeigt anhand des ersten Fahrzeugtyps in der Liste, wie ein Name
+    // mit den aktuell gewaehlten Bausteinen/Einstellungen aussehen wuerde.
+    const previewEl = document.getElementById("vn-preview-text");
+    function updatePreview() {
+      const previewTpl = {
+        useText1: document.getElementById("vn-use-text1").checked,
+        text1: document.getElementById("vn-text1").value.trim(),
+        useType: document.getElementById("vn-use-type").checked,
+        useText2: document.getElementById("vn-use-text2").checked,
+        text2: document.getElementById("vn-text2").value.trim(),
+        useNumber: document.getElementById("vn-use-number").checked,
+      };
+      const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
+      const padding = document.getElementById("vn-padding").checked;
+
+      const firstRow = body.querySelector(".vn-type-row");
+      const enteredName = firstRow ? firstRow.querySelector(".vn-name-input").value.trim() : "";
+      const caption = firstRow ? firstRow.dataset.caption : "Fahrzeugtyp";
+
+      previewEl.textContent = composeName(previewTpl, enteredName, caption, startNr, padding);
+    }
+    body.addEventListener("input", updatePreview);
+    body.addEventListener("change", updatePreview);
+    updatePreview();
 
     // Namen sofort dauerhaft speichern, sobald sie eingegeben werden - nicht erst beim Umbenennen
     body.querySelectorAll(".vn-name-input").forEach(input => {
@@ -820,7 +1023,33 @@
     });
   }
 
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems }) {
+  function closeModal() {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).modal("hide");
+  }
+
+  // Exklusiver Screen nach "Neuinstallation erzwingen": bewusst OHNE andere Buttons
+  // (kein Zurueck, kein Hauptmenue) - erst nach dem Neuladen soll man mit FuxTools
+  // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
+  // anderen Tab schon eine neue Version installiert wurde.
+  function renderReloadOnlyScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
+        Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen.
+      </p>
+      <p>Lade diese Seite danach neu, um mit der aktuellen Version weiterzumachen:</p>
+      <button id="vn-btn-reload-page" type="button" class="btn btn-warning btn-lg">
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
+      </button>
+    `;
+    document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+  }
+
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled }) {
     const body = document.getElementById("vehicle-naming-modal-body");
 
     // Pro Wache zusammenfassen, statt jedes einzelne Fahrzeug aufzulisten
@@ -841,6 +1070,10 @@
       `;
     }
 
+    const cancelledNote = cancelled
+      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten Fahrzeugen.</p>`
+      : "";
+
     const retryButton =
       failedItems && failedItems.length
         ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">
@@ -850,6 +1083,7 @@
         : "";
 
     body.innerHTML = `
+      ${cancelledNote}
       <p>
         <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
         <b>${done} Fahrzeug(e) ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
@@ -860,14 +1094,20 @@
       <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
       <div class="form-group" style="margin-top: 12px;">
         ${retryButton}
-        <button id="vn-btn-finish" type="button" class="btn btn-primary">Beenden</button>
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
 
-    document.getElementById("vn-btn-finish").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     if (failedItems && failedItems.length) {
       document.getElementById("vn-btn-retry").addEventListener("click", () => {
-        executeRenamePlan(failedItems, verb);
+        executeRenamePlan(failedItems, verb, goBack);
       });
     }
   }
@@ -888,20 +1128,44 @@
     throw lastError;
   }
 
-  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsanzeige) und zeigt
-  // am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut versuchen"-Button
-  // mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  async function executeRenamePlan(plan, verb) {
+  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu fluten.
+  const RENAME_DELAY_MS = 400;
+
+  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
+  // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
+  // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
+  async function executeRenamePlan(plan, verb, goBack) {
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p id="vn-exec-status" style="font-weight: bold; white-space: pre-wrap;"></p>`;
-    const progressEl = document.getElementById("vn-exec-status");
+    renameCancelled = false;
+
+    body.innerHTML = `
+      <div class="progress" style="margin-bottom: 12px; height: 24px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar"
+             style="width:0%; line-height:24px; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        </div>
+      </div>
+      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+      </button>
+    `;
+    const progressBarEl = document.getElementById("vn-exec-progress-bar");
+    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
+      renameCancelled = true;
+    });
 
     let done = 0;
     const failedItems = [];
     const errors = [];
+    let cancelled = false;
 
-    for (const item of plan) {
-      progressEl.textContent = `${done + failedItems.length + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+    for (let i = 0; i < plan.length; i++) {
+      if (renameCancelled) {
+        cancelled = true;
+        break;
+      }
+      const item = plan[i];
+      progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
+      progressBarEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       try {
         await renameVehicleWithRetry(item.id, item.newName);
         done++;
@@ -910,10 +1174,10 @@
         failedItems.push(item);
         if (errors.length < 5) errors.push(`Fahrzeug ${item.id} (${item.newName}): ${e.message}`);
       }
-      await sleep(700);
+      if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
     }
 
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems });
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled });
   }
 
   async function runRenaming(selectedStations) {
@@ -936,13 +1200,19 @@
 
     body.querySelectorAll(".vn-type-row").forEach(row => {
       const input = row.querySelector(".vn-name-input");
-      const baseName = input.value.trim();
+      const enteredName = input.value.trim();
       const typeId = row.dataset.type;
-      if (!baseName) {
+      const caption = row.dataset.caption || `Typ ${typeId}`;
+
+      // Checkbox pro Zeile entscheidet ueber die Auswahl, das Textfeld ist nur ein
+      // optionales Kuerzel (leer = offizieller Typname).
+      if (!row.querySelector(".vn-type-include").checked) return;
+
+      if (enteredName) {
+        namesStore[typeId] = enteredName;
+      } else {
         delete namesStore[typeId];
-        return;
       }
-      namesStore[typeId] = baseName;
 
       // Nummerierung laeuft pro Wache separat, auch wenn der Name global gilt.
       // Wir benennen der Einfachheit halber immer um, unabhaengig vom aktuellen Namen.
@@ -952,15 +1222,7 @@
           .sort((a, b) => a.id - b.id);
 
         vList.forEach((v, idx) => {
-          const segments = [];
-          if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
-          if (tpl.useType) segments.push(baseName);
-          if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
-          if (tpl.useNumber) {
-            const nr = startNr + idx;
-            segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
-          }
-          const newName = segments.join(" ") || baseName;
+          const newName = composeName(tpl, enteredName, caption, startNr + idx, padding);
           plan.push({ id: v.id, oldName: v.caption, newName, station: station.name });
         });
       }
@@ -969,11 +1231,40 @@
     await saveNamesStore();
 
     if (!plan.length) {
-      statusEl.textContent = "Keine Fahrzeugtypen mit Namen ausgefuellt.";
+      statusEl.textContent = "Keine Fahrzeugtypen ausgewählt (Häkchen prüfen).";
       return;
     }
 
-    await executeRenamePlan(plan, "umbenannt");
+    renderRenameConfirmation(selectedStations, plan);
+  }
+
+  // Letzter Bestaetigungsschritt vor dem eigentlichen Umbenennen: zeigt nochmal ein
+  // Beispiel aus dem fertigen Plan und laesst zwischen Umbenennen/Zurueck waehlen,
+  // bevor irgendetwas im Spiel geaendert wird.
+  function renderRenameConfirmation(selectedStations, plan) {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const exampleName = plan.length ? plan[0].newName : "-";
+
+    body.innerHTML = `
+      <p>Bereit zum Umbenennen von <b>${plan.length}</b> Fahrzeug(en) in <b>${selectedStations.length}</b> Wache(n).</p>
+      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
+        Vorschau: <b>${escapeHtml(exampleName)}</b>
+      </div>
+      <p class="text-muted" style="font-size:12px;">Wirklich umbenennen, oder nochmal zurück zu den Einstellungen?</p>
+      <div class="form-group">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", () => renderNameForm(selectedStations));
+    document.getElementById("vn-btn-confirm-run").addEventListener("click", () => {
+      executeRenamePlan(plan, "umbenannt", () => renderNameForm(selectedStations));
+    });
   }
 
   //////////////////////////////////////////////////
@@ -986,14 +1277,14 @@
     const totalVehicles = selectedStations.reduce((sum, s) => sum + s.vehicles.length, 0);
 
     body.innerHTML = `
-      <p class="text-muted">${selectedStations.length} Wache(n) ausgewaehlt.</p>
-      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurueckgesetzt (keine Nummer, kein Praefix).</p>
+      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>
+      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurückgesetzt (keine Nummer, kein Präfix).</p>
       <div class="form-group">
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-reset" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zuruecksetzen
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zurücksetzen
         </button>
       </div>
       <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>
@@ -1020,7 +1311,7 @@
       return;
     }
 
-    await executeRenamePlan(plan, "zurueckgesetzt");
+    await executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
 
   //////////////////////////////////////////////////
@@ -1033,8 +1324,10 @@
       "color:#337ab7; font-weight:bold;",
       "color:inherit; font-weight:normal;"
     );
+    await migrateLegacyIndexedDbNames();
     await Promise.all([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
     addMenuEntry();
+    checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
   }
 
   main();
