@@ -933,6 +933,11 @@
         const enabled = useTypeCheckbox.checked;
         body.querySelectorAll(".vn-name-input").forEach(input => {
           input.disabled = !enabled;
+          // explizite Inline-Styles statt uns auf CSS von der Seite zu verlassen -
+          // so ist der ausgegraute Zustand immer sichtbar, egal welches Theme aktiv ist.
+          input.style.backgroundColor = enabled ? "" : "#eee";
+          input.style.color = enabled ? "" : "#999";
+          input.style.cursor = enabled ? "" : "not-allowed";
           input.placeholder = enabled ? "eigenes Kuerzel (optional), sonst Fahrzeugtypname" : "wird nicht verwendet (Fahrzeugtyp-Name oben deaktiviert)";
         });
       }
