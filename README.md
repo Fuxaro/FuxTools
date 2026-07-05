@@ -35,11 +35,12 @@ im Hintergrund. Im Script selbst gibt es unter **Einstellungen** ebenfalls einen
 
 ## Beta-Kanal
 
-Für Testzwecke gibt es parallel zur stabilen Version (`main`-Branch) einen `beta`-Branch. Wer
-Neuerungen vorab testen möchte, installiert zusätzlich die Beta-Variante über
-[`fuxtools.user.js` im `beta`-Branch](https://github.com/Fuxaro/FuxTools/blob/beta/fuxtools.user.js)
-(eigener Name/Namespace, läuft parallel zur Stable-Version, ohne sie zu ersetzen). Der
-Einstellungen-Bildschirm im Script zeigt an, welcher Kanal (Stable/Beta) gerade installiert ist.
+Neuerungen landen zuerst auf dem `beta`-Branch und erst danach auf `main` (stabil). Unter
+**Einstellungen** im Script zeigt ein Button "Zu Beta wechseln" den aktuellen Kanal an und lässt
+dich jederzeit umschalten: Klick öffnet den Code des jeweils anderen Kanals in einem neuen Tab,
+Tampermonkey erkennt es (gleicher Script-Name) als Update und fragt einmal zur Bestätigung. Ab
+dann läuft der neue Kanal inklusive Auto-Update, bis du im selben Menü wieder zurückwechselst –
+keine separate Installation nötig.
 
 ## Changelog
 
