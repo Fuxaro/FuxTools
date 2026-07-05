@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name        * FuxTools
-// @namespace   custom.leitstellenspiel.de
+// @name        * FuxTools Beta
+// @namespace   custom.leitstellenspiel.de.beta
 // @version     0.1.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
-// @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
+// @description FuxTools (Beta) - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
-// @updateURL   https://raw.githubusercontent.com/Fuxaro/Fuxtools/main/fuxtools.user.js
-// @downloadURL https://raw.githubusercontent.com/Fuxaro/Fuxtools/main/fuxtools.user.js
+// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
+// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @run-at      document-idle
 // @grant       none
 // ==/UserScript==
@@ -34,10 +34,12 @@
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
   // installierten Kanal in der UI (Einstellungen, Footer). Muss manuell pro Branch
   // synchron mit @updateURL/@downloadURL im Header oben gehalten werden.
-  const CHANNEL = "stable";
-  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
+  const CHANNEL = "beta";
+  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
 
-  const modalId = "vehicle-naming-modal";
+  // Eigene modalId pro Kanal, damit Stable und Beta gleichzeitig installiert sein
+  // koennen, ohne sich beim DOM-Element/Menueeintrag in die Quere zu kommen.
+  const modalId = CHANNEL === "beta" ? "vehicle-naming-modal-beta" : "vehicle-naming-modal";
   const databaseName = "CustomVehicleNaming";
   const objectStoreName = "main";
   const cacheKeyVehicleTypes = "vehicleTypes";
@@ -243,7 +245,7 @@
     const modalTitle = document.createElement("h4");
     modalTitle.id = "vehicle-naming-modal-title";
     modalTitle.className = "modal-title";
-    modalTitle.textContent = "FuxTools";
+    modalTitle.textContent = CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools";
 
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
@@ -432,7 +434,7 @@
     const a = document.createElement("a");
     a.href = "#";
     a.appendChild(icon);
-    a.appendChild(document.createTextNode(" FuxTools"));
+    a.appendChild(document.createTextNode(CHANNEL === "beta" ? " FuxTools Beta" : " FuxTools"));
 
     const li = document.createElement("li");
     li.role = "presentation";
