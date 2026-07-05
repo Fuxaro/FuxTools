@@ -98,6 +98,16 @@
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
+
+    // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
+    // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
+    // Namen aus der Legacy-Datenbank wiederherstellen.
+    await new Promise(resolve => {
+      const request = window.indexedDB.deleteDatabase("CustomVehicleNaming");
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    });
   }
 
   // Einmalige Migration: alte IndexedDB-Daten (Vor-GM-Speicher-Versionen) uebernehmen,
