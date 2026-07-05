@@ -1,16 +1,16 @@
+<p align="center">
+  <img src="./logo.png" alt="FuxTools Logo" width="220">
+</p>
+
 # FuxTools
 
-**© Fuxaro.** Lizenziert unter [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-– siehe [LICENSE](./LICENSE) für Details. Kurz gesagt: nutzen, verändern und weitergeben erlaubt,
-solange Fuxaro als Urheber genannt wird, es nicht verkauft wird und veränderte Versionen unter
-derselben Lizenz weitergegeben werden.
+Willkommen bei FuxTools – meinem ersten Script für [leitstellenspiel.de](https://www.leitstellenspiel.de)!
 
-Tampermonkey-Script für [leitstellenspiel.de](https://www.leitstellenspiel.de): Fahrzeuge einer
-oder mehrerer Wachen automatisch und durchnummeriert umbenennen – oder wieder auf den reinen
-Fahrzeugtyp-Namen zurücksetzen. Läuft komplett über die bestehende Spiel-Session, kein API-Key
-nötig.
+Ein Tampermonkey-Script zur Wachen- und Fahrzeugverwaltung: Fahrzeuge einer oder mehrerer Wachen
+automatisch und durchnummeriert umbenennen – oder wieder auf den reinen Fahrzeugtyp-Namen
+zurücksetzen. Läuft komplett über die bestehende Spiel-Session, kein API-Key nötig.
 
-## Features
+## Aktuelle Funktionen
 
 - Leitstelle(n) und Wache(n) gezielt auswählen (nach Kategorie sortiert: Feuerwehr,
   Rettungsdienst, Polizei, THW, Seenotrettung, Sonstiges).
@@ -45,3 +45,10 @@ keine separate Installation nötig.
 ## Changelog
 
 Siehe [CHANGELOG.md](./CHANGELOG.md).
+
+## Copyright
+
+**© Fuxaro.** Lizenziert unter [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+– siehe [LICENSE](./LICENSE) für Details. Kurz gesagt: nutzen, verändern und weitergeben erlaubt,
+solange Fuxaro als Urheber genannt wird, es nicht verkauft wird und veränderte Versionen unter
+derselben Lizenz weitergegeben werden.
