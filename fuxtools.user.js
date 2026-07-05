@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.1.5
+// @version     0.2.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -32,7 +32,7 @@
 
 (async function () {
   // WICHTIG: muss manuell synchron mit dem @version-Wert im Header oben gehalten werden
-  const SCRIPT_VERSION = "0.1.5";
+  const SCRIPT_VERSION = "0.2.0";
 
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
   // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
@@ -219,8 +219,8 @@
     const html = await res.text();
 
     // Wichtig: NICHT ins Dokument einhaengen und NICHT per form.submit()/trigger('submit')
-    // abschicken - das fuehrt zu einer echten Seiten-Navigation (siehe Bug-Report) und
-    // bricht die restliche Umbenennungs-Schleife ab.
+    // abschicken - das fuehrt zu einer echten Seiten-Navigation und bricht die
+    // restliche Umbenennungs-Schleife ab.
     const container = document.createElement("div");
     container.innerHTML = html;
 
@@ -1139,20 +1139,12 @@
     throw lastError;
   }
 
-  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu
-  // fluten, aber deutlich kuerzer als frueher (700ms), um bei vielen Fahrzeugen
-  // spuerbar schneller durchzukommen.
+  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu fluten.
   const RENAME_DELAY_MS = 400;
 
   // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
   // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
   // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  //
-  // Keine Nach-Verifikation ueber /api/vehicles mehr: der Vergleich lief zu schnell
-  // nach dem Umbenennen und zeigte durch serverseitige Verzoegerung/Caching falsche
-  // Abweichungen an, obwohl die Umbenennung tatsaechlich geklappt hatte. Ob ein
-  // einzelnes Fahrzeug erfolgreich war, sagt weiterhin die HTTP-Antwort beim
-  // Umbenennen selbst (done/failed unten).
   async function executeRenamePlan(plan, verb, goBack) {
     const body = document.getElementById("vehicle-naming-modal-body");
     renameCancelled = false;
