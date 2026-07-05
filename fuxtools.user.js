@@ -746,7 +746,6 @@
   //////////////////////////////////////////////////
 
   const defaultTemplate = {
-    mode: "template", // "template" (Bausteine) oder "manual" (pro Typ selbst benennen)
     useText1: false,
     text1: "",
     useType: true,
@@ -777,23 +776,14 @@
       }
     }
 
-    const isManual = tpl.mode === "manual";
-
-    // Im Bausteine-Modus bestimmt eine Checkbox, ob ein Typ einbezogen wird (das
-    // Textfeld ist optional - leer = offizieller Fahrzeugtypname). Im manuellen
-    // Modus bestimmt weiterhin das Textfeld selbst die Auswahl (leer = ueberspringen),
-    // wie urspruenglich.
+    // Checkbox pro Zeile waehlt aus, ob der Typ ueberhaupt umbenannt wird. Das
+    // Textfeld ist immer optional (leer = offizieller Fahrzeugtypname) - fuer rein
+    // manuelle volle Namen (z.B. "STW -SH-") einfach Text 1/Text 2 unten deaktivieren
+    // und den gewuenschten Namen direkt hier eintragen.
     const typeRows = [...byType.entries()]
       .sort((a, b) => a[1].caption.localeCompare(b[1].caption))
       .map(([typeId, info]) => {
         const savedName = namesStore[typeId] || "";
-        if (isManual) {
-          return `
-          <div class="form-group vn-type-row" data-type="${typeId}" data-caption="${escapeHtml(info.caption)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <label style="flex: 0 0 220px; margin: 0;">${escapeHtml(info.caption)} <span class="text-muted">(${info.count}x insgesamt)</span></label>
-            <input type="text" class="form-control vn-name-input" placeholder="Name eingeben, z.B. LF" value="${escapeHtml(savedName)}" style="flex:1;">
-          </div>`;
-        }
         return `
         <div class="form-group vn-type-row" data-type="${typeId}" data-caption="${escapeHtml(info.caption)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
           <label style="flex: 0 0 24px; margin: 0;">
@@ -808,42 +798,36 @@
     body.innerHTML = `
       <p class="text-muted">${selectedStations.length} Wache(n) ausgewaehlt.</p>
 
-      <div class="btn-group" role="group" style="margin-bottom:12px;">
-        <button type="button" id="vn-mode-template" class="btn ${!isManual ? "btn-primary" : "btn-default"}">Bausteine verwenden</button>
-        <button type="button" id="vn-mode-manual" class="btn ${isManual ? "btn-primary" : "btn-default"}">Manuell benennen</button>
-      </div>
+      <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
+        <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;">
+          <label style="display:flex; align-items:center; gap:4px; margin:0;">
+            <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
+          </label>
+          <input type="text" id="vn-text1" class="form-control input-sm" style="width:140px;" placeholder="z.B. Bereitschaft" value="${escapeHtml(tpl.text1)}">
 
-      <div id="vn-template-fieldset" style="${isManual ? "display:none;" : ""}">
-        <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
-          <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>
-          <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;">
-            <label style="display:flex; align-items:center; gap:4px; margin:0;">
-              <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
-            </label>
-            <input type="text" id="vn-text1" class="form-control input-sm" style="width:140px;" placeholder="z.B. Bereitschaft" value="${escapeHtml(tpl.text1)}">
+          <label style="display:flex; align-items:center; gap:4px; margin:0;">
+            <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
+          </label>
 
-            <label style="display:flex; align-items:center; gap:4px; margin:0;">
-              <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
-            </label>
-
-            <label style="display:flex; align-items:center; gap:4px; margin:0;">
-              <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
-            </label>
-            <input type="text" id="vn-text2" class="form-control input-sm" style="width:140px;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
-          </div>
-          <p class="text-muted" style="font-size:11px; margin:8px 0 0;">
-            Reihenfolge im Namen: Text 1 &rarr; Fahrzeugtyp-Name &rarr; Text 2 &rarr; Nummer. Deaktivierte oder leere
-            Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
-          </p>
-          <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
-            Unten pro Zeile: Haekchen wählt aus, welche Fahrzeugtypen ueberhaupt umbenannt werden. Das Kuerzel-Textfeld
-            ist nur das optionale Kuerzel fuer den "Fahrzeugtyp-Name"-Baustein (leer = offizieller Fahrzeugtypname) -
-            solange der oben deaktiviert ist, ist das Feld ausgegraut und wirkungslos.
-          </p>
-        </fieldset>
-      </div>
-      <p class="text-muted" style="${isManual ? "" : "display:none;"}" id="vn-manual-hint">
-        Der Name pro Fahrzeugtyp gilt fuer alle ausgewaehlten Wachen. Leeres Feld = Typ wird nicht angefasst.
+          <label style="display:flex; align-items:center; gap:4px; margin:0;">
+            <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
+          </label>
+          <input type="text" id="vn-text2" class="form-control input-sm" style="width:140px;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
+        </div>
+        <p class="text-muted" style="font-size:11px; margin:8px 0 0;">
+          Reihenfolge im Namen: Text 1 &rarr; Fahrzeugtyp-Name &rarr; Text 2 &rarr; Nummer. Deaktivierte oder leere
+          Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
+        </p>
+        <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
+          Fuer einen komplett manuellen, freien Namen: Text 1 und Text 2 hier deaktivieren und den
+          gewuenschten Namen direkt ins Kuerzel-Feld pro Fahrzeugtyp unten eintragen.
+        </p>
+      </fieldset>
+      <p class="text-muted" style="font-size:11px;">
+        Haekchen pro Zeile waehlt aus, welche Fahrzeugtypen ueberhaupt umbenannt werden. Das
+        Kuerzel-Textfeld ist nur relevant, wenn "Fahrzeugtyp-Name" oben aktiv ist (leer = offizieller
+        Fahrzeugtypname) - sonst ist es ausgegraut und wirkungslos.
       </p>
       <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
         ${typeRows}
@@ -874,44 +858,21 @@
     document.getElementById("vn-btn-back").addEventListener("click", renderStationSelection);
     document.getElementById("vn-btn-run").addEventListener("click", () => runRenaming(selectedStations));
 
-    document.getElementById("vn-mode-template").addEventListener("click", () => {
-      if (tpl.mode !== "template") {
-        namesStore.__template = Object.assign({}, tpl, { mode: "template" });
-        saveNamesStore();
-      }
-      renderNameForm(selectedStations);
-    });
-    document.getElementById("vn-mode-manual").addEventListener("click", () => {
-      if (tpl.mode !== "manual") {
-        namesStore.__template = Object.assign({}, tpl, { mode: "manual" });
-        saveNamesStore();
-      }
-      renderNameForm(selectedStations);
-    });
-
-    if (!isManual) {
-      // Bausteine sofort dauerhaft speichern, sobald sie geaendert werden - nicht erst beim Umbenennen
-      function persistTemplate() {
-        namesStore.__template = {
-          mode: "template",
-          useText1: document.getElementById("vn-use-text1").checked,
-          text1: document.getElementById("vn-text1").value.trim(),
-          useType: document.getElementById("vn-use-type").checked,
-          useText2: document.getElementById("vn-use-text2").checked,
-          text2: document.getElementById("vn-text2").value.trim(),
-          useNumber: document.getElementById("vn-use-number").checked,
-        };
-        saveNamesStore();
-      }
-      ["vn-use-text1", "vn-text1", "vn-use-type", "vn-use-text2", "vn-text2", "vn-use-number"].forEach(id => {
-        document.getElementById(id).addEventListener("change", persistTemplate);
-      });
-    } else {
-      document.getElementById("vn-use-number").addEventListener("change", () => {
-        namesStore.__template = Object.assign({}, tpl, { useNumber: document.getElementById("vn-use-number").checked });
-        saveNamesStore();
-      });
+    // Bausteine sofort dauerhaft speichern, sobald sie geaendert werden - nicht erst beim Umbenennen
+    function persistTemplate() {
+      namesStore.__template = {
+        useText1: document.getElementById("vn-use-text1").checked,
+        text1: document.getElementById("vn-text1").value.trim(),
+        useType: document.getElementById("vn-use-type").checked,
+        useText2: document.getElementById("vn-use-text2").checked,
+        text2: document.getElementById("vn-text2").value.trim(),
+        useNumber: document.getElementById("vn-use-number").checked,
+      };
+      saveNamesStore();
     }
+    ["vn-use-text1", "vn-text1", "vn-use-type", "vn-use-text2", "vn-text2", "vn-use-number"].forEach(id => {
+      document.getElementById(id).addEventListener("change", persistTemplate);
+    });
 
     // Nummer-Felder ausgrauen, wenn "Nummer anhaengen" deaktiviert ist
     const useNumberCheckbox = document.getElementById("vn-use-number");
@@ -927,23 +888,21 @@
 
     // Kuerzel-Felder pro Typ ausgrauen, wenn "Fahrzeugtyp-Name" oben deaktiviert ist -
     // sie wirken sich dann auf den Namen nicht aus, sollen also auch nicht aktiv aussehen.
-    if (!isManual) {
-      const useTypeCheckbox = document.getElementById("vn-use-type");
-      function syncTypeNameInputs() {
-        const enabled = useTypeCheckbox.checked;
-        body.querySelectorAll(".vn-name-input").forEach(input => {
-          input.disabled = !enabled;
-          // explizite Inline-Styles statt uns auf CSS von der Seite zu verlassen -
-          // so ist der ausgegraute Zustand immer sichtbar, egal welches Theme aktiv ist.
-          input.style.backgroundColor = enabled ? "" : "#eee";
-          input.style.color = enabled ? "" : "#999";
-          input.style.cursor = enabled ? "" : "not-allowed";
-          input.placeholder = enabled ? "eigenes Kuerzel (optional), sonst Fahrzeugtypname" : "wird nicht verwendet (Fahrzeugtyp-Name oben deaktiviert)";
-        });
-      }
-      useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
-      syncTypeNameInputs();
+    const useTypeCheckbox = document.getElementById("vn-use-type");
+    function syncTypeNameInputs() {
+      const enabled = useTypeCheckbox.checked;
+      body.querySelectorAll(".vn-name-input").forEach(input => {
+        input.disabled = !enabled;
+        // explizite Inline-Styles statt uns auf CSS von der Seite zu verlassen -
+        // so ist der ausgegraute Zustand immer sichtbar, egal welches Theme aktiv ist.
+        input.style.backgroundColor = enabled ? "" : "#eee";
+        input.style.color = enabled ? "" : "#999";
+        input.style.cursor = enabled ? "" : "not-allowed";
+        input.placeholder = enabled ? "eigenes Kuerzel (optional), sonst Fahrzeugtypname" : "wird nicht verwendet (Fahrzeugtyp-Name oben deaktiviert)";
+      });
     }
+    useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
+    syncTypeNameInputs();
 
     // Namen sofort dauerhaft speichern, sobald sie eingegeben werden - nicht erst beim Umbenennen
     body.querySelectorAll(".vn-name-input").forEach(input => {
@@ -1073,21 +1032,16 @@
     const body = document.getElementById("vehicle-naming-modal-body");
     const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
     const padding = document.getElementById("vn-padding").checked;
-    const useNumber = document.getElementById("vn-use-number").checked;
     const statusEl = document.getElementById("vn-status");
-    const isManual = getTemplate().mode === "manual";
 
-    const tpl = isManual
-      ? Object.assign({}, getTemplate(), { mode: "manual", useNumber })
-      : {
-          mode: "template",
-          useText1: document.getElementById("vn-use-text1").checked,
-          text1: document.getElementById("vn-text1").value.trim(),
-          useType: document.getElementById("vn-use-type").checked,
-          useText2: document.getElementById("vn-use-text2").checked,
-          text2: document.getElementById("vn-text2").value.trim(),
-          useNumber,
-        };
+    const tpl = {
+      useText1: document.getElementById("vn-use-text1").checked,
+      text1: document.getElementById("vn-text1").value.trim(),
+      useType: document.getElementById("vn-use-type").checked,
+      useText2: document.getElementById("vn-use-text2").checked,
+      text2: document.getElementById("vn-text2").value.trim(),
+      useNumber: document.getElementById("vn-use-number").checked,
+    };
     namesStore.__template = tpl;
 
     const plan = [];
@@ -1098,18 +1052,9 @@
       const typeId = row.dataset.type;
       const caption = row.dataset.caption || `Typ ${typeId}`;
 
-      // Manueller Modus: das Textfeld selbst entscheidet, ob der Typ ueberhaupt
-      // angefasst wird - leer = ueberspringen, wie urspruenglich.
-      if (isManual && !enteredName) {
-        delete namesStore[typeId];
-        return;
-      }
-
-      // Bausteine-Modus: eine eigene Checkbox entscheidet ueber die Auswahl, das
-      // Textfeld ist nur ein optionales Kuerzel (leer = offizieller Typname).
-      if (!isManual && !row.querySelector(".vn-type-include").checked) {
-        return;
-      }
+      // Checkbox pro Zeile entscheidet ueber die Auswahl, das Textfeld ist nur ein
+      // optionales Kuerzel (leer = offizieller Typname).
+      if (!row.querySelector(".vn-type-include").checked) return;
 
       if (enteredName) {
         namesStore[typeId] = enteredName;
@@ -1125,22 +1070,15 @@
           .sort((a, b) => a.id - b.id);
 
         vList.forEach((v, idx) => {
-          let newName;
-          if (isManual) {
+          const segments = [];
+          if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
+          if (tpl.useType) segments.push(enteredName || caption);
+          if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
+          if (tpl.useNumber) {
             const nr = startNr + idx;
-            const nrStr = padding ? String(nr).padStart(2, "0") : String(nr);
-            newName = tpl.useNumber ? `${enteredName} ${nrStr}` : enteredName;
-          } else {
-            const segments = [];
-            if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
-            if (tpl.useType) segments.push(enteredName || caption);
-            if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
-            if (tpl.useNumber) {
-              const nr = startNr + idx;
-              segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
-            }
-            newName = segments.join(" ") || enteredName || caption;
+            segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
           }
+          const newName = segments.join(" ") || enteredName || caption;
           plan.push({ id: v.id, oldName: v.caption, newName, station: station.name });
         });
       }
@@ -1149,9 +1087,7 @@
     await saveNamesStore();
 
     if (!plan.length) {
-      statusEl.textContent = isManual
-        ? "Keine Fahrzeugtypen mit Namen ausgefuellt."
-        : "Keine Fahrzeugtypen ausgewaehlt (Haekchen pruefen).";
+      statusEl.textContent = "Keine Fahrzeugtypen ausgewaehlt (Haekchen pruefen).";
       return;
     }
 
