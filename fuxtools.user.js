@@ -43,6 +43,12 @@
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
+  let modalFooterEl = null;
+  let availableUpdateVersion = null;
+  let lastUpdateCheckAt = 0;
+  const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  let renameCancelled = false;
+
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
 
