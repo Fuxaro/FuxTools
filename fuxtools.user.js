@@ -549,18 +549,7 @@
     });
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
-      // Tampermonkeys Install-Dialog laeuft im neuen Tab - von hier aus koennen wir
-      // nicht wissen, wann/ob dort bestaetigt wurde. Also Hinweis+Button ZUERST
-      // anzeigen (erscheint so auch, falls der Popup-Blocker den neuen Tab verhindert),
-      // dann erst den neuen Tab oeffnen.
-      const statusEl = document.getElementById("vn-update-status");
-      statusEl.innerHTML = `
-        <span class="text-muted">Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen. Danach hier neu laden:</span><br>
-        <button id="vn-btn-reload-page" type="button" class="btn btn-warning" style="margin-top:6px;">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
-        </button>
-      `;
-      document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+      renderReloadOnlyScreen();
       window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
     });
 
@@ -1052,7 +1041,26 @@
     pageJQuery(modal).modal("hide");
   }
 
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, mismatchedItems }) {
+  // Exklusiver Screen nach "Neuinstallation erzwingen": bewusst OHNE andere Buttons
+  // (kein Zurueck, kein Hauptmenue) - erst nach dem Neuladen soll man mit FuxTools
+  // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
+  // anderen Tab schon eine neue Version installiert wurde.
+  function renderReloadOnlyScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
+        Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen.
+      </p>
+      <p>Lade diese Seite danach neu, um mit der aktuellen Version weiterzumachen:</p>
+      <button id="vn-btn-reload-page" type="button" class="btn btn-warning btn-lg">
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
+      </button>
+    `;
+    document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+  }
+
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled }) {
     const body = document.getElementById("vehicle-naming-modal-body");
 
     // Pro Wache zusammenfassen, statt jedes einzelne Fahrzeug aufzulisten
@@ -1070,21 +1078,6 @@
       errorBlock = `
         <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>
         <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>
-      `;
-    }
-
-    let mismatchBlock = "";
-    if (mismatchedItems && mismatchedItems.length) {
-      const mismatchList = mismatchedItems
-        .slice(0, 5)
-        .map(item => `Fahrzeug ${item.id}: erwartet "${item.newName}"`)
-        .join("\n");
-      mismatchBlock = `
-        <p class="text-warning" style="margin-top:10px;">
-          <b>Achtung: Bei ${mismatchedItems.length} Fahrzeug(en) weicht der Name laut Server vom erwarteten
-          Namen ab</b> (z.B. durch serverseitige Kürzung/Filterung). Erste ${Math.min(5, mismatchedItems.length)}:
-        </p>
-        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(mismatchList)}</pre>
       `;
     }
 
@@ -1109,7 +1102,6 @@
       </p>
       <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
       ${errorBlock}
-      ${mismatchBlock}
       <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
       <div class="form-group" style="margin-top: 12px;">
         ${retryButton}
@@ -1152,46 +1144,35 @@
   // spuerbar schneller durchzukommen.
   const RENAME_DELAY_MS = 400;
 
-  // Nach dem Umbenennen einmal die tatsaechlichen Namen vom Server abgleichen -
-  // eine erfolgreiche HTTP-Antwort beweist nicht zwingend, dass der Name im Spiel
-  // wirklich wie gewuenscht uebernommen wurde (z.B. serverseitige Kuerzung/Filterung).
-  async function verifyRenamedVehicles(doneItems) {
-    if (!doneItems.length) return [];
-    try {
-      const vehicles = await fetchJSON("/api/vehicles");
-      const captionById = new Map(vehicles.map(v => [String(v.id), v.caption]));
-      return doneItems.filter(item => captionById.get(String(item.id)) !== item.newName);
-    } catch (e) {
-      console.warn("[FuxTools] Überprüfung nach dem Umbenennen fehlgeschlagen:", e);
-      return [];
-    }
-  }
-
-  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsanzeige, Abbrechen-
-  // Button und Abschluss-Verifikation) und zeigt am Ende die Abschluss-Ansicht.
-  // Wird auch fuer den "erneut versuchen"-Button mit nur den zuvor fehlgeschlagenen
-  // Eintraegen wiederverwendet.
+  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
+  // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
+  // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
+  //
+  // Keine Nach-Verifikation ueber /api/vehicles mehr: der Vergleich lief zu schnell
+  // nach dem Umbenennen und zeigte durch serverseitige Verzoegerung/Caching falsche
+  // Abweichungen an, obwohl die Umbenennung tatsaechlich geklappt hatte. Ob ein
+  // einzelnes Fahrzeug erfolgreich war, sagt weiterhin die HTTP-Antwort beim
+  // Umbenennen selbst (done/failed unten).
   async function executeRenamePlan(plan, verb, goBack) {
     const body = document.getElementById("vehicle-naming-modal-body");
     renameCancelled = false;
 
     body.innerHTML = `
-      <p id="vn-exec-status" style="font-weight: bold; white-space: pre-wrap;"></p>
-      <div class="progress" style="margin: 8px 0 12px;">
-        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
+      <div class="progress" style="margin-bottom: 12px; height: 24px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar"
+             style="width:0%; line-height:24px; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        </div>
       </div>
       <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
         <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
       </button>
     `;
-    const progressEl = document.getElementById("vn-exec-status");
     const progressBarEl = document.getElementById("vn-exec-progress-bar");
     document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
       renameCancelled = true;
     });
 
     let done = 0;
-    const doneItems = [];
     const failedItems = [];
     const errors = [];
     let cancelled = false;
@@ -1202,12 +1183,11 @@
         break;
       }
       const item = plan[i];
-      progressEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
+      progressBarEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       try {
         await renameVehicleWithRetry(item.id, item.newName);
         done++;
-        doneItems.push(item);
       } catch (e) {
         console.error("[FuxTools] Fehler bei Fahrzeug", item.id, e);
         failedItems.push(item);
@@ -1216,10 +1196,7 @@
       if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
     }
 
-    progressEl.textContent = "Überprüfe Ergebnis ...";
-    const mismatchedItems = await verifyRenamedVehicles(doneItems);
-
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, mismatchedItems });
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled });
   }
 
   async function runRenaming(selectedStations) {
