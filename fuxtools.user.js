@@ -833,9 +833,12 @@
           </div>
           <p class="text-muted" style="font-size:11px; margin:8px 0 0;">
             Reihenfolge im Namen: Text 1 &rarr; Fahrzeugtyp-Name &rarr; Text 2 &rarr; Nummer. Deaktivierte oder leere
-            Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen. Haekchen
-            links pro Zeile unten waehlt aus, welche Fahrzeugtypen ueberhaupt umbenannt werden - das Textfeld ist nur
-            fuer ein eigenes Kuerzel, leer = offizieller Fahrzeugtypname wird verwendet.
+            Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
+          </p>
+          <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
+            Unten pro Zeile: Haekchen wählt aus, welche Fahrzeugtypen ueberhaupt umbenannt werden. Das Kuerzel-Textfeld
+            ist nur das optionale Kuerzel fuer den "Fahrzeugtyp-Name"-Baustein (leer = offizieller Fahrzeugtypname) -
+            solange der oben deaktiviert ist, ist das Feld ausgegraut und wirkungslos.
           </p>
         </fieldset>
       </div>
@@ -921,6 +924,21 @@
     }
     useNumberCheckbox.addEventListener("change", syncNumberControls);
     syncNumberControls();
+
+    // Kuerzel-Felder pro Typ ausgrauen, wenn "Fahrzeugtyp-Name" oben deaktiviert ist -
+    // sie wirken sich dann auf den Namen nicht aus, sollen also auch nicht aktiv aussehen.
+    if (!isManual) {
+      const useTypeCheckbox = document.getElementById("vn-use-type");
+      function syncTypeNameInputs() {
+        const enabled = useTypeCheckbox.checked;
+        body.querySelectorAll(".vn-name-input").forEach(input => {
+          input.disabled = !enabled;
+          input.placeholder = enabled ? "eigenes Kuerzel (optional), sonst Fahrzeugtypname" : "wird nicht verwendet (Fahrzeugtyp-Name oben deaktiviert)";
+        });
+      }
+      useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
+      syncTypeNameInputs();
+    }
 
     // Namen sofort dauerhaft speichern, sobald sie eingegeben werden - nicht erst beim Umbenennen
     body.querySelectorAll(".vn-name-input").forEach(input => {
