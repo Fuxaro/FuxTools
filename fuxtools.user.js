@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name        * FuxTools Beta
-// @namespace   custom.leitstellenspiel.de.beta
+// @name        * FuxTools
+// @namespace   custom.leitstellenspiel.de
 // @version     0.1.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
-// @description FuxTools (Beta) - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
+// @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
@@ -32,14 +32,15 @@
   const SCRIPT_VERSION = "0.1.4";
 
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
-  // installierten Kanal in der UI (Einstellungen, Footer). Muss manuell pro Branch
-  // synchron mit @updateURL/@downloadURL im Header oben gehalten werden.
+  // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
+  // Wechseln angezeigt wird. Muss manuell pro Branch synchron mit CHANNEL,
+  // @updateURL/@downloadURL im Header oben gehalten werden.
   const CHANNEL = "beta";
-  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
+  const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
+  const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
+  const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
-  // Eigene modalId pro Kanal, damit Stable und Beta gleichzeitig installiert sein
-  // koennen, ohne sich beim DOM-Element/Menueeintrag in die Quere zu kommen.
-  const modalId = CHANNEL === "beta" ? "vehicle-naming-modal-beta" : "vehicle-naming-modal";
+  const modalId = "vehicle-naming-modal";
   const databaseName = "CustomVehicleNaming";
   const objectStoreName = "main";
   const cacheKeyVehicleTypes = "vehicleTypes";
@@ -393,6 +394,25 @@
         </button>
       </div>
       <div id="vn-update-status" style="margin-top: 10px;"></div>
+
+      <hr>
+      <p><b>Kanal wechseln</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        ${
+          CHANNEL === "beta"
+            ? "Zurueck zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
+            : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
+        }
+      </p>
+      <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">
+        <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>
+        ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
+      </a>
+      <p class="text-muted" style="font-size:11px; margin-top:6px;">
+        Oeffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
+        Update dieses Scripts und fragt einmal um Bestaetigung - danach laeuft der neue Kanal
+        inklusive Auto-Update, bis du hier erneut wechselst.
+      </p>
     `;
 
     document.getElementById("vn-back-to-menu").addEventListener("click", e => {
