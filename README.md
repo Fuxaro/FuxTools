@@ -30,7 +30,16 @@ nötig.
 
 Das Script prüft automatisch (über `@updateURL`) auf neue Versionen aus diesem Repo –
 Tampermonkey zeigt sie unter *Dashboard → Utilities → Nach Updates suchen* an, oder automatisch
-im Hintergrund.
+im Hintergrund. Im Script selbst gibt es unter **Einstellungen** ebenfalls einen manuellen
+"Nach Updates suchen"-Button samt Anzeige der aktuellen Version.
+
+## Beta-Kanal
+
+Für Testzwecke gibt es parallel zur stabilen Version (`main`-Branch) einen `beta`-Branch. Wer
+Neuerungen vorab testen möchte, installiert zusätzlich die Beta-Variante über
+[`fuxtools.user.js` im `beta`-Branch](https://github.com/Fuxaro/FuxTools/blob/beta/fuxtools.user.js)
+(eigener Name/Namespace, läuft parallel zur Stable-Version, ohne sie zu ersetzen). Der
+Einstellungen-Bildschirm im Script zeigt an, welcher Kanal (Stable/Beta) gerade installiert ist.
 
 ## Changelog
 

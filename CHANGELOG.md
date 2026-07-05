@@ -9,6 +9,9 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.1.4** – Neuer Menüpunkt "Einstellungen" mit Anzeige von Version/Kanal (Stable/Beta) und
+  manuellem "Nach Updates suchen"-Button. Grundlage für den neuen `beta`-Branch zum Testen von
+  Neuerungen, bevor sie auf `main` landen.
 - **0.1.3** – Namens-Bausteine beim Umbenennen: Text 1, Fahrzeugtyp-Name, Text 2 und Nummer sind
   jetzt einzeln zu- und abschaltbar; Text 1/Text 2 gelten global für alle ausgewählten Fahrzeugtypen.
 - **0.1.2** – Wartungs-Release, keine funktionalen Änderungen.

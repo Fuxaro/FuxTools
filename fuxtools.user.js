@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.1.3
+// @version     0.1.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
@@ -29,7 +29,13 @@
 
 (async function () {
   // WICHTIG: muss manuell synchron mit dem @version-Wert im Header oben gehalten werden
-  const SCRIPT_VERSION = "0.1.3";
+  const SCRIPT_VERSION = "0.1.4";
+
+  // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
+  // installierten Kanal in der UI (Einstellungen, Footer). Muss manuell pro Branch
+  // synchron mit @updateURL/@downloadURL im Header oben gehalten werden.
+  const CHANNEL = "stable";
+  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
 
   const modalId = "vehicle-naming-modal";
   const databaseName = "CustomVehicleNaming";
@@ -252,7 +258,8 @@
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
     modalFooter.style.cssText = "text-align:right; font-size:11px; color:#888; padding:6px 12px;";
-    modalFooter.textContent = `FuxTools v${SCRIPT_VERSION} \u00b7 \u00a9 Fuxaro \u00b7 CC BY-NC-SA 4.0`;
+    const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
+    modalFooter.textContent = `FuxTools v${SCRIPT_VERSION}${channelSuffix} \u00b7 \u00a9 Fuxaro \u00b7 CC BY-NC-SA 4.0`;
 
     const modalContent = document.createElement("div");
     modalContent.className = "modal-content";
@@ -326,6 +333,10 @@
           <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
           &nbsp; Leitstellen umbenennen <span class="text-muted">(bald verfuegbar)</span>
         </button>
+        <button type="button" class="list-group-item" id="vn-menu-settings">
+          <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
+          &nbsp; Einstellungen
+        </button>
       </div>
     `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
@@ -335,6 +346,81 @@
     document.getElementById("vn-menu-reset").addEventListener("click", () => {
       currentMode = "reset";
       renderLeitstelleSelection();
+    });
+    document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
+  }
+
+  //////////////////////////////////////////////////
+  // Einstellungen: Kanal-Info + manueller Update-Check
+  //////////////////////////////////////////////////
+
+  // Einfacher numerischer Vergleich fuer Versionsnummern wie "0.1.4" (kein Semver mit
+  // Vorabversionen, reicht fuer unser X.Y.Z-Schema).
+  function isNewerVersion(remote, local) {
+    const r = remote.split(".").map(n => parseInt(n, 10) || 0);
+    const l = local.split(".").map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(r.length, l.length); i++) {
+      const rv = r[i] || 0;
+      const lv = l[i] || 0;
+      if (rv > lv) return true;
+      if (rv < lv) return false;
+    }
+    return false;
+  }
+
+  function renderSettingsScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
+
+    body.innerHTML = `
+      <p><a href="#" id="vn-back-to-menu">&larr; Hauptmenue</a></p>
+      <p>
+        Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
+        <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
+      </p>
+      <p class="text-muted" style="font-size:12px;">
+        ${
+          CHANNEL === "beta"
+            ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)."
+            : "Du nutzt den Stable-Kanal (main-Branch)."
+        }
+      </p>
+      <div class="form-group">
+        <button id="vn-btn-check-update" type="button" class="btn btn-primary">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen
+        </button>
+      </div>
+      <div id="vn-update-status" style="margin-top: 10px;"></div>
+    `;
+
+    document.getElementById("vn-back-to-menu").addEventListener("click", e => {
+      e.preventDefault();
+      renderMainMenu();
+    });
+
+    document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
+      const statusEl = document.getElementById("vn-update-status");
+      statusEl.innerHTML = `<em>Suche nach Updates ...</em>`;
+      try {
+        const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        const match = text.match(/@version\s+([\d.]+)/);
+        if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
+        const remoteVersion = match[1];
+
+        if (isNewerVersion(remoteVersion, SCRIPT_VERSION)) {
+          statusEl.innerHTML = `
+            <span class="text-success"><b>Update verfuegbar: v${escapeHtml(remoteVersion)}</b></span><br>
+            <a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener">Script oeffnen, um zu aktualisieren</a>
+            (Tampermonkey zeigt dann den Installations-/Update-Dialog).
+          `;
+        } else {
+          statusEl.innerHTML = `<span class="text-success">Du bist bereits aktuell (v${escapeHtml(SCRIPT_VERSION)}).</span>`;
+        }
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler beim Suchen nach Updates: ${escapeHtml(e.message)}</span>`;
+      }
     });
   }
 
