@@ -13,6 +13,7 @@
 // @run-at      document-idle
 // @grant       GM.setValue
 // @grant       GM.getValue
+// @grant       GM.deleteValue
 // @grant       unsafeWindow
 // ==/UserScript==
 
@@ -89,6 +90,14 @@
 
   async function retrieveData(key) {
     return await GM.getValue(key, undefined);
+  }
+
+  // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
+  // Einstellungen + Fahrzeugtyp-Cache) - fuer den "Speicher loeschen"-Button in den
+  // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
+  async function clearAllStoredData() {
+    await GM.deleteValue("names");
+    await GM.deleteValue(cacheKeyVehicleTypes);
   }
 
   // Einmalige Migration: alte IndexedDB-Daten (Vor-GM-Speicher-Versionen) uebernehmen,
@@ -277,7 +286,7 @@
 
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
-    modalFooter.style.cssText = "display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
+    modalFooter.style.cssText = "display:flex; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
     modalFooterEl = modalFooter;
     renderFooter();
 
@@ -383,11 +392,11 @@
     const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
     const updateBadge = availableUpdateVersion
       ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold;">Update verfuegbar (v${escapeHtml(availableUpdateVersion)})</a>`
-      : "<span></span>";
-    // Kein Whitespace zwischen den beiden Spans - sonst wird der Leerraum-Textknoten
-    // im Flex-Container als eigenes Element gezaehlt und "space-between" verschiebt
-    // die Version aus der rechten Ecke Richtung Mitte.
-    modalFooterEl.innerHTML = `${updateBadge}<span>FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
+      : "";
+    // margin-left:auto auf der Versions-Span schiebt sie an den rechten Rand, egal ob
+    // der Update-Hinweis davor existiert oder nicht (robuster als space-between mit
+    // einem Platzhalter-Element, das je nach Inhalt/Whitespace die Verteilung kippt).
+    modalFooterEl.innerHTML = `${updateBadge}<span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
   }
 
   async function fetchRemoteVersion() {
@@ -434,11 +443,6 @@
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
     body.innerHTML = `
-      <div class="form-group" style="margin-bottom: 14px;">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
       <p>
         Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
         <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
@@ -483,9 +487,46 @@
         Update dieses Scripts und fragt einmal um Bestaetigung - danach laeuft der neue Kanal
         inklusive Auto-Update, bis du hier erneut wechselst.
       </p>
+
+      <hr>
+      <p><b>Speicher löschen</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        Setzt FuxTools auf den Zustand einer Neuinstallation zurueck: alle gespeicherten
+        Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden geloescht.
+      </p>
+      <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
+      </button>
+      <div id="vn-clear-status" style="margin-top:10px;"></div>
+
+      <hr>
+      <div class="form-group">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+
+    document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
+      const confirmed = confirm(
+        "Achtung: Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen, " +
+          "Namens-Bausteine-Einstellungen) unwiderruflich geloescht - als waere das Script gerade " +
+          "neu installiert worden. Fortfahren?"
+      );
+      if (!confirmed) return;
+
+      const statusEl = document.getElementById("vn-clear-status");
+      statusEl.innerHTML = `<em>Speicher wird geloescht ...</em>`;
+      try {
+        await clearAllStoredData();
+        statusEl.innerHTML = `<span class="text-success">Erledigt. Seite wird neu geladen ...</span>`;
+        location.reload();
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler beim Loeschen: ${escapeHtml(e.message)}</span>`;
+      }
+    });
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
       window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
@@ -607,16 +648,14 @@
       .join("");
 
     body.innerHTML = `
-      <div class="form-group" style="margin-bottom: 14px;">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
       <p>Waehle die Leitstelle(n) aus:</p>
       <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
         ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
       </div>
       <div class="form-group" style="margin-top: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
         <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">
           Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
         </button>
@@ -689,16 +728,14 @@
       .join("");
 
     body.innerHTML = `
-      <div class="form-group" style="margin-bottom: 14px;">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
       <p>Waehle die Wachen aus, deren Fahrzeuge du umbenennen moechtest (Kategorie anklicken zum Auf-/Zuklappen):</p>
       <div style="max-height: 460px; overflow-y: auto; padding: 4px;">
         ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}
       </div>
       <div class="form-group" style="margin-top: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
         <button id="vn-btn-next" type="button" class="btn btn-primary">
           Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
         </button>
@@ -1026,7 +1063,7 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
-        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenue</button>
+        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
         <button id="vn-btn-close" type="button" class="btn btn-default">Schliessen</button>
       </div>
     `;
