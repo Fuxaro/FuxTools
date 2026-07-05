@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.1.4
+// @version     0.1.5
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
@@ -11,7 +11,9 @@
 // @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @run-at      document-idle
-// @grant       none
+// @grant       GM.setValue
+// @grant       GM.getValue
+// @grant       unsafeWindow
 // ==/UserScript==
 
 // -----------------------------------------------------------------------------
@@ -29,7 +31,7 @@
 
 (async function () {
   // WICHTIG: muss manuell synchron mit dem @version-Wert im Header oben gehalten werden
-  const SCRIPT_VERSION = "0.1.4";
+  const SCRIPT_VERSION = "0.1.5";
 
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
   // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
@@ -41,8 +43,6 @@
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
   const modalId = "vehicle-naming-modal";
-  const databaseName = "CustomVehicleNaming";
-  const objectStoreName = "main";
   const cacheKeyVehicleTypes = "vehicleTypes";
 
   let vehicleTypeCaptions = {};
@@ -69,44 +69,54 @@
   }
 
   //////////////////////////////////////////////////
-  // IndexedDB (wie im Wachenbauplaene-Script)
+  // Speicher ueber Tampermonkey (GM.setValue/GM.getValue) statt IndexedDB.
+  // Vorteil: haengt am Script, nicht an der Website-Origin - Einstellungen/Namen
+  // bleiben so auch zwischen www.leitstellenspiel.de und polizei.leitstellenspiel.de
+  // (getrennte Origins, getrennte IndexedDBs) erhalten und ueberleben ein "Cookies/
+  // Website-Daten loeschen" im Browser.
   //////////////////////////////////////////////////
 
-  function openDB() {
-    return new Promise((resolve, reject) => {
-      const request = window.indexedDB.open(databaseName, 1);
-
-      request.onerror = () => reject("Failed to open the database");
-      request.onsuccess = event => resolve(event.target.result);
-      request.onupgradeneeded = event => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains(objectStoreName)) {
-          db.createObjectStore(objectStoreName);
-        }
-      };
-    });
-  }
-
   async function storeData(data, key) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([objectStoreName], "readwrite");
-      const store = tx.objectStore(objectStoreName);
-      const request = store.put(data, key);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject("Failed to store data");
-    });
+    await GM.setValue(key, data);
   }
 
   async function retrieveData(key) {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction([objectStoreName], "readonly");
-      const store = tx.objectStore(objectStoreName);
-      const request = store.get(key);
-      request.onsuccess = event => resolve(event.target.result);
-      request.onerror = () => reject("Failed to retrieve data");
-    });
+    return await GM.getValue(key, undefined);
+  }
+
+  // Einmalige Migration: alte IndexedDB-Daten (Vor-GM-Speicher-Versionen) uebernehmen,
+  // falls im neuen GM-Speicher noch nichts unter "names" liegt. Laeuft fehlerfrei durch,
+  // auch wenn die alte Datenbank gar nicht existiert (z.B. bei Neuinstallation).
+  async function migrateLegacyIndexedDbNames() {
+    try {
+      const alreadyMigrated = await GM.getValue("names", undefined);
+      if (alreadyMigrated !== undefined) return;
+
+      const db = await new Promise((resolve, reject) => {
+        const request = window.indexedDB.open("CustomVehicleNaming", 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = () => {}; // keine alte DB vorhanden - nichts zu migrieren
+      });
+
+      if (!db.objectStoreNames.contains("main")) {
+        db.close();
+        return;
+      }
+
+      const legacyNames = await new Promise((resolve, reject) => {
+        const tx = db.transaction(["main"], "readonly");
+        const store = tx.objectStore("main");
+        const request = store.get("names");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+
+      if (legacyNames) await GM.setValue("names", legacyNames);
+    } catch (e) {
+      console.warn("[FuxTools] Migration aus altem IndexedDB-Speicher fehlgeschlagen (ignoriert):", e);
+    }
   }
 
   async function fetchAndStoreData(url, key) {
@@ -292,7 +302,10 @@
     // startet - so wird das Hauptmenue gesetzt, bevor ueberhaupt etwas sichtbar ist.
     // (shown.bs.modal wuerde erst NACH der Animation feuern und kurz den alten
     // Inhalt vom letzten Mal aufblitzen lassen.)
-    $(modal).on("show.bs.modal", () => renderMainMenu());
+    // Seiten-jQuery ueber unsafeWindow: seit @grant nicht mehr "none" ist, laeuft das
+    // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).on("show.bs.modal", () => renderMainMenu());
   }
 
   function getCurrentUsername() {
@@ -1126,6 +1139,7 @@
       "color:#337ab7; font-weight:bold;",
       "color:inherit; font-weight:normal;"
     );
+    await migrateLegacyIndexedDbNames();
     await Promise.all([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
     addMenuEntry();
   }
