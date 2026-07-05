@@ -32,10 +32,13 @@
   const SCRIPT_VERSION = "0.1.4";
 
   // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
-  // installierten Kanal in der UI (Einstellungen, Footer). Muss manuell pro Branch
-  // synchron mit @updateURL/@downloadURL im Header oben gehalten werden.
+  // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
+  // Wechseln angezeigt wird. Muss manuell pro Branch synchron mit CHANNEL,
+  // @updateURL/@downloadURL im Header oben gehalten werden.
   const CHANNEL = "stable";
-  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
+  const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
+  const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
+  const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
 
   const modalId = "vehicle-naming-modal";
   const databaseName = "CustomVehicleNaming";
@@ -243,7 +246,7 @@
     const modalTitle = document.createElement("h4");
     modalTitle.id = "vehicle-naming-modal-title";
     modalTitle.className = "modal-title";
-    modalTitle.textContent = "FuxTools";
+    modalTitle.textContent = CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools";
 
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
@@ -391,6 +394,25 @@
         </button>
       </div>
       <div id="vn-update-status" style="margin-top: 10px;"></div>
+
+      <hr>
+      <p><b>Kanal wechseln</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        ${
+          CHANNEL === "beta"
+            ? "Zurueck zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
+            : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
+        }
+      </p>
+      <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">
+        <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>
+        ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
+      </a>
+      <p class="text-muted" style="font-size:11px; margin-top:6px;">
+        Oeffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
+        Update dieses Scripts und fragt einmal um Bestaetigung - danach laeuft der neue Kanal
+        inklusive Auto-Update, bis du hier erneut wechselst.
+      </p>
     `;
 
     document.getElementById("vn-back-to-menu").addEventListener("click", e => {
@@ -432,7 +454,7 @@
     const a = document.createElement("a");
     a.href = "#";
     a.appendChild(icon);
-    a.appendChild(document.createTextNode(" FuxTools"));
+    a.appendChild(document.createTextNode(CHANNEL === "beta" ? " FuxTools Beta" : " FuxTools"));
 
     const li = document.createElement("li");
     li.role = "presentation";
