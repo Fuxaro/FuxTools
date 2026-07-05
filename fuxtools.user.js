@@ -4,7 +4,7 @@
 // @version     0.1.5
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
-// @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zuruecksetzen.
+// @description FuxTools - Wachen- und Fahrzeugverwaltung fuer leitstellenspiel.de: Wache(n) auswaehlen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
@@ -277,7 +277,7 @@
 
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
-    modalFooter.style.cssText = "text-align:left; font-size:11px; color:#888; padding:6px 12px;";
+    modalFooter.style.cssText = "display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
     modalFooterEl = modalFooter;
     renderFooter();
 
@@ -347,7 +347,7 @@
         </button>
         <button type="button" class="list-group-item" id="vn-menu-reset">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-          &nbsp; Fahrzeuge zuruecksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
+          &nbsp; Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
         </button>
         <button type="button" class="list-group-item disabled" id="vn-menu-stations" disabled>
           <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
@@ -382,9 +382,12 @@
     if (!modalFooterEl) return;
     const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
     const updateBadge = availableUpdateVersion
-      ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold; margin-right:8px;">Update verfuegbar (v${escapeHtml(availableUpdateVersion)})</a>`
-      : "";
-    modalFooterEl.innerHTML = `${updateBadge}FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0`;
+      ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold;">Update verfuegbar (v${escapeHtml(availableUpdateVersion)})</a>`
+      : "<span></span>";
+    modalFooterEl.innerHTML = `
+      ${updateBadge}
+      <span>FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>
+    `;
   }
 
   async function fetchRemoteVersion() {
@@ -431,7 +434,11 @@
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-menu">&larr; Hauptmenue</a></p>
+      <div class="form-group" style="margin-bottom: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
       <p>
         Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
         <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
@@ -463,7 +470,7 @@
       <p class="text-muted" style="font-size:12px;">
         ${
           CHANNEL === "beta"
-            ? "Zurueck zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
+            ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
             : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
         }
       </p>
@@ -478,10 +485,7 @@
       </p>
     `;
 
-    document.getElementById("vn-back-to-menu").addEventListener("click", e => {
-      e.preventDefault();
-      renderMainMenu();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
       window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
@@ -603,7 +607,11 @@
       .join("");
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-menu">&larr; Hauptmenue</a></p>
+      <div class="form-group" style="margin-bottom: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
       <p>Waehle die Leitstelle(n) aus:</p>
       <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
         ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
@@ -615,10 +623,7 @@
       </div>
     `;
 
-    document.getElementById("vn-back-to-menu").addEventListener("click", e => {
-      e.preventDefault();
-      renderMainMenu();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
 
     document.getElementById("vn-btn-next-leitstelle").addEventListener("click", () => {
       const ids = [...body.querySelectorAll(".vn-leitstelle-check:checked")].map(el => el.value);
@@ -684,7 +689,11 @@
       .join("");
 
     body.innerHTML = `
-      <p><a href="#" id="vn-back-to-leitstelle">&larr; Leitstellen-Auswahl</a></p>
+      <div class="form-group" style="margin-bottom: 14px;">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
       <p>Waehle die Wachen aus, deren Fahrzeuge du umbenennen moechtest (Kategorie anklicken zum Auf-/Zuklappen):</p>
       <div style="max-height: 460px; overflow-y: auto; padding: 4px;">
         ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}
@@ -696,10 +705,7 @@
       </div>
     `;
 
-    document.getElementById("vn-back-to-leitstelle").addEventListener("click", e => {
-      e.preventDefault();
-      renderLeitstelleSelection();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", renderLeitstelleSelection);
 
     // "alle auswaehlen" Checkbox pro Kategorie
     body.querySelectorAll(".vn-category-master").forEach(master => {
@@ -756,6 +762,18 @@
 
   function getTemplate() {
     return Object.assign({}, defaultTemplate, namesStore.__template || {});
+  }
+
+  // Setzt einen Namen aus den Bausteinen zusammen - gemeinsam genutzt von der
+  // Live-Vorschau und dem eigentlichen Umbenennen, damit beide immer exakt
+  // dasselbe Ergebnis anzeigen/erzeugen.
+  function composeName(tpl, enteredName, caption, nr, padding) {
+    const segments = [];
+    if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
+    if (tpl.useType) segments.push(enteredName || caption);
+    if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
+    if (tpl.useNumber) segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
+    return segments.join(" ") || enteredName || caption;
   }
 
   function renderNameForm(selectedStations) {
@@ -824,6 +842,11 @@
           gewuenschten Namen direkt ins Kuerzel-Feld pro Fahrzeugtyp unten eintragen.
         </p>
       </fieldset>
+
+      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
+        Vorschau: <b id="vn-preview-text">-</b>
+      </div>
+
       <p class="text-muted" style="font-size:11px;">
         Haekchen pro Zeile waehlt aus, welche Fahrzeugtypen ueberhaupt umbenannt werden. Das
         Kuerzel-Textfeld ist nur relevant, wenn "Fahrzeugtyp-Name" oben aktiv ist (leer = offizieller
@@ -846,7 +869,7 @@
       <p class="text-muted" style="font-size:11px;">Nummeriert wird <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer).</p>
       <div class="form-group">
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-run" type="button" class="btn btn-success">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Fahrzeuge umbenennen
@@ -903,6 +926,31 @@
     }
     useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
     syncTypeNameInputs();
+
+    // Live-Vorschau: zeigt anhand des ersten Fahrzeugtyps in der Liste, wie ein Name
+    // mit den aktuell gewaehlten Bausteinen/Einstellungen aussehen wuerde.
+    const previewEl = document.getElementById("vn-preview-text");
+    function updatePreview() {
+      const previewTpl = {
+        useText1: document.getElementById("vn-use-text1").checked,
+        text1: document.getElementById("vn-text1").value.trim(),
+        useType: document.getElementById("vn-use-type").checked,
+        useText2: document.getElementById("vn-use-text2").checked,
+        text2: document.getElementById("vn-text2").value.trim(),
+        useNumber: document.getElementById("vn-use-number").checked,
+      };
+      const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
+      const padding = document.getElementById("vn-padding").checked;
+
+      const firstRow = body.querySelector(".vn-type-row");
+      const enteredName = firstRow ? firstRow.querySelector(".vn-name-input").value.trim() : "";
+      const caption = firstRow ? firstRow.dataset.caption : "Fahrzeugtyp";
+
+      previewEl.textContent = composeName(previewTpl, enteredName, caption, startNr, padding);
+    }
+    body.addEventListener("input", updatePreview);
+    body.addEventListener("change", updatePreview);
+    updatePreview();
 
     // Namen sofort dauerhaft speichern, sobald sie eingegeben werden - nicht erst beim Umbenennen
     body.querySelectorAll(".vn-name-input").forEach(input => {
@@ -967,7 +1015,7 @@
       <div class="form-group" style="margin-top: 12px;">
         ${retryButton}
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenue</button>
         <button id="vn-btn-close" type="button" class="btn btn-default">Schliessen</button>
@@ -1070,15 +1118,7 @@
           .sort((a, b) => a.id - b.id);
 
         vList.forEach((v, idx) => {
-          const segments = [];
-          if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
-          if (tpl.useType) segments.push(enteredName || caption);
-          if (tpl.useText2 && tpl.text2) segments.push(tpl.text2);
-          if (tpl.useNumber) {
-            const nr = startNr + idx;
-            segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
-          }
-          const newName = segments.join(" ") || enteredName || caption;
+          const newName = composeName(tpl, enteredName, caption, startNr + idx, padding);
           plan.push({ id: v.id, oldName: v.caption, newName, station: station.name });
         });
       }
@@ -1105,13 +1145,13 @@
 
     body.innerHTML = `
       <p class="text-muted">${selectedStations.length} Wache(n) ausgewaehlt.</p>
-      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurueckgesetzt (keine Nummer, kein Praefix).</p>
+      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurückgesetzt (keine Nummer, kein Praefix).</p>
       <div class="form-group">
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurueck
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-reset" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zuruecksetzen
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zurücksetzen
         </button>
       </div>
       <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>
@@ -1138,7 +1178,7 @@
       return;
     }
 
-    await executeRenamePlan(plan, "zurueckgesetzt", () => renderResetScreen(selectedStations));
+    await executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
 
   //////////////////////////////////////////////////
