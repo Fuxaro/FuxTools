@@ -384,10 +384,10 @@
     const updateBadge = availableUpdateVersion
       ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold;">Update verfuegbar (v${escapeHtml(availableUpdateVersion)})</a>`
       : "<span></span>";
-    modalFooterEl.innerHTML = `
-      ${updateBadge}
-      <span>FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>
-    `;
+    // Kein Whitespace zwischen den beiden Spans - sonst wird der Leerraum-Textknoten
+    // im Flex-Container als eigenes Element gezaehlt und "space-between" verschiebt
+    // die Version aus der rechten Ecke Richtung Mitte.
+    modalFooterEl.innerHTML = `${updateBadge}<span>FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
   }
 
   async function fetchRemoteVersion() {
@@ -751,12 +751,15 @@
   // Schritt 2: Namen pro Wache + Fahrzeugtyp vergeben
   //////////////////////////////////////////////////
 
+  // Text1/Text2 kommen mit einem Beispielwert vorausgefuellt, sind aber standardmaessig
+  // deaktiviert - so sieht man sofort, wie die Bausteine funktionieren, ohne dass beim
+  // ersten Ausfuehren versehentlich "DE"/"-SH-" mit umbenannt wird.
   const defaultTemplate = {
     useText1: false,
-    text1: "",
+    text1: "DE",
     useType: true,
     useText2: false,
-    text2: "",
+    text2: "-SH-",
     useNumber: true,
   };
 
@@ -818,24 +821,30 @@
 
       <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
         <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>
-        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px;">
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
-          </label>
-          <input type="text" id="vn-text1" class="form-control input-sm" style="width:140px;" placeholder="z.B. Bereitschaft" value="${escapeHtml(tpl.text1)}">
-
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
-          </label>
-
-          <label style="display:flex; align-items:center; gap:4px; margin:0;">
-            <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
-          </label>
-          <input type="text" id="vn-text2" class="form-control input-sm" style="width:140px;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
+        <div style="display:grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap:4px 10px; align-items:end;">
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
+            </label>
+            <input type="text" id="vn-text1" class="form-control input-sm" style="width:100%;" placeholder="z.B. DE" value="${escapeHtml(tpl.text1)}">
+          </div>
+          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
+            </label>
+          </div>
+          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
+          <div>
+            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
+              <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
+            </label>
+            <input type="text" id="vn-text2" class="form-control input-sm" style="width:100%;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
+          </div>
         </div>
-        <p class="text-muted" style="font-size:11px; margin:8px 0 0;">
-          Reihenfolge im Namen: Text 1 &rarr; Fahrzeugtyp-Name &rarr; Text 2 &rarr; Nummer. Deaktivierte oder leere
-          Bausteine werden uebersprungen. Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
+        <p class="text-muted" style="font-size:11px; margin:10px 0 0;">
+          Deaktivierte oder leere Bausteine werden uebersprungen, die Nummer kommt immer ans Ende.
+          Text 1/Text 2 gelten global fuer alle ausgewaehlten Fahrzeugtypen.
         </p>
         <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
           Fuer einen komplett manuellen, freien Namen: Text 1 und Text 2 hier deaktivieren und den
