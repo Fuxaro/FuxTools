@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.5**
+  - Neuer Menüpunkt "Verlauf" (Hauptmenü &gt; Sonstiges): Liste aller über FuxTools
+    gebauten Ausbauten, Lagerräume und Ausbaustufen mit Datum, Uhrzeit, Kosten und
+    Script-Version, mit Suchfeld und Dropdown-Filter nach Aktion.
 - **0.4.4**
   - **Wichtiger Fix**: Ausbaustufe zeigte teilweise eine falsche Zielstufe beim Bauen an
     (z. B. Sprung auf Stufe 3 statt 2). Anzeige und Zielstufe stimmen jetzt mit der Stufe

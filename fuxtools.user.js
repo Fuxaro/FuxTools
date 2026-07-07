@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.4
+// @version     0.4.5
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.4";
+  const SCRIPT_VERSION = "0.4.5";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -560,12 +560,32 @@
     return await GM.getValue(key, undefined);
   }
 
+  // Verlauf gebauter Ausbauten/Lagerraeume/Ausbaustufen - rein informativ (Hauptmenue
+  // > Sonstiges > Verlauf), hat keinen Einfluss auf den eigentlichen Bau. Die Script-
+  // Version wird mitgespeichert, um bei spaeteren Fehlermeldungen zuordnen zu koennen,
+  // mit welcher Version eine Aktion ausgefuehrt wurde.
+  const HISTORY_STORAGE_KEY = "actionHistory";
+  const HISTORY_MAX_ENTRIES = 300;
+  const HISTORY_TYPE_LABELS = { extension: "Ausbau", storage: "Lagerraum", level: "Ausbaustufe" };
+
+  async function getHistory() {
+    return (await retrieveData(HISTORY_STORAGE_KEY)) || [];
+  }
+
+  async function logHistoryEntry(entry) {
+    const history = await getHistory();
+    history.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, ...entry });
+    if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
+    await storeData(history, HISTORY_STORAGE_KEY);
+  }
+
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
-  // Einstellungen + Fahrzeugtyp-Cache) - fuer den "Speicher loeschen"-Button in den
-  // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
+  // Einstellungen, Fahrzeugtyp-Cache, Verlauf) - fuer den "Speicher loeschen"-Button in
+  // den Einstellungen, simuliert damit den Zustand einer Neuinstallation.
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
+    await GM.deleteValue(HISTORY_STORAGE_KEY);
 
     // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
     // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
@@ -1140,6 +1160,10 @@
 
         <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
         <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">
+            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
+            Verlauf
+          </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">
             <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
             Einstellungen
@@ -1158,6 +1182,7 @@
     document.getElementById("vn-menu-stations").addEventListener("click", renderStationRenameScreen);
     document.getElementById("vn-menu-leitstellen").addEventListener("click", renderLeitstelleRenameScreen);
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
+    document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
   }
 
@@ -1354,6 +1379,94 @@
       </button>
     `;
     document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+  }
+
+  // Verlauf: zeigt alle ueber FuxTools gebauten Ausbauten/Lagerraeume/Ausbaustufen mit
+  // Datum, Uhrzeit und Kosten - rein informativ, nur lokal gespeichert (kein Bezug zum
+  // Spielserver). Gleiches Grundprinzip wie der Wachen-Check: Suchfeld + Dropdown-Filter.
+  async function renderHistoryScreen() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade Verlauf ...</p>`;
+
+    const history = await getHistory();
+
+    function applyRowVisibility() {
+      const query = document.getElementById("vn-history-search")?.value.trim().toLowerCase() || "";
+      const typeFilter = document.getElementById("vn-history-type-filter")?.value || "";
+      body.querySelectorAll(".vn-history-row").forEach(row => {
+        const matchesQuery = !query || row.dataset.search.includes(query);
+        const matchesType = !typeFilter || row.dataset.type === typeFilter;
+        row.style.display = matchesQuery && matchesType ? "" : "none";
+      });
+    }
+
+    const rows = history
+      .map(entry => {
+        const date = new Date(entry.timestamp);
+        const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
+        const costLabel =
+          entry.currency === "coins"
+            ? `${entry.cost.toLocaleString("de-DE")} Coins`
+            : `${entry.cost.toLocaleString("de-DE")} Credits`;
+        const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
+        return `
+          <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
+            <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
+            <td>${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
+            <td>
+              ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}
+              <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>
+            </td>
+            <td>${escapeHtml(costLabel)}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Zeigt Ausbauten, Lagerräume und Ausbaustufen, die über FuxTools gebaut wurden - nur auf
+        diesem Gerät gespeichert.
+      </p>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">
+          <option value="">Alle Aktionen</option>
+          <option value="extension">Ausbau</option>
+          <option value="storage">Lagerraum</option>
+          <option value="level">Ausbaustufe</option>
+        </select>
+        <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
+      </div>
+      <div style="max-height:55vh; overflow:auto;">
+        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
+          <colgroup>
+            <col style="width:14%;">
+            <col style="width:11%;">
+            <col style="width:55%;">
+            <col style="width:20%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Uhrzeit</th>
+              <th>Funktion</th>
+              <th>Kosten</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="4" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
+        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
+      </button>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-history-search").addEventListener("input", applyRowVisibility);
+    document.getElementById("vn-history-type-filter").addEventListener("change", applyRowVisibility);
   }
 
   function addMenuEntry() {
@@ -2303,7 +2416,8 @@
         return `<button type="button" class="label ${cssClass} vn-build-extension" title="${escapeHtml(title)}"
                    style="margin:1px; border:none; cursor:pointer;"
                    data-building-id="${station.id}" data-extension-id="${entry.id}"
-                   data-name="${escapeHtml(label)}" data-cost="${entry.cost}" data-coins="${entry.coins}">${entry.id}</button>`;
+                   data-name="${escapeHtml(label)}" data-cost="${entry.cost}" data-coins="${entry.coins}"
+                   data-station-name="${escapeHtml(station.name)}">${entry.id}</button>`;
       })
       .join("");
   }
@@ -2331,12 +2445,14 @@
       <div>${label}</div>
       <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"
               data-building-id="${station.id}" data-level="${nextLevel.id}"
-              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}">
+              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}"
+              data-station-name="${escapeHtml(station.name)}">
         Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)
       </button>
       <button type="button" class="btn btn-xs btn-default vn-build-level-max" style="margin-top:2px; margin-left:2px;"
               data-building-id="${station.id}" data-level="${maxLevel}"
               data-cost="${maxCost}" data-coins="${maxCoins}"
+              data-station-name="${escapeHtml(station.name)}"
               title="Direkt auf Stufe ${maxLevel} ausbauen (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)">
         Max
       </button>
@@ -2357,7 +2473,8 @@
         return `<button type="button" class="label label-warning vn-build-storage" title="${escapeHtml(title)}"
                    style="margin:1px; border:none; cursor:pointer;"
                    data-building-id="${station.id}" data-storage-id="${room.id}"
-                   data-name="${escapeHtml(room.name)}" data-cost="${room.cost}" data-coins="${room.coins}">+</button>`;
+                   data-name="${escapeHtml(room.name)}" data-cost="${room.cost}" data-coins="${room.coins}"
+                   data-station-name="${escapeHtml(station.name)}">+</button>`;
       })
       .join("");
   }
@@ -2377,7 +2494,16 @@
   // Waehrung (Credits oder Coins - nie automatisch eine Wahl treffen), fuehrt dann den
   // uebergebenen Bau-Aufruf aus und kehrt zum Wachen-Check zurueck (frisch geladen,
   // damit der neue Stand sofort sichtbar ist).
-  function renderBuildConfirmScreen({ title, costCredits, costCoins, onConfirm, goBack }) {
+  function renderBuildConfirmScreen({
+    title,
+    costCredits,
+    costCoins,
+    onConfirm,
+    goBack,
+    historyType,
+    historyLabel,
+    historyStation,
+  }) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const back = goBack || renderStationCheckScreen;
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2410,6 +2536,13 @@
       statusEl.innerHTML = `<em>Wird gebaut ...</em>`;
       try {
         await onConfirm(currency);
+        await logHistoryEntry({
+          type: historyType,
+          label: historyLabel,
+          station: historyStation,
+          cost: currency === "coins" ? costCoins : costCredits,
+          currency,
+        });
         statusEl.innerHTML = `<span class="text-success">Erfolgreich gebaut. Lade neu ...</span>`;
         setTimeout(back, 600);
       } catch (e) {
@@ -2576,6 +2709,9 @@
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildExtension(buildingId, extensionId, currency),
             goBack: () => renderStationCheckScreen(currentState()),
+            historyType: "extension",
+            historyLabel: btn.dataset.name,
+            historyStation: btn.dataset.stationName,
           });
         });
       });
@@ -2591,6 +2727,9 @@
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildStorage(buildingId, storageId, currency),
             goBack: () => renderStationCheckScreen(currentState()),
+            historyType: "storage",
+            historyLabel: btn.dataset.name,
+            historyStation: btn.dataset.stationName,
           });
         });
       });
@@ -2606,6 +2745,9 @@
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildLevel(buildingId, currency, level),
             goBack: () => renderStationCheckScreen(currentState()),
+            historyType: "level",
+            historyLabel: `Ausbaustufe ${level}`,
+            historyStation: btn.dataset.stationName,
           });
         });
       });
