@@ -31,14 +31,19 @@
 // -----------------------------------------------------------------------------
 
 (async function () {
-  // WICHTIG: muss manuell synchron mit dem @version-Wert im Header oben gehalten werden
+  //////////////////////////////////////////////////////////////////////////////
+  // KONFIGURATION - bei jedem Release/Beta-Push hier pruefen und anpassen.
+  //
+  //   SCRIPT_VERSION  muss manuell synchron mit dem @version-Wert im Header
+  //                   ganz oben in der Datei gehalten werden.
+  //   CHANNEL         "stable" auf dem main-Branch, "beta" auf dem beta-Branch.
+  //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
+  //                   passend zum jeweiligen Branch gesetzt sein.
+  //////////////////////////////////////////////////////////////////////////////
   const SCRIPT_VERSION = "0.2.0";
+  const CHANNEL = "beta"; // "stable" oder "beta"
+  //////////////////////////////////////////////////////////////////////////////
 
-  // "stable" auf dem main-Branch, "beta" auf dem beta-Branch - identifiziert den
-  // installierten Kanal in der UI (Einstellungen) und bestimmt, welcher Link zum
-  // Wechseln angezeigt wird. Muss manuell pro Branch synchron mit CHANNEL,
-  // @updateURL/@downloadURL im Header oben gehalten werden.
-  const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
@@ -291,6 +296,10 @@
     const modalBody = document.createElement("div");
     modalBody.className = "modal-body";
     modalBody.id = "vehicle-naming-modal-body";
+    // Feste Hoehe mit eigenem Scrollbereich: Kopf- und Fusszeile bleiben so immer an
+    // Ort und Stelle sichtbar, auch wenn eine Liste (z.B. viele Fahrzeugtypen) laenger
+    // ist als der Bildschirm - dann scrollt nur dieser Bereich, nicht das ganze Fenster.
+    modalBody.style.cssText = "max-height: 72vh; overflow-y: auto;";
     modalBody.innerHTML = `<p><em>Lade Wachen &amp; Fahrzeuge ...</em></p>`;
 
     const modalFooter = document.createElement("div");
@@ -1145,9 +1154,11 @@
     renameCancelled = false;
 
     body.innerHTML = `
-      <div class="progress" style="margin-bottom: 12px; height: 24px;">
-        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar"
-             style="width:0%; line-height:24px; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
+        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
+             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
+             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">
         </div>
       </div>
       <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
@@ -1155,6 +1166,9 @@
       </button>
     `;
     const progressBarEl = document.getElementById("vn-exec-progress-bar");
+    // Eigenes, fest positioniertes Element fuer den Text - liegt ueber der gesamten
+    // Balkenbreite und wandert dadurch nicht mit, wenn der farbige Balken waechst.
+    const progressTextEl = document.getElementById("vn-exec-progress-text");
     document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
       renameCancelled = true;
     });
@@ -1171,7 +1185,7 @@
       }
       const item = plan[i];
       progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
-      progressBarEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+      progressTextEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       try {
         await renameVehicleWithRetry(item.id, item.newName);
         done++;
