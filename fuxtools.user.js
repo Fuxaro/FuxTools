@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.1
+// @version     0.4.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.1";
+  const SCRIPT_VERSION = "0.4.2";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2192,12 +2192,22 @@
   async function buildLevel(buildingId, currency, level) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    // WICHTIG: redirect "manual" statt des fetch()-Standards "follow". Dieser Endpunkt
+    // antwortet bei Erfolg mit einer Weiterleitung (302) - mit "follow" würde fetch()
+    // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken, ohne
+    // dass wir das kontrollieren. Das war vermutlich die Ursache fuer eine doppelte
+    // Abbuchung beim Wachen-Ausbau. Mit "manual" senden wir garantiert nur eine Anfrage.
     const res = await fetch(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
       method: "GET",
       credentials: "same-origin",
+      redirect: "manual",
       headers: { "X-CSRF-Token": csrfToken },
     });
-    if (!res.ok) throw new Error(`Ausbauen fehlgeschlagen (${res.status})`);
+    // Bei redirect:"manual" liefert eine erfolgreiche Weiterleitung type "opaqueredirect"
+    // und status 0 - das ist hier der ERWARTETE Erfolgsfall, kein Fehler.
+    if (res.type !== "opaqueredirect" && !res.ok) {
+      throw new Error(`Ausbauen fehlgeschlagen (${res.status})`);
+    }
   }
 
   async function loadBuildingsForCheck() {
