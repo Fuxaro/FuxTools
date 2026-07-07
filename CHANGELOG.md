@@ -9,6 +9,9 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.2.3**
+  - Fix: Nach dem Umbenennen von Wachen/Leitstellen führte "Zurück" fälschlich zum
+    Hauptmenü statt zurück ins Namen-Menü.
 - **0.2.2**
   - Fix: Wachen/Leitstellen umbenennen hat den neuen Namen nicht gespeichert (falsches
     Formularfeld). Behoben.
