@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.1
+// @version     0.3.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.1";
+  const SCRIPT_VERSION = "0.3.2";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -96,7 +96,7 @@
 
   // "Pseudo-Gebaeudetypen": Kleinwachen teilen sich die building_type-ID mit ihrem
   // normalen Pendant (z.B. Feuerwache/Feuerwache Kleinwache sind beide 0), haben aber
-  // teils andere Pflicht-Ausbauten - deshalb eigene IDs hier, analog zur Nummerierung
+  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier, analog zur Nummerierung
   // die auch die externe Ausbau-Bezeichnungs-Quelle (siehe loadExtensionCatalog) nutzt.
   const PSEUDO_BUILDING_TYPES = [
     { id: "0", buildingType: 0, smallBuilding: false },
@@ -138,10 +138,11 @@
     return entry ? entry.id : null;
   }
 
-  // Pflicht-Ausbauten je Pseudo-Gebaeudetyp, uebernommen aus einem bekannten
-  // Community-Skript ("Gebaeude- & Fuhrparkverwalter"). Nur Gebaeudetypen mit
-  // Eintrag hier werden im Wachen-Check auf fehlende Ausbauten geprueft.
-  const REQUIRED_EXTENSIONS_BY_PSEUDO_ID = {
+  // Empfohlene Ausbauten je Pseudo-Gebaeudetyp, uebernommen aus einem bekannten
+  // Community-Skript ("Gebaeude- & Fuhrparkverwalter") - keine offizielle Vorgabe
+  // des Spiels, nur ein Richtwert. Nur Gebaeudetypen mit Eintrag hier werden im
+  // Wachen-Check auf fehlende Ausbauten geprueft.
+  const RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID = {
     "0": [16, 18, 25], // Feuerwache
     "1": [0, 1, 2], // Feuerwehrschule
     "2": [], // Rettungswache
@@ -616,8 +617,8 @@
     const modalDialog = document.createElement("div");
     modalDialog.className = "modal-dialog";
     modalDialog.role = "document";
-    modalDialog.style.minWidth = "min(900px, 90%)";
-    modalDialog.style.maxWidth = "min(900px, 90%)";
+    modalDialog.style.minWidth = "min(1100px, 95%)";
+    modalDialog.style.maxWidth = "min(1100px, 95%)";
     modalDialog.appendChild(modalContent);
 
     const modal = document.createElement("div");
@@ -1692,10 +1693,10 @@
   }
 
   //////////////////////////////////////////////////
-  // Wachen-Check: Tabelle je Wache mit Pflicht-Ausbauten (farbige Badges mit Tooltip
-  // zur Namen/Status-Anzeige) sowie aktuellem Personal und automatischem Werben als
-  // reine Info-Spalten. Bauen von Ausbauten kostet Spielgeld und bleibt deshalb ein
-  // manueller Klick zur Wache - keine automatische Aktion in dieser Ansicht.
+  // Wachen-Check: Tabelle je Wache mit empfohlenen Ausbauten (farbige Badges mit
+  // Tooltip zur Namen/Status-Anzeige) sowie aktuellem Personal und automatischem
+  // Werben als reine Info-Spalten. Bauen von Ausbauten kostet Spielgeld und bleibt
+  // deshalb ein manueller Klick zur Wache - keine automatische Aktion in dieser Ansicht.
   //////////////////////////////////////////////////
 
   async function loadBuildingsForCheck() {
@@ -1711,9 +1712,9 @@
       .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
       .map(b => {
         const pseudoId = getPseudoBuildingTypeId(b);
-        const requiredExtensions = pseudoId ? REQUIRED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [] : [];
+        const recommendedExtensions = pseudoId ? RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [] : [];
         const extensions = Array.isArray(b.extensions) ? b.extensions : [];
-        const missingExtensions = requiredExtensions.filter(id => !extensions.some(e => e.type_id === id));
+        const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
         const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
 
         return {
@@ -1723,7 +1724,7 @@
           leitstelleName: leitstelle ? leitstelle.caption : null,
           pseudoId,
           extensions,
-          requiredExtensions,
+          recommendedExtensions,
           missingExtensions,
           personnelCount: b.personal_count ?? null,
           automaticHiring: b.hiring_automatic === true,
@@ -1732,18 +1733,18 @@
   }
 
   // Ausbau-Badges einer Wache: gruen = vorhanden, blau = wird gerade gebaut, orange =
-  // Pflicht-Ausbau fehlt noch, grau = kein Pflicht-Ausbau. Der Name kommt, wenn
-  // verfuegbar, aus dem externen Ausbau-Katalog (siehe initExtensionCatalog) und
-  // erscheint als Tooltip beim Draufhalten mit der Maus.
+  // empfohlen aber noch nicht gebaut, grau = nicht in der Empfehlungs-Liste. Der Name
+  // kommt, wenn verfuegbar, aus dem externen Ausbau-Katalog (siehe initExtensionCatalog)
+  // und erscheint als Tooltip beim Draufhalten mit der Maus.
   function renderExtensionBadges(station) {
     const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
     const entries = catalogEntries.length
       ? catalogEntries
-      : station.requiredExtensions.map(id => ({ id, caption: null }));
+      : station.recommendedExtensions.map(id => ({ id, caption: null }));
 
     if (!entries.length) return '<span class="text-muted">-</span>';
 
-    const requiredIds = new Set(station.requiredExtensions);
+    const recommendedIds = new Set(station.recommendedExtensions);
 
     return entries
       .map(entry => {
@@ -1757,11 +1758,9 @@
           } else {
             cssClass = "label-success";
           }
-        } else if (requiredIds.has(entry.id)) {
+        } else if (recommendedIds.has(entry.id)) {
           cssClass = "label-warning";
-          title += " (Pflicht-Ausbau, noch nicht gebaut)";
-        } else {
-          title += " (kein Pflicht-Ausbau)";
+          title += " (empfohlen, noch nicht gebaut)";
         }
         return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
       })
@@ -1785,17 +1784,35 @@
       return;
     }
 
-    stations.sort((a, b) => a.name.localeCompare(b.name));
+    // Nach Kategorie (gleiche Reihenfolge wie bei der Wachen-Auswahl), dann Name sortiert -
+    // sonst wird die Liste bei vielen Wachen schnell unuebersichtlich.
+    stations.sort((a, b) => {
+      const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+      return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
+    });
     const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
 
+    let currentCategory = null;
     const rows = stations
       .map(s => {
-        const subtitle = [s.category, s.leitstelleName].filter(Boolean).join(" | ");
+        let categoryHeaderRow = "";
+        if (s.category !== currentCategory) {
+          currentCategory = s.category;
+          const countInCategory = stations.filter(x => x.category === currentCategory).length;
+          categoryHeaderRow = `
+            <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}">
+              <td colspan="4" style="background:#f5f5f5;">
+                <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
+              </td>
+            </tr>
+          `;
+        }
         return `
-          <tr>
+          ${categoryHeaderRow}
+          <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-category="${escapeHtml(s.category)}">
             <td>
-              <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a><br>
-              <small class="text-muted">${escapeHtml(subtitle)}</small>
+              <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
+              ${s.leitstelleName ? `<br><small class="text-muted">${escapeHtml(s.leitstelleName)}</small>` : ""}
             </td>
             <td>${s.personnelCount ?? "-"}</td>
             <td>
@@ -1811,12 +1828,14 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = Pflicht-Ausbau fehlt noch,
-        Grau = kein Pflicht-Ausbau. Maus über einen Ausbau halten zeigt den Namen. Klick auf eine
-        Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht automatisiert).
-        ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch mindestens einen
-        fehlenden Pflicht-Ausbau.
+        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = empfohlen, aber noch nicht
+        gebaut, Grau = nicht in der Empfehlungs-Liste. Maus über einen Ausbau halten zeigt den
+        Namen. Klick auf eine Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht
+        automatisiert). ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch
+        mindestens einen empfohlenen, aber noch nicht gebauten Ausbau.
       </p>
+      <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
+             style="margin-bottom:8px;">
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
           <thead>
@@ -1836,6 +1855,22 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+
+    document.getElementById("vn-station-check-search").addEventListener("input", e => {
+      const query = e.target.value.trim().toLowerCase();
+
+      body.querySelectorAll(".vn-check-station-row").forEach(row => {
+        row.style.display = !query || row.dataset.name.includes(query) ? "" : "none";
+      });
+
+      body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
+        const category = headerRow.dataset.category;
+        const hasVisibleStation = [...body.querySelectorAll(".vn-check-station-row")].some(
+          row => row.dataset.category === category && row.style.display !== "none",
+        );
+        headerRow.style.display = hasVisibleStation ? "" : "none";
+      });
+    });
   }
 
   //////////////////////////////////////////////////
