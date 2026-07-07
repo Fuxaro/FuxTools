@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.6
+// @version     0.4.7
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.6";
+  const SCRIPT_VERSION = "0.4.7";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1021,6 +1021,17 @@
         font-size: 16px;
         width: 18px;
         text-align: center;
+      }
+      #vehicle-naming-modal-body .vn-btn-max-level {
+        background-color: #7a2020;
+        border-color: #6b1c1c;
+        color: #fff;
+      }
+      #vehicle-naming-modal-body .vn-btn-max-level:hover,
+      #vehicle-naming-modal-body .vn-btn-max-level:focus {
+        background-color: #8f2626;
+        border-color: #7a2020;
+        color: #fff;
       }
     `;
     document.head.appendChild(style);
@@ -2486,12 +2497,12 @@
               data-station-name="${escapeHtml(station.name)}">
         Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)
       </button>
-      <button type="button" class="btn btn-xs btn-default vn-build-level-max" style="margin-top:2px; margin-left:2px;"
+      <button type="button" class="btn btn-xs vn-build-level-max vn-btn-max-level" style="margin-top:2px; margin-left:2px;"
               data-building-id="${station.id}" data-level="${maxLevel}"
               data-cost="${maxCost}" data-coins="${maxCoins}"
               data-station-name="${escapeHtml(station.name)}"
-              title="Direkt auf Stufe ${maxLevel} ausbauen (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)">
-        Max
+              title="Direkt auf Stufe ${maxLevel} ausbauen (springt alle verbleibenden Stufen auf einmal)">
+        Max ausbauen auf Stufe ${maxLevel} (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)
       </button>
     `;
   }
@@ -2740,12 +2751,16 @@
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
           const extensionId = Number(btn.dataset.extensionId);
+          // Zustand JETZT sichern (Suche/Filter/Sortierung), nicht erst wenn goBack
+          // ausgefuehrt wird - die Suchleiste/das Dropdown existieren dann nicht mehr,
+          // weil der Bau-Bestaetigungs-Bildschirm den Inhalt schon ersetzt hat.
+          const savedState = currentState();
           renderBuildConfirmScreen({
             title: btn.dataset.name,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildExtension(buildingId, extensionId, currency),
-            goBack: () => renderStationCheckScreen(currentState()),
+            goBack: () => renderStationCheckScreen(savedState),
             historyType: "extension",
             historyLabel: btn.dataset.name,
             historyStation: btn.dataset.stationName,
@@ -2758,12 +2773,13 @@
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
           const storageId = btn.dataset.storageId;
+          const savedState = currentState();
           renderBuildConfirmScreen({
             title: btn.dataset.name,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildStorage(buildingId, storageId, currency),
-            goBack: () => renderStationCheckScreen(currentState()),
+            goBack: () => renderStationCheckScreen(savedState),
             historyType: "storage",
             historyLabel: btn.dataset.name,
             historyStation: btn.dataset.stationName,
@@ -2776,12 +2792,13 @@
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
           const level = Number(btn.dataset.level);
+          const savedState = currentState();
           renderBuildConfirmScreen({
             title: `Ausbaustufe ${level}`,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildLevel(buildingId, currency, level),
-            goBack: () => renderStationCheckScreen(currentState()),
+            goBack: () => renderStationCheckScreen(savedState),
             historyType: "level",
             historyLabel: `Ausbaustufe ${level}`,
             historyStation: btn.dataset.stationName,

@@ -9,6 +9,13 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.7**
+  - **Wichtiger Fix**: Wachen-Check sprang nach einem Kauf trotzdem auf die
+    Standardansicht zurück statt Suche/Filter/Sortierung beizubehalten (der
+    Zustand wurde erst beim Zurückspringen ausgelesen, da war die Suchleiste/das
+    Dropdown aber schon durch den Bau-Bildschirm ersetzt).
+  - "Max"-Button umbenannt in "Max ausbauen auf Stufe X (...)" mit Gesamtkosten im
+    Text, und in einem dunkleren Rot (statt Grau) passend zu den anderen Farben.
 - **0.4.6**
   - Verlauf: Umbenennen/Zurücksetzen von Fahrzeugen, Wachen und Leitstellen wird jetzt
     ebenfalls erfasst – ein zusammengefasster Eintrag pro Durchlauf (Typ + Anzahl),
