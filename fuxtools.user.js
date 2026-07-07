@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.9
+// @version     0.5.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.9";
+  const SCRIPT_VERSION = "0.5.0";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -122,8 +122,7 @@
 
   // "Pseudo-Gebaeudetypen": Kleinwachen teilen sich die building_type-ID mit ihrem
   // normalen Pendant (z.B. Feuerwache/Feuerwache Kleinwache sind beide 0), haben aber
-  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier, analog zur Nummerierung
-  // die auch die externe Ausbau-Bezeichnungs-Quelle (siehe loadExtensionCatalog) nutzt.
+  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier.
   const PSEUDO_BUILDING_TYPES = [
     { id: "0", buildingType: 0, smallBuilding: false },
     { id: "1", buildingType: 1, smallBuilding: false },
@@ -259,10 +258,10 @@
   };
 
   //////////////////////////////////////////////////
-  // Ausbau-Katalog: echte Namen, Kosten (Credits/Coins) fuer Ausbauten, Lagerraeume und
-  // Ausbaustufen, uebernommen aus einem bekannten Community-Skript ("Erweiterungs-
-  // Manager" von Caddy21). Schluessel: "<building_type>_normal" oder "<building_type>_
-  // small" (Kleinwache). Ermoeglicht das direkte Bauen aus FuxTools heraus.
+  // Ausbau-Katalog: echte Namen und Kosten (Credits/Coins) fuer Ausbauten, Lagerraeume
+  // und Ausbaustufen, wie sie im Spiel angezeigt werden. Schluessel: "<building_type>_
+  // normal" oder "<building_type>_small" (Kleinwache). Ermoeglicht das direkte Bauen aus
+  // FuxTools heraus.
   //////////////////////////////////////////////////
 
   function getBuildingKey(building) {
@@ -1008,12 +1007,6 @@
   // Modal-Markup (Bootstrap-Modal, Grundgeruest fuer alle Bildschirme)
   //////////////////////////////////////////////////
 
-  function elementFromString(htmlString) {
-    const template = document.createElement("template");
-    template.innerHTML = htmlString.trim();
-    return template.content.firstElementChild;
-  }
-
   function escapeHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, c => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -1213,7 +1206,7 @@
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">
             <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-            Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
+            Fahrzeugnamen zurücksetzen
           </button>
         </div>
 
@@ -1229,7 +1222,7 @@
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
             <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-            Wachen-Check <span class="text-muted">(Ausbauten, Personal, Werben)</span>
+            Wachen-Check
           </button>
         </div>
 
@@ -2081,12 +2074,26 @@
         <button id="vn-btn-run" type="button" class="btn btn-success">
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Fahrzeuge umbenennen
         </button>
+        <button id="vn-btn-reset-template" type="button" class="btn btn-default"
+                title="Setzt Text 1, Fahrzeugtyp-Name, Text 2 und Nummer auf die Standardeinstellung zurück">
+          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Bausteine zurücksetzen
+        </button>
       </div>
       <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderStationSelection);
     document.getElementById("vn-btn-run").addEventListener("click", () => runRenaming(selectedStations));
+    document.getElementById("vn-btn-reset-template").addEventListener("click", async () => {
+      const confirmed = confirm(
+        "Achtung: Das setzt die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2, " +
+          "Nummer) wieder auf die Standardeinstellung zurück. Fortfahren?"
+      );
+      if (!confirmed) return;
+      delete namesStore.__template;
+      await saveNamesStore();
+      renderNameForm(selectedStations);
+    });
 
     // Bausteine sofort dauerhaft speichern, sobald sie geaendert werden - nicht erst beim Umbenennen
     function persistTemplate() {
@@ -2507,15 +2514,9 @@
   // automatisches Werben als reine Info-Spalten.
   //////////////////////////////////////////////////
 
-  async function getUserCredits() {
-    const data = await fetchJSON("/api/userinfo");
-    return { credits: data.credits_user_current, coins: data.coins_user_current };
-  }
-
-  // Baut eine einzelne Ausbau/Lager/Stufen-Aktion. Alle drei Endpunkte sind vom
-  // Referenzskript "Erweiterungs-Manager" (Caddy21) uebernommen und dort im Einsatz
-  // bestaetigt. currency ist immer "credits" oder "coins" - der Spieler waehlt das
-  // in einem Bestaetigungsdialog vor jeder Aktion selbst aus.
+  // Baut eine einzelne Ausbau/Lager/Stufen-Aktion. currency ist immer "credits" oder
+  // "coins" - der Spieler waehlt das in einem Bestaetigungsdialog vor jeder Aktion selbst
+  // aus.
   async function buildExtension(buildingId, extensionId, currency) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
@@ -2551,10 +2552,10 @@
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
     // WICHTIG: redirect "manual" statt des fetch()-Standards "follow". Dieser Endpunkt
-    // antwortet bei Erfolg mit einer Weiterleitung (302) - mit "follow" würde fetch()
-    // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken, ohne
-    // dass wir das kontrollieren. Das war vermutlich die Ursache fuer eine doppelte
-    // Abbuchung beim Wachen-Ausbau. Mit "manual" senden wir garantiert nur eine Anfrage.
+    // antwortet bei Erfolg mit einer Weiterleitung (302) - mit "follow" wuerde fetch()
+    // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken und
+    // damit den Ausbau doppelt abbuchen. Mit "manual" senden wir garantiert nur eine
+    // Anfrage.
     const res = await fetch(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
       method: "GET",
       credentials: "same-origin",
@@ -2677,8 +2678,7 @@
   // die Wache noch nicht auf der letzten Stufe ist.
   // WICHTIG: Das Level-Feld der API entspricht direkt der im Spiel angezeigten
   // "Stufe"-Nummer (bestaetigt: API-Wert 1 == Spiel zeigt "Stufe: 1") - keine eigene
-  // +1-Verschiebung mehr vornehmen, das fuehrte vorher zu falscher Anzeige UND einem
-  // falschen Zielwert beim Bauen.
+  // +1-Verschiebung vornehmen, sonst stimmen Anzeige und Bau-Zielstufe nicht mehr.
   function renderLevelCell(station) {
     if (!station.levelCatalog) return '<span class="text-muted">-</span>';
     const maxLevel = station.levelCatalog[station.levelCatalog.length - 1].id;
