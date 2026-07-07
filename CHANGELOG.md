@@ -9,6 +9,16 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.4**
+  - **Wichtiger Fix**: Ausbaustufe zeigte teilweise eine falsche Zielstufe beim Bauen an
+    (z. B. Sprung auf Stufe 3 statt 2). Anzeige und Zielstufe stimmen jetzt mit der Stufe
+    im Spiel überein.
+  - Wachen-Check: Neuer kleiner "Max"-Button neben "Nächste Stufe" – baut direkt bis zur
+    höchsten verfügbaren Ausbaustufe (Gesamtkosten werden vorher angezeigt).
+  - Wachen-Check: Kategorie-Gruppierung entfernt (durch den Gebäudetyp-Filter nicht mehr
+    nötig), Filter/Suche vertauscht (Filter links, Suche rechts).
+  - Wachen-Check: Nach einem Kauf (Ausbau, Lagerraum, Ausbaustufe) bleiben Suche, Filter
+    und Sortierung erhalten, statt auf die Standardansicht zurückzuspringen.
 - **0.4.3**
   - Wachen-Check: Neues Dropdown zum Filtern nach genauem Gebäudetyp (zusätzlich zur
     Textsuche und der groben Kategorie).

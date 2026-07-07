@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.3
+// @version     0.4.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.3";
+  const SCRIPT_VERSION = "0.4.4";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2311,21 +2311,34 @@
   // Ausbaustufe (getrenntes System von den Ausbauten oben): zeigt "Stufe X von Y" plus
   // einen Button fuer die naechste Stufe, wenn eine LEVEL_CATALOG-Eintrag existiert und
   // die Wache noch nicht auf der letzten Stufe ist.
+  // WICHTIG: Das Level-Feld der API entspricht direkt der im Spiel angezeigten
+  // "Stufe"-Nummer (bestaetigt: API-Wert 1 == Spiel zeigt "Stufe: 1") - keine eigene
+  // +1-Verschiebung mehr vornehmen, das fuehrte vorher zu falscher Anzeige UND einem
+  // falschen Zielwert beim Bauen.
   function renderLevelCell(station) {
     if (!station.levelCatalog) return '<span class="text-muted">-</span>';
-    const maxLevel = station.levelCatalog.length - 1;
-    const shownLevel = station.currentLevel < 0 ? 0 : station.currentLevel + 1;
-    const label = `Stufe ${shownLevel} / ${maxLevel + 1}`;
+    const maxLevel = station.levelCatalog[station.levelCatalog.length - 1].id;
+    const shownLevel = station.currentLevel < 0 ? 1 : station.currentLevel;
+    const label = `Stufe ${shownLevel} / ${maxLevel}`;
     if (station.currentLevel >= maxLevel) {
       return `<span class="label label-success">${label}</span>`;
     }
     const nextLevel = station.levelCatalog[station.currentLevel + 1];
+    const remaining = station.levelCatalog.slice(station.currentLevel + 1, maxLevel + 1);
+    const maxCost = remaining.reduce((sum, l) => sum + l.cost, 0);
+    const maxCoins = remaining.reduce((sum, l) => sum + l.coins, 0);
     return `
       <div>${label}</div>
       <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"
               data-building-id="${station.id}" data-level="${nextLevel.id}"
               data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}">
         Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)
+      </button>
+      <button type="button" class="btn btn-xs btn-default vn-build-level-max" style="margin-top:2px; margin-left:2px;"
+              data-building-id="${station.id}" data-level="${maxLevel}"
+              data-cost="${maxCost}" data-coins="${maxCoins}"
+              title="Direkt auf Stufe ${maxLevel} ausbauen (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)">
+        Max
       </button>
     `;
   }
@@ -2364,8 +2377,9 @@
   // Waehrung (Credits oder Coins - nie automatisch eine Wahl treffen), fuehrt dann den
   // uebergebenen Bau-Aufruf aus und kehrt zum Wachen-Check zurueck (frisch geladen,
   // damit der neue Stand sofort sichtbar ist).
-  function renderBuildConfirmScreen({ title, costCredits, costCoins, onConfirm }) {
+  function renderBuildConfirmScreen({ title, costCredits, costCoins, onConfirm, goBack }) {
     setModalWidth(MODAL_WIDTH_COMPACT);
+    const back = goBack || renderStationCheckScreen;
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `
       <p>Bauen: <b>${escapeHtml(title)}</b></p>
@@ -2384,7 +2398,7 @@
       </button>
     `;
 
-    document.getElementById("vn-btn-back").addEventListener("click", renderStationCheckScreen);
+    document.getElementById("vn-btn-back").addEventListener("click", back);
 
     const statusEl = document.getElementById("vn-build-status");
     const creditsBtn = document.getElementById("vn-btn-pay-credits");
@@ -2397,7 +2411,7 @@
       try {
         await onConfirm(currency);
         statusEl.innerHTML = `<span class="text-success">Erfolgreich gebaut. Lade neu ...</span>`;
-        setTimeout(renderStationCheckScreen, 600);
+        setTimeout(back, 600);
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
         creditsBtn.disabled = false;
@@ -2409,7 +2423,7 @@
     coinsBtn.addEventListener("click", () => pay("coins"));
   }
 
-  async function renderStationCheckScreen() {
+  async function renderStationCheckScreen(preservedState) {
     setModalWidth(MODAL_WIDTH_WIDE);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
@@ -2430,8 +2444,8 @@
 
     // "category" ist der Standard-Sortiermodus (nach Kategorie gruppiert, dann Name) -
     // die anderen Spalten sind einfache auf-/absteigend umschaltbare Sortierungen.
-    let sortColumn = "category";
-    let sortAscending = true;
+    let sortColumn = preservedState?.sortColumn || "category";
+    let sortAscending = preservedState?.sortAscending ?? true;
 
     const columnLabels = {
       category: "Wache",
@@ -2474,62 +2488,37 @@
       return `<span style="white-space:nowrap;">${label}&nbsp;<span class="glyphicon ${icon}" style="font-size:10px;"></span></span>`;
     }
 
-    // Welche Kategorien eingeklappt sind - startet komplett eingeklappt, wie bei der
-    // Wachen-Auswahl zum Umbenennen. Bleibt ueber Sortier-/Such-Aktionen hinweg erhalten.
-    const collapsedCategories = new Set(CATEGORY_ORDER.filter(cat => stations.some(s => s.category === cat)));
+    // Aktueller Filter-/Sortierzustand - wird beim Oeffnen eines Bau-Dialogs mitgegeben,
+    // damit man nach dem Bauen (oder Abbrechen) genau hier wieder landet statt in der
+    // Standardansicht.
+    function currentState() {
+      return {
+        sortColumn,
+        sortAscending,
+        searchQuery: document.getElementById("vn-station-check-search")?.value || "",
+        typeFilter: document.getElementById("vn-station-check-type-filter")?.value || "",
+      };
+    }
 
-    // Blendet Wachen-Zeilen anhand von Sucheingabe und Auf-/Zugeklappt-Status ein/aus,
-    // ohne die Tabelle neu aufzubauen. Waehrend einer Suche werden eingeklappte
-    // Kategorien mit Treffern automatisch mitdurchsucht (Klapp-Status bleibt dabei
-    // unveraendert, wird nur voruebergehend ignoriert).
+    // Blendet Wachen-Zeilen anhand von Sucheingabe und Typ-Filter ein/aus, ohne die
+    // Tabelle neu aufzubauen.
     function applyRowVisibility() {
       const query = document.getElementById("vn-station-check-search")?.value.trim().toLowerCase() || "";
       const typeFilter = document.getElementById("vn-station-check-type-filter")?.value || "";
-      const filterActive = !!query || !!typeFilter;
 
       body.querySelectorAll(".vn-check-station-row").forEach(row => {
         const matchesQuery = !query || row.dataset.name.includes(query);
         const matchesType = !typeFilter || row.dataset.type === typeFilter;
-        const hiddenByCollapse = !filterActive && collapsedCategories.has(row.dataset.category);
-        row.style.display = matchesQuery && matchesType && !hiddenByCollapse ? "" : "none";
-      });
-
-      body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
-        if (!filterActive) {
-          headerRow.style.display = ""; // Kopfzeile bleibt immer sichtbar - sonst nicht mehr aufklappbar
-          return;
-        }
-        const category = headerRow.dataset.category;
-        const hasVisibleStation = [...body.querySelectorAll(".vn-check-station-row")].some(
-          row => row.dataset.category === category && row.style.display !== "none",
-        );
-        headerRow.style.display = hasVisibleStation ? "" : "none";
+        row.style.display = matchesQuery && matchesType ? "" : "none";
       });
     }
 
     function renderTable() {
       const list = sortedStations();
-      let currentCategory = null;
 
       const rows = list
         .map(s => {
-          let categoryHeaderRow = "";
-          if (s.category !== currentCategory) {
-            currentCategory = s.category;
-            const countInCategory = list.filter(x => x.category === currentCategory).length;
-            categoryHeaderRow = `
-              <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}"
-                  style="cursor:pointer; border-top:2px solid rgba(128,128,128,0.4);
-                         background-color:transparent !important;">
-                <td colspan="6" style="padding-top:10px;">
-                  <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
-                  <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
-                </td>
-              </tr>
-            `;
-          }
           return `
-            ${categoryHeaderRow}
             <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}"
                 data-category="${escapeHtml(s.category)}" data-type="${escapeHtml(s.typeName || "")}">
               <td>
@@ -2575,14 +2564,6 @@
         });
       });
 
-      body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
-        headerRow.addEventListener("click", () => {
-          const category = headerRow.dataset.category;
-          if (collapsedCategories.has(category)) collapsedCategories.delete(category);
-          else collapsedCategories.add(category);
-          applyRowVisibility();
-        });
-      });
 
       body.querySelectorAll(".vn-build-extension").forEach(btn => {
         btn.addEventListener("click", e => {
@@ -2594,6 +2575,7 @@
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildExtension(buildingId, extensionId, currency),
+            goBack: () => renderStationCheckScreen(currentState()),
           });
         });
       });
@@ -2608,20 +2590,22 @@
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildStorage(buildingId, storageId, currency),
+            goBack: () => renderStationCheckScreen(currentState()),
           });
         });
       });
 
-      body.querySelectorAll(".vn-build-level").forEach(btn => {
+      body.querySelectorAll(".vn-build-level, .vn-build-level-max").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
           const level = Number(btn.dataset.level);
           renderBuildConfirmScreen({
-            title: `Ausbaustufe ${level + 1}`,
+            title: `Ausbaustufe ${level}`,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
             onConfirm: currency => buildLevel(buildingId, currency, level),
+            goBack: () => renderStationCheckScreen(currentState()),
           });
         });
       });
@@ -2642,12 +2626,12 @@
         geforderter Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
       </p>
       <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
-               style="flex:1;">
         <select id="vn-station-check-type-filter" class="form-control" style="max-width:260px;">
           <option value="">Alle Gebäudetypen</option>
           ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
         </select>
+        <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
+               value="${escapeHtml(preservedState?.searchQuery || "")}" style="flex:1;">
       </div>
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
@@ -2669,6 +2653,9 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    if (preservedState?.typeFilter) {
+      document.getElementById("vn-station-check-type-filter").value = preservedState.typeFilter;
+    }
     document.getElementById("vn-station-check-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-station-check-type-filter").addEventListener("change", applyRowVisibility);
 
