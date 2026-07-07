@@ -9,6 +9,11 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.2.1**
+  - Internes Aufräumen: Skript in klar benannte Abschnitte gegliedert (Konfiguration,
+    Speicher, Umbenennen-Engine, Bildschirme je Funktion) – keine funktionalen
+    Änderungen an bestehenden Funktionen.
+  - Wachen/Leitstellen umbenennen: zuverlässigerer Weg zum Speichern des neuen Namens.
 - **0.2.0**
   - Fahrzeuge umbenennen: ein einheitlicher Bildschirm statt getrennter Modi. Namens-Bausteine
     (Text 1 → Fahrzeugtyp-Name → Text 2 → Nummer) sind einzeln zu-/abschaltbar, jeder Fahrzeugtyp

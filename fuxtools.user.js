@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.2.0
+// @version     0.2.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.2.0";
+  const SCRIPT_VERSION = "0.2.1";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -204,7 +204,7 @@
   }
 
   //////////////////////////////////////////////////
-  // Umbenennen ueber das interne Inline-Formular der Seite
+  // Umbenennen: Low-Level-Requests fuer Fahrzeuge und Gebaeude (Wachen/Leitstellen)
   //////////////////////////////////////////////////
 
   function sleep(ms) {
@@ -253,46 +253,181 @@
     if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
   }
 
-  // Gleiches Formular-Muster wie renameVehicle, nur fuer Gebaeude (Wachen/Leitstellen
-  // sind beides Eintraege der /api/buildings-Liste). Noch nicht live gegen das Spiel
-  // verifiziert (im Gegensatz zu renameVehicle) - falls der Endpunkt anders heisst,
-  // schlaegt es mit einer klaren Fehlermeldung fehl statt still zu versagen.
+  // Gebaeude (Wachen/Leitstellen) werden anders umbenannt als Fahrzeuge: kein eigenes
+  // Formular-Fragment zum Abholen, stattdessen direkt POST auf die Gebaeude-Resource
+  // mit Rails-typischem Methode-Override (_method=put) und dem CSRF-Token aus dem
+  // <meta name="csrf-token">-Tag der Seite. "caption" ist dasselbe Feld, das auch
+  // /api/buildings als Namen zurueckgibt.
   async function renameBuilding(buildingId, newName) {
-    const res = await fetch(`/buildings/${buildingId}/editName`, { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
-    const html = await res.text();
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
 
-    const container = document.createElement("div");
-    container.innerHTML = html;
+    const formData = new URLSearchParams();
+    formData.append("utf8", "✓");
+    formData.append("_method", "put");
+    formData.append("authenticity_token", csrfToken);
+    formData.append("building[caption]", newName);
 
-    const input =
-      container.querySelector(`#building_new_name_${buildingId}`) ||
-      container.querySelector('input[type="text"]');
-    const form =
-      container.querySelector(`#building_form_${buildingId}`) ||
-      container.querySelector("form");
-    if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
-
-    input.value = newName;
-
-    const action = form.getAttribute("action") || form.action;
-    const formData = new FormData(form);
-
-    const res2 = await fetch(action, {
+    const res = await fetch(`/buildings/${buildingId}`, {
       method: "POST",
-      body: formData,
       credentials: "same-origin",
       headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-CSRF-Token": csrfToken,
         "X-Requested-With": "XMLHttpRequest",
-        Accept: "text/javascript, application/json, */*; q=0.01",
       },
+      body: formData.toString(),
     });
 
-    if (!res2.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res2.status})`);
+    if (!res.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res.status})`);
   }
 
   //////////////////////////////////////////////////
-  // Modal-Markup (Bootstrap, wie im Wachenbauplaene-Script)
+  // Umbenennen-Engine (gemeinsam fuer Fahrzeuge, Wachen und Leitstellen -
+  // arbeitet ueber renameVehicle/renameBuilding, unabhaengig vom Item-Typ)
+  //////////////////////////////////////////////////
+
+  // Versucht ein Umbenennen, mit einem automatischen zweiten Versuch bei Fehlern
+  // (z.B. kurzer Lag/Verbindungsaussetzer). renameFn ist renameVehicle oder
+  // renameBuilding - dieselbe Retry-Logik fuer beide.
+  async function renameItemWithRetry(renameFn, id, newName, maxAttempts = 2) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await renameFn(id, newName);
+        return;
+      } catch (e) {
+        lastError = e;
+        if (attempt < maxAttempts) await sleep(1000);
+      }
+    }
+    throw lastError;
+  }
+
+  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu fluten.
+  const RENAME_DELAY_MS = 400;
+
+  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
+  // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
+  // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
+  // renameFn/itemNoun erlauben die Wiederverwendung fuer Fahrzeuge, Wachen und
+  // Leitstellen (alle drei sind technisch dasselbe Formular-Umbenennen-Muster).
+  async function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    renameCancelled = false;
+
+    body.innerHTML = `
+      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
+        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
+             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
+             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">
+        </div>
+      </div>
+      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+      </button>
+    `;
+    const progressBarEl = document.getElementById("vn-exec-progress-bar");
+    // Eigenes, fest positioniertes Element fuer den Text - liegt ueber der gesamten
+    // Balkenbreite und wandert dadurch nicht mit, wenn der farbige Balken waechst.
+    const progressTextEl = document.getElementById("vn-exec-progress-text");
+    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
+      renameCancelled = true;
+    });
+
+    let done = 0;
+    const failedItems = [];
+    const errors = [];
+    let cancelled = false;
+
+    for (let i = 0; i < plan.length; i++) {
+      if (renameCancelled) {
+        cancelled = true;
+        break;
+      }
+      const item = plan[i];
+      progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
+      progressTextEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+      try {
+        await renameItemWithRetry(renameFn, item.id, item.newName);
+        done++;
+      } catch (e) {
+        console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
+        failedItems.push(item);
+        if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
+      }
+      if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
+    }
+
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
+  }
+
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    // Pro Wache/Kategorie zusammenfassen, statt jedes einzelne Element aufzulisten
+    const perStation = new Map();
+    for (const item of plan) {
+      perStation.set(item.station, (perStation.get(item.station) || 0) + 1);
+    }
+    const stationRows = [...perStation.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`)
+      .join("");
+
+    let errorBlock = "";
+    if (errors.length) {
+      errorBlock = `
+        <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>
+        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>
+      `;
+    }
+
+    const cancelledNote = cancelled
+      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>`
+      : "";
+
+    const retryButton =
+      failedItems && failedItems.length
+        ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">
+             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>
+             Fehlgeschlagene erneut versuchen (${failedItems.length})
+           </button>`
+        : "";
+
+    body.innerHTML = `
+      ${cancelledNote}
+      <p>
+        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
+        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
+        (von ${plan.length} geplant).
+      </p>
+      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
+      ${errorBlock}
+      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
+      <div class="form-group" style="margin-top: 12px;">
+        ${retryButton}
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+    if (failedItems && failedItems.length) {
+      document.getElementById("vn-btn-retry").addEventListener("click", () => {
+        executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
+      });
+    }
+  }
+
+  //////////////////////////////////////////////////
+  // Modal-Markup (Bootstrap-Modal, Grundgeruest fuer alle Bildschirme)
   //////////////////////////////////////////////////
 
   function elementFromString(htmlString) {
@@ -384,6 +519,13 @@
     pageJQuery(modal).on("hide.bs.modal", () => {
       renameCancelled = true;
     });
+  }
+
+  function closeModal() {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).modal("hide");
   }
 
   function getCurrentUsername() {
@@ -621,6 +763,25 @@
     });
   }
 
+  // Exklusiver Screen nach "Neuinstallation erzwingen": bewusst OHNE andere Buttons
+  // (kein Zurueck, kein Hauptmenue) - erst nach dem Neuladen soll man mit FuxTools
+  // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
+  // anderen Tab schon eine neue Version installiert wurde.
+  function renderReloadOnlyScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
+        Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen.
+      </p>
+      <p>Lade diese Seite danach neu, um mit der aktuellen Version weiterzumachen:</p>
+      <button id="vn-btn-reload-page" type="button" class="btn btn-warning btn-lg">
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
+      </button>
+    `;
+    document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+  }
+
   function addMenuEntry() {
     const icon = document.createElement("span");
     icon.className = "glyphicon glyphicon-wrench";
@@ -642,7 +803,7 @@
   }
 
   //////////////////////////////////////////////////
-  // Schritt 1: Leitstelle(n) auswaehlen
+  // Fahrzeuge umbenennen - Schritt 1: Leitstelle(n) auswaehlen
   //////////////////////////////////////////////////
 
   let gameVehicles = [];
@@ -741,7 +902,7 @@
   }
 
   //////////////////////////////////////////////////
-  // Schritt 2: Wachen auswaehlen (gefiltert auf die
+  // Fahrzeuge umbenennen - Schritt 2: Wachen auswaehlen (gefiltert auf die
   // zuvor gewaehlten Leitstellen, nach Kategorie sortiert)
   //////////////////////////////////////////////////
 
@@ -850,7 +1011,7 @@
   }
 
   //////////////////////////////////////////////////
-  // Schritt 2: Namen pro Wache + Fahrzeugtyp vergeben
+  // Fahrzeuge umbenennen - Schritt 3: Namen pro Wache + Fahrzeugtyp vergeben
   //////////////////////////////////////////////////
 
   // Text1/Text2 kommen mit einem Beispielwert vorausgefuellt, sind aber standardmaessig
@@ -1076,171 +1237,6 @@
         saveNamesStore();
       });
     });
-  }
-
-  function closeModal() {
-    const modal = document.getElementById(modalId);
-    if (!modal) return;
-    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
-    pageJQuery(modal).modal("hide");
-  }
-
-  // Exklusiver Screen nach "Neuinstallation erzwingen": bewusst OHNE andere Buttons
-  // (kein Zurueck, kein Hauptmenue) - erst nach dem Neuladen soll man mit FuxTools
-  // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
-  // anderen Tab schon eine neue Version installiert wurde.
-  function renderReloadOnlyScreen() {
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>
-        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-        Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen.
-      </p>
-      <p>Lade diese Seite danach neu, um mit der aktuellen Version weiterzumachen:</p>
-      <button id="vn-btn-reload-page" type="button" class="btn btn-warning btn-lg">
-        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
-      </button>
-    `;
-    document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
-  }
-
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
-    const body = document.getElementById("vehicle-naming-modal-body");
-
-    // Pro Wache/Kategorie zusammenfassen, statt jedes einzelne Element aufzulisten
-    const perStation = new Map();
-    for (const item of plan) {
-      perStation.set(item.station, (perStation.get(item.station) || 0) + 1);
-    }
-    const stationRows = [...perStation.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`)
-      .join("");
-
-    let errorBlock = "";
-    if (errors.length) {
-      errorBlock = `
-        <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>
-        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>
-      `;
-    }
-
-    const cancelledNote = cancelled
-      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>`
-      : "";
-
-    const retryButton =
-      failedItems && failedItems.length
-        ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">
-             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>
-             Fehlgeschlagene erneut versuchen (${failedItems.length})
-           </button>`
-        : "";
-
-    body.innerHTML = `
-      ${cancelledNote}
-      <p>
-        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
-        (von ${plan.length} geplant).
-      </p>
-      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
-      ${errorBlock}
-      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
-      <div class="form-group" style="margin-top: 12px;">
-        ${retryButton}
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
-      </div>
-    `;
-
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
-    if (failedItems && failedItems.length) {
-      document.getElementById("vn-btn-retry").addEventListener("click", () => {
-        executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
-      });
-    }
-  }
-
-  // Versucht ein Umbenennen, mit einem automatischen zweiten Versuch bei Fehlern
-  // (z.B. kurzer Lag/Verbindungsaussetzer). renameFn ist renameVehicle oder
-  // renameBuilding - dieselbe Retry-Logik fuer beide.
-  async function renameItemWithRetry(renameFn, id, newName, maxAttempts = 2) {
-    let lastError;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        await renameFn(id, newName);
-        return;
-      } catch (e) {
-        lastError = e;
-        if (attempt < maxAttempts) await sleep(1000);
-      }
-    }
-    throw lastError;
-  }
-
-  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu fluten.
-  const RENAME_DELAY_MS = 400;
-
-  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
-  // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
-  // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  // renameFn/itemNoun erlauben die Wiederverwendung fuer Fahrzeuge, Wachen und
-  // Leitstellen (alle drei sind technisch dasselbe Formular-Umbenennen-Muster).
-  async function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
-    const body = document.getElementById("vehicle-naming-modal-body");
-    renameCancelled = false;
-
-    body.innerHTML = `
-      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
-        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
-        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
-             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
-             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">
-        </div>
-      </div>
-      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
-        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-      </button>
-    `;
-    const progressBarEl = document.getElementById("vn-exec-progress-bar");
-    // Eigenes, fest positioniertes Element fuer den Text - liegt ueber der gesamten
-    // Balkenbreite und wandert dadurch nicht mit, wenn der farbige Balken waechst.
-    const progressTextEl = document.getElementById("vn-exec-progress-text");
-    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
-      renameCancelled = true;
-    });
-
-    let done = 0;
-    const failedItems = [];
-    const errors = [];
-    let cancelled = false;
-
-    for (let i = 0; i < plan.length; i++) {
-      if (renameCancelled) {
-        cancelled = true;
-        break;
-      }
-      const item = plan[i];
-      progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
-      progressTextEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
-      try {
-        await renameItemWithRetry(renameFn, item.id, item.newName);
-        done++;
-      } catch (e) {
-        console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
-        failedItems.push(item);
-        if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
-      }
-      if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
-    }
-
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
   }
 
   async function runRenaming(selectedStations) {
