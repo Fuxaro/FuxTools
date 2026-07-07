@@ -9,6 +9,13 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.9**
+  - Neuer Menüpunkt in den Einstellungen: "Geforderte Ausbauten anpassen" - legt fest,
+    welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert" markiert
+    werden. Standard bleibt die bisherige feste Empfehlungs-Liste, mit Button zum
+    Zurücksetzen darauf.
+  - Änderungen an dieser Konfiguration (gespeichert oder zurückgesetzt) landen mit
+    Details im Verlauf.
 - **0.4.8**
   - Update-Logik aufgeräumt: der "Update verfügbar"-Hinweis unten im Fenster löst
     jetzt nichts mehr direkt aus, sondern führt nur noch zu den Einstellungen (dort

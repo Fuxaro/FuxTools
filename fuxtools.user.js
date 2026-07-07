@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.8
+// @version     0.4.9
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.8";
+  const SCRIPT_VERSION = "0.4.9";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -584,6 +584,7 @@
     vehicle_reset: "Fahrzeuge zurücksetzen",
     station_rename: "Wachen umbenennen",
     leitstelle_rename: "Leitstellen umbenennen",
+    required_extensions_config: "Geforderte Ausbauten",
   };
 
   async function getHistory() {
@@ -606,13 +607,30 @@
     return "rename";
   }
 
+  // Ueberschreibt optional, welche Ausbauten je Gebaeudetyp im Wachen-Check als
+  // "gefordert" (orange) markiert werden - Standard ist RECOMMENDED_EXTENSIONS_BY_
+  // PSEUDO_ID. Komplett fehlend (kein GM-Wert gespeichert) bedeutet "ueberall Standard
+  // verwenden"; sobald einmal in den Einstellungen gespeichert, wird die komplette
+  // Konfiguration aus dem GM-Speicher genutzt (kein Mischen von Standard + Custom).
+  const CUSTOM_REQUIRED_EXTENSIONS_KEY = "customRequiredExtensions";
+
+  async function getRequiredExtensionsOverrides() {
+    return await retrieveData(CUSTOM_REQUIRED_EXTENSIONS_KEY);
+  }
+
+  function getDefaultRequiredExtensions(pseudoId) {
+    return RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [];
+  }
+
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
-  // Einstellungen, Fahrzeugtyp-Cache, Verlauf) - fuer den "Speicher loeschen"-Button in
-  // den Einstellungen, simuliert damit den Zustand einer Neuinstallation.
+  // Einstellungen, Fahrzeugtyp-Cache, Verlauf, geforderte-Ausbauten-Konfiguration) -
+  // fuer den "Speicher loeschen"-Button in den Einstellungen, simuliert damit den
+  // Zustand einer Neuinstallation.
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
     await GM.deleteValue(HISTORY_STORAGE_KEY);
+    await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
 
     // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
     // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
@@ -1366,6 +1384,16 @@
       </p>
 
       <hr>
+      <p><b>Geforderte Ausbauten (Wachen-Check)</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        Legt fest, welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert"
+        markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.
+      </p>
+      <button id="vn-btn-required-extensions" type="button" class="btn btn-default">
+        <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
+      </button>
+
+      <hr>
       <p><b>Speicher löschen</b></p>
       <p class="text-muted" style="font-size:12px;">
         Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
@@ -1385,6 +1413,7 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
 
     document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
       const confirmed = confirm(
@@ -1463,6 +1492,131 @@
     `;
   }
 
+  // Gebaeudetypen, die im "Geforderte Ausbauten anpassen"-Bildschirm ueberhaupt gezeigt
+  // werden - nur Typen mit echten, benannten Ausbauten (EXTENSION_CATALOG), da man ohne
+  // Namen nichts sinnvoll anhaken koennte.
+  function requiredExtensionsConfigurableTypes() {
+    return PSEUDO_BUILDING_TYPES.map(t => {
+      const buildingKey = `${t.buildingType}_${t.smallBuilding ? "small" : "normal"}`;
+      return {
+        pseudoId: t.id,
+        buildingKey,
+        typeName: BUILDING_TYPE_NAMES[buildingKey] || `Typ ${buildingKey}`,
+        extensions: EXTENSION_CATALOG[buildingKey] || [],
+      };
+    }).filter(t => t.extensions.length > 0);
+  }
+
+  // Einstellungen > "Geforderte Ausbauten anpassen": pro Gebaeudetyp ankreuzbare Liste
+  // aller bekannten Ausbauten. Ohne eigene Speicherung (kein Klick auf "Speichern") gilt
+  // weiterhin die feste Standard-Liste (RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID) - "Speichern"
+  // schreibt die komplette angezeigte Konfiguration, "Zurücksetzen" loescht sie wieder.
+  async function renderRequiredExtensionsSettingsScreen() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade ...</p>`;
+
+    const overrides = await getRequiredExtensionsOverrides();
+    const types = requiredExtensionsConfigurableTypes();
+
+    function isChecked(pseudoId, extensionId) {
+      const list = overrides ? overrides[pseudoId] || [] : getDefaultRequiredExtensions(pseudoId);
+      return list.includes(extensionId);
+    }
+
+    const groupsHtml = types
+      .map(
+        t => `
+          <div class="vn-required-ext-group" style="margin-bottom:14px;">
+            <p style="font-weight:bold; margin:0 0 4px;">${escapeHtml(t.typeName)}</p>
+            <div>
+              ${t.extensions
+                .map(
+                  ext => `
+                    <label style="display:inline-flex; align-items:center; gap:4px; margin:2px 10px 2px 0; font-weight:normal;">
+                      <input type="checkbox" class="vn-required-ext-checkbox" data-pseudo-id="${t.pseudoId}"
+                             data-extension-id="${ext.id}" ${isChecked(t.pseudoId, ext.id) ? "checked" : ""}>
+                      ${escapeHtml(ext.name)}
+                    </label>
+                  `,
+                )
+                .join("")}
+            </div>
+          </div>
+        `,
+      )
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Angehakte Ausbauten werden im Wachen-Check orange als "gefordert" markiert.
+        Änderungen gelten erst nach "Speichern".
+        ${overrides ? "" : "Aktuell aktiv: die Standard-Empfehlungen."}
+      </p>
+      <div style="max-height:55vh; overflow:auto; padding-right:4px;">
+        ${groupsHtml}
+      </div>
+      <div id="vn-required-ext-status" style="margin-top:6px;"></div>
+      <div class="form-group" style="margin-top:10px;">
+        <button id="vn-btn-save-required" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern
+        </button>
+        <button id="vn-btn-reset-required" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Zurücksetzen auf Standard
+        </button>
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderSettingsScreen);
+
+    document.getElementById("vn-btn-save-required").addEventListener("click", async () => {
+      const newOverrides = {};
+      for (const t of types) newOverrides[t.pseudoId] = [];
+      body.querySelectorAll(".vn-required-ext-checkbox:checked").forEach(cb => {
+        newOverrides[cb.dataset.pseudoId].push(Number(cb.dataset.extensionId));
+      });
+
+      // Diff gegen den Stand beim Oeffnen dieses Bildschirms, fuer einen lesbaren
+      // Verlaufs-Eintrag (welche Ausbauten je Gebaeudetyp neu/nicht mehr gefordert sind).
+      const changes = [];
+      for (const t of types) {
+        const before = new Set(t.extensions.filter(ext => isChecked(t.pseudoId, ext.id)).map(ext => ext.id));
+        const after = new Set(newOverrides[t.pseudoId]);
+        const added = t.extensions.filter(ext => after.has(ext.id) && !before.has(ext.id)).map(ext => ext.name);
+        const removed = t.extensions.filter(ext => before.has(ext.id) && !after.has(ext.id)).map(ext => ext.name);
+        if (!added.length && !removed.length) continue;
+        const parts = [];
+        if (added.length) parts.push(`+${added.join(", ")}`);
+        if (removed.length) parts.push(`-${removed.join(", ")}`);
+        changes.push(`${t.typeName}: ${parts.join(", ")}`);
+      }
+
+      await storeData(newOverrides, CUSTOM_REQUIRED_EXTENSIONS_KEY);
+      if (changes.length) {
+        await logHistoryEntry({ type: "required_extensions_config", label: changes.join(" · ") });
+      }
+      document.getElementById("vn-required-ext-status").innerHTML =
+        '<span class="text-success">Gespeichert.</span>';
+    });
+
+    document.getElementById("vn-btn-reset-required").addEventListener("click", async () => {
+      const confirmed = confirm("Eigene Einstellung löschen und zu den Standard-Empfehlungen zurückkehren?");
+      if (!confirmed) return;
+      const hadOverrides = !!overrides;
+      await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
+      if (hadOverrides) {
+        await logHistoryEntry({
+          type: "required_extensions_config",
+          label: "Zurückgesetzt auf Standard-Empfehlungen",
+        });
+      }
+      renderRequiredExtensionsSettingsScreen();
+    });
+  }
+
   // Verlauf: zeigt alle ueber FuxTools durchgefuehrten Aktionen (Ausbauten, Lagerraeume,
   // Ausbaustufen, Umbenennen/Zuruecksetzen von Fahrzeugen/Wachen/Leitstellen) mit Datum,
   // Uhrzeit und Kosten - rein informativ, nur lokal gespeichert (kein Bezug zum
@@ -1525,6 +1679,7 @@
           <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>
           <option value="station_rename">Wachen umbenennen</option>
           <option value="leitstelle_rename">Leitstellen umbenennen</option>
+          <option value="required_extensions_config">Geforderte Ausbauten</option>
         </select>
         <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
       </div>
@@ -2415,6 +2570,7 @@
 
   async function loadBuildingsForCheck() {
     const buildings = await fetchJSON("/api/buildings");
+    const requiredExtensionOverrides = await getRequiredExtensionsOverrides();
 
     const leitstelleIds = new Set();
     for (const b of buildings) {
@@ -2427,7 +2583,11 @@
       .map(b => {
         const pseudoId = getPseudoBuildingTypeId(b);
         const buildingKey = getBuildingKey(b);
-        const recommendedExtensions = pseudoId ? RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [] : [];
+        const recommendedExtensions = pseudoId
+          ? requiredExtensionOverrides
+            ? requiredExtensionOverrides[pseudoId] || []
+            : getDefaultRequiredExtensions(pseudoId)
+          : [];
         const extensions = Array.isArray(b.extensions) ? b.extensions : [];
         const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
         const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
