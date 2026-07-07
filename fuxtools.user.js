@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.0
+// @version     0.4.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.0";
+  const SCRIPT_VERSION = "0.4.1";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -62,7 +62,7 @@
   // rechts bei einfachen Bildschirmen, ohne die Tabelle einzuquetschen.
   const MODAL_WIDTH_COMPACT = 520;
   const MODAL_WIDTH_DEFAULT = 900;
-  const MODAL_WIDTH_WIDE = 1100;
+  const MODAL_WIDTH_WIDE = 1400;
 
   function setModalWidth(px) {
     const dialog = document.getElementById("vehicle-naming-modal-dialog");
@@ -156,6 +156,42 @@
     );
     return entry ? entry.id : null;
   }
+
+  // Lesbare Gebaeudetyp-Namen, unabhaengig vom (frei waehlbaren) Wachen-Namen - wichtig
+  // im Wachen-Check, damit man bei einer umbenannten Wache trotzdem sofort sieht, um
+  // welchen Gebaeudetyp es sich handelt. Schluessel wie bei EXTENSION_CATALOG etc.
+  const BUILDING_TYPE_NAMES = {
+    "0_normal": "Feuerwache",
+    "0_small": "Feuerwache (Kleinwache)",
+    "1_normal": "Feuerwehrschule",
+    "2_normal": "Rettungswache",
+    "2_small": "Rettungswache (Kleinwache)",
+    "3_normal": "Rettungsschule",
+    "4_normal": "Krankenhaus",
+    "5_normal": "Rettungshubschrauber-Station",
+    "6_normal": "Polizeiwache",
+    "6_small": "Polizeiwache (Kleinwache)",
+    "7_normal": "Leitstelle",
+    "8_normal": "Polizeischule",
+    "9_normal": "Technisches Hilfswerk",
+    "10_normal": "THW-Bundesschule",
+    "11_normal": "Bereitschaftspolizei",
+    "12_normal": "Schnelleinsatzgruppe (SEG)",
+    "13_normal": "Polizeihubschrauberstation",
+    "14_normal": "Bereitstellungsraum",
+    "15_normal": "Wasserrettung",
+    "16_normal": "Verbandszellen",
+    "17_normal": "Polizei-Sondereinheiten",
+    "21_normal": "Rettungshundestaffel",
+    "22_normal": "Großer Komplex",
+    "23_normal": "Kleiner Komplex",
+    "24_normal": "Reiterstaffel",
+    "25_normal": "Bergrettungswache",
+    "26_normal": "Seenotrettungswache",
+    "27_normal": "Schule für Seefahrt und Seenotrettung",
+    "28_normal": "Hubschrauberstation (Seenotrettung)",
+    "29_normal": "Autobahnpolizei",
+  };
 
   // Empfohlene Ausbauten je Pseudo-Gebaeudetyp, uebernommen aus einem bekannten
   // Community-Skript ("Gebaeude- & Fuhrparkverwalter") - keine offizielle Vorgabe
@@ -2193,6 +2229,7 @@
           id: String(b.id),
           name: b.caption || `Wache ${b.id}`,
           category: categoryForBuilding(b),
+          typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
           leitstelleName: leitstelle ? leitstelle.caption : null,
           pseudoId,
           buildingKey,
@@ -2483,7 +2520,7 @@
             <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-category="${escapeHtml(s.category)}">
               <td>
                 <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
-                ${s.leitstelleName ? `<br><small class="text-muted">${escapeHtml(s.leitstelleName)}</small>` : ""}
+                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}${s.leitstelleName ? ` · ${escapeHtml(s.leitstelleName)}` : ""}</small>
               </td>
               <td>${renderPersonnelCell(s)}</td>
               <td>

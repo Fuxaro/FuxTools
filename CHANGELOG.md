@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.1**
+  - Wachen-Check: Gebäudetyp wird jetzt zusätzlich zum Namen angezeigt – wichtig, wenn
+    eine Wache umbenannt wurde und der Name nichts mehr über den Typ verrät.
+  - Fenster im Wachen-Check nochmal breiter, damit mehr Platz für die Tabelle ist.
 - **0.4.0**
   - Wachen-Check: Ausbauten, Ausbaustufen und Lagerräume haben jetzt echte Namen und
     Kosten und können direkt gebaut werden – bei jeder Aktion wählst du selbst, ob mit
