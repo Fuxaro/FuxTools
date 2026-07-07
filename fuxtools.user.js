@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.3
+// @version     0.3.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.3";
+  const SCRIPT_VERSION = "0.3.4";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1733,9 +1733,9 @@
   }
 
   // Ausbau-Badges einer Wache: gruen = vorhanden, blau = wird gerade gebaut, orange =
-  // empfohlen aber noch nicht gebaut, grau = nicht in der Empfehlungs-Liste. Der Name
-  // kommt, wenn verfuegbar, aus dem externen Ausbau-Katalog (siehe initExtensionCatalog)
-  // und erscheint als Tooltip beim Draufhalten mit der Maus.
+  // optional, noch nicht gebaut (steht auf der Empfehlungs-Liste), grau = nicht auf der
+  // Empfehlungs-Liste. Der Name kommt, wenn verfuegbar, aus dem externen Ausbau-Katalog
+  // (siehe initExtensionCatalog) und erscheint als Tooltip beim Draufhalten mit der Maus.
   function renderExtensionBadges(station) {
     const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
     const entries = catalogEntries.length
@@ -1760,11 +1760,22 @@
           }
         } else if (recommendedIds.has(entry.id)) {
           cssClass = "label-warning";
-          title += " (empfohlen, noch nicht gebaut)";
+          title += " (optional, noch nicht gebaut)";
         }
         return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
       })
       .join("");
+  }
+
+  // Anzahl bereits fertig gebauter (nicht mehr im Bau befindlicher) Ausbauten einer
+  // Wache - dient nur als grobe Vergleichsgroesse zum Sortieren nach Ausbau-Fortschritt.
+  function getBuiltExtensionsCount(station) {
+    const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
+    const entries = catalogEntries.length ? catalogEntries : station.recommendedExtensions.map(id => ({ id }));
+    return entries.filter(entry => {
+      const owned = station.extensions.find(e => e.type_id === entry.id);
+      return owned && !owned.available_at;
+    }).length;
   }
 
   async function renderStationCheckScreen() {
@@ -1784,80 +1795,49 @@
       return;
     }
 
-    // Nach Kategorie (gleiche Reihenfolge wie bei der Wachen-Auswahl), dann Name sortiert -
-    // sonst wird die Liste bei vielen Wachen schnell unuebersichtlich.
-    stations.sort((a, b) => {
-      const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
-      return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
-    });
     const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
 
-    let currentCategory = null;
-    const rows = stations
-      .map(s => {
-        let categoryHeaderRow = "";
-        if (s.category !== currentCategory) {
-          currentCategory = s.category;
-          const countInCategory = stations.filter(x => x.category === currentCategory).length;
-          categoryHeaderRow = `
-            <tr class="vn-check-category-row active" data-category="${escapeHtml(currentCategory)}">
-              <td colspan="4">
-                <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
-              </td>
-            </tr>
-          `;
-        }
-        return `
-          ${categoryHeaderRow}
-          <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-category="${escapeHtml(s.category)}">
-            <td>
-              <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
-              ${s.leitstelleName ? `<br><small class="text-muted">${escapeHtml(s.leitstelleName)}</small>` : ""}
-            </td>
-            <td>${s.personnelCount ?? "-"}</td>
-            <td>
-              <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">
-                ${s.automaticHiring ? "Ja" : "Nein"}
-              </span>
-            </td>
-            <td>${renderExtensionBadges(s)}</td>
-          </tr>
-        `;
-      })
-      .join("");
+    // "category" ist der Standard-Sortiermodus (nach Kategorie gruppiert, dann Name) -
+    // die anderen Spalten sind einfache auf-/absteigend umschaltbare Sortierungen.
+    let sortColumn = "category";
+    let sortAscending = true;
 
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = empfohlen, aber noch nicht
-        gebaut, Grau = nicht in der Empfehlungs-Liste. Maus über einen Ausbau halten zeigt den
-        Namen. Klick auf eine Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht
-        automatisiert). ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch
-        mindestens einen empfohlenen, aber noch nicht gebauten Ausbau.
-      </p>
-      <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
-             style="margin-bottom:8px;">
-      <div style="max-height:55vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px;">
-          <thead>
-            <tr>
-              <th>Wache</th>
-              <th>Personal</th>
-              <th>Automat. Werben</th>
-              <th>Ausbauten</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
-        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
-      </button>
-    `;
+    const columnLabels = {
+      category: "Wache",
+      personnel: "Personal",
+      hiring: "Automat. Werben",
+      extensions: "Ausbauten",
+    };
 
-    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    function sortedStations() {
+      if (sortColumn === "category") {
+        return [...stations].sort((a, b) => {
+          const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+          return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
+        });
+      }
 
-    document.getElementById("vn-station-check-search").addEventListener("input", e => {
-      const query = e.target.value.trim().toLowerCase();
+      const dir = sortAscending ? 1 : -1;
+      return [...stations].sort((a, b) => {
+        let diff = 0;
+        if (sortColumn === "personnel") diff = (a.personnelCount ?? -1) - (b.personnelCount ?? -1);
+        else if (sortColumn === "hiring") diff = Number(a.automaticHiring) - Number(b.automaticHiring);
+        else if (sortColumn === "extensions") diff = getBuiltExtensionsCount(a) - getBuiltExtensionsCount(b);
+        return (diff !== 0 ? diff : a.name.localeCompare(b.name)) * dir;
+      });
+    }
+
+    function headerHtml(column) {
+      const label = columnLabels[column];
+      if (column !== sortColumn) {
+        return `${label} <span class="glyphicon glyphicon-sort text-muted" style="font-size:10px;"></span>`;
+      }
+      const icon = sortAscending ? "glyphicon-sort-by-attributes" : "glyphicon-sort-by-attributes-alt";
+      return `${label} <span class="glyphicon ${icon}" style="font-size:10px;"></span>`;
+    }
+
+    function applySearchFilter() {
+      const query = document.getElementById("vn-station-check-search")?.value.trim().toLowerCase() || "";
 
       body.querySelectorAll(".vn-check-station-row").forEach(row => {
         row.style.display = !query || row.dataset.name.includes(query) ? "" : "none";
@@ -1870,7 +1850,96 @@
         );
         headerRow.style.display = hasVisibleStation ? "" : "none";
       });
-    });
+    }
+
+    function renderTable() {
+      const list = sortedStations();
+      let currentCategory = null;
+
+      const rows = list
+        .map(s => {
+          let categoryHeaderRow = "";
+          if (sortColumn === "category" && s.category !== currentCategory) {
+            currentCategory = s.category;
+            const countInCategory = list.filter(x => x.category === currentCategory).length;
+            categoryHeaderRow = `
+              <tr class="vn-check-category-row active" data-category="${escapeHtml(currentCategory)}">
+                <td colspan="4">
+                  <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
+                </td>
+              </tr>
+            `;
+          }
+          return `
+            ${categoryHeaderRow}
+            <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-category="${escapeHtml(s.category)}">
+              <td>
+                <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
+                ${s.leitstelleName ? `<br><small class="text-muted">${escapeHtml(s.leitstelleName)}</small>` : ""}
+              </td>
+              <td>${s.personnelCount ?? "-"}</td>
+              <td>
+                <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">
+                  ${s.automaticHiring ? "Ja" : "Nein"}
+                </span>
+              </td>
+              <td>${renderExtensionBadges(s)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      body.querySelector("thead").innerHTML = `
+        <tr>
+          <th class="vn-check-sort-header" data-column="category" style="cursor:pointer;">${headerHtml("category")}</th>
+          <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer;">${headerHtml("personnel")}</th>
+          <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer;">${headerHtml("hiring")}</th>
+          <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer;">${headerHtml("extensions")}</th>
+        </tr>
+      `;
+      body.querySelector("tbody").innerHTML = rows;
+
+      body.querySelectorAll(".vn-check-sort-header").forEach(th => {
+        th.addEventListener("click", () => {
+          const column = th.dataset.column;
+          if (column === sortColumn && column !== "category") {
+            sortAscending = !sortAscending;
+          } else {
+            sortColumn = column;
+            sortAscending = true;
+          }
+          renderTable();
+          applySearchFilter();
+        });
+      });
+    }
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = optional (steht auf der
+        Empfehlungs-Liste), noch nicht gebaut, Grau = nicht auf der Empfehlungs-Liste. Maus über
+        einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im Spiel zum Bauen
+        (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount} von
+        ${stations.length} Wachen haben noch mindestens einen optionalen, aber noch nicht gebauten
+        Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
+      </p>
+      <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
+             style="margin-bottom:8px;">
+      <div style="max-height:55vh; overflow:auto;">
+        <table class="table table-condensed table-striped" style="font-size:12px;">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
+        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
+      </button>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-station-check-search").addEventListener("input", applySearchFilter);
+
+    renderTable();
   }
 
   //////////////////////////////////////////////////
