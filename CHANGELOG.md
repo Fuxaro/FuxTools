@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.3**
+  - Fix: Kategorie-Überschriften im Wachen-Check waren im dunklen Theme kaum lesbar
+    (fest einprogrammierter heller Hintergrund) - nutzt jetzt eine Bootstrap-Klasse,
+    die sich ans Theme der Seite anpasst.
 - **0.3.2**
   - Neuer Menüpunkt "Wachen-Check": Tabelle mit allen Wachen (nach Kategorie sortiert,
     mit Suchfeld), zeigt je Wache empfohlene Ausbauten als farbige Badges (grün =

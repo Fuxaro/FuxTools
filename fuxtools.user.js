@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.2
+// @version     0.3.3
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.2";
+  const SCRIPT_VERSION = "0.3.3";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1800,8 +1800,8 @@
           currentCategory = s.category;
           const countInCategory = stations.filter(x => x.category === currentCategory).length;
           categoryHeaderRow = `
-            <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}">
-              <td colspan="4" style="background:#f5f5f5;">
+            <tr class="vn-check-category-row active" data-category="${escapeHtml(currentCategory)}">
+              <td colspan="4">
                 <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
               </td>
             </tr>
