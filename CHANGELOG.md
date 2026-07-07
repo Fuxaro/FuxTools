@@ -9,6 +9,9 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.9**
+  - Hauptmenü: Logo im Fenster-Titel, Menüpunkte in Abschnitte gruppiert (Fahrzeuge /
+    Wachen &amp; Leitstellen / Sonstiges) für mehr Übersicht.
 - **0.3.8**
   - Wachen-Check: Bedeutung von Orange/Grau bei den Ausbauten getauscht - Orange =
     "als nächstes bauen", Grau = "optional" (steht auf der Referenz-Liste, aber nicht

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.8
+// @version     0.3.9
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,13 +40,14 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.8";
+  const SCRIPT_VERSION = "0.3.9";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
+  const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
 
   let modalFooterEl = null;
   let availableUpdateVersion = null;
@@ -583,10 +584,21 @@
     closeButton.setAttribute("aria-label", "Close");
     closeButton.appendChild(closeSpan);
 
+    const logoImg = document.createElement("img");
+    logoImg.src = LOGO_URL;
+    logoImg.alt = "";
+    logoImg.style.cssText = "height:28px; width:28px; vertical-align:middle; margin-right:8px; border-radius:4px;";
+    // Fehlt das Logo mal (z.B. Netzwerkfehler) soll es einfach verschwinden statt als
+    // kaputtes Bild-Icon angezeigt zu werden.
+    logoImg.addEventListener("error", () => logoImg.remove());
+
     const modalTitle = document.createElement("h4");
     modalTitle.id = "vehicle-naming-modal-title";
     modalTitle.className = "modal-title";
-    modalTitle.textContent = CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools";
+    modalTitle.style.display = "flex";
+    modalTitle.style.alignItems = "center";
+    modalTitle.appendChild(logoImg);
+    modalTitle.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
 
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
@@ -678,8 +690,13 @@
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
+    const sectionLabelStyle =
+      "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
+
     body.innerHTML = `
       <p>${greeting}</p>
+
+      <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Fahrzeuge</p>
       <div class="list-group">
         <button type="button" class="list-group-item" id="vn-menu-vehicles">
           <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
@@ -689,6 +706,10 @@
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
           &nbsp; Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
         </button>
+      </div>
+
+      <p class="text-muted" style="${sectionLabelStyle}">Wachen &amp; Leitstellen</p>
+      <div class="list-group">
         <button type="button" class="list-group-item" id="vn-menu-stations">
           <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
           &nbsp; Wachen umbenennen
@@ -701,6 +722,10 @@
           <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
           &nbsp; Wachen-Check <span class="text-muted">(Ausbauten, Personal, Werben)</span>
         </button>
+      </div>
+
+      <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
+      <div class="list-group">
         <button type="button" class="list-group-item" id="vn-menu-settings">
           <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
           &nbsp; Einstellungen
