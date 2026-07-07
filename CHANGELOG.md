@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.6**
+  - Verlauf: Umbenennen/Zurücksetzen von Fahrzeugen, Wachen und Leitstellen wird jetzt
+    ebenfalls erfasst – ein zusammengefasster Eintrag pro Durchlauf (Typ + Anzahl),
+    keine Einzeleinträge pro Fahrzeug/Wache.
 - **0.4.5**
   - Neuer Menüpunkt "Verlauf" (Hauptmenü &gt; Sonstiges): Liste aller über FuxTools
     gebauten Ausbauten, Lagerräume und Ausbaustufen mit Datum, Uhrzeit, Kosten und

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.5
+// @version     0.4.6
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.5";
+  const SCRIPT_VERSION = "0.4.6";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -560,13 +560,24 @@
     return await GM.getValue(key, undefined);
   }
 
-  // Verlauf gebauter Ausbauten/Lagerraeume/Ausbaustufen - rein informativ (Hauptmenue
-  // > Sonstiges > Verlauf), hat keinen Einfluss auf den eigentlichen Bau. Die Script-
-  // Version wird mitgespeichert, um bei spaeteren Fehlermeldungen zuordnen zu koennen,
-  // mit welcher Version eine Aktion ausgefuehrt wurde.
+  // Verlauf aller Aktionen ueber FuxTools (Ausbauten/Lagerraeume/Ausbaustufen bauen,
+  // Fahrzeuge/Wachen/Leitstellen umbenennen) - rein informativ (Hauptmenue > Sonstiges
+  // > Verlauf), hat keinen Einfluss auf die eigentliche Aktion. Umbenennungen werden
+  // bewusst NICHT pro Fahrzeug/Wache geloggt, sondern einmal zusammengefasst pro Lauf
+  // (Typ + Anzahl), sonst waere der Verlauf bei grossen Umbenennungen unlesbar voll.
+  // Die Script-Version wird mitgespeichert, um bei spaeteren Fehlermeldungen zuordnen
+  // zu koennen, mit welcher Version eine Aktion ausgefuehrt wurde.
   const HISTORY_STORAGE_KEY = "actionHistory";
   const HISTORY_MAX_ENTRIES = 300;
-  const HISTORY_TYPE_LABELS = { extension: "Ausbau", storage: "Lagerraum", level: "Ausbaustufe" };
+  const HISTORY_TYPE_LABELS = {
+    extension: "Ausbau",
+    storage: "Lagerraum",
+    level: "Ausbaustufe",
+    vehicle_rename: "Fahrzeuge umbenennen",
+    vehicle_reset: "Fahrzeuge zurücksetzen",
+    station_rename: "Wachen umbenennen",
+    leitstelle_rename: "Leitstellen umbenennen",
+  };
 
   async function getHistory() {
     return (await retrieveData(HISTORY_STORAGE_KEY)) || [];
@@ -577,6 +588,15 @@
     history.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, ...entry });
     if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
     await storeData(history, HISTORY_STORAGE_KEY);
+  }
+
+  // Ordnet einen Umbenennen-/Reset-Lauf (itemNoun+verb aus executeRenamePlan) einem
+  // Verlaufs-Typ zu.
+  function renameHistoryType(itemNoun, verb) {
+    if (itemNoun === "Fahrzeug(e)") return verb === "zurückgesetzt" ? "vehicle_reset" : "vehicle_rename";
+    if (itemNoun === "Wache(n)") return "station_rename";
+    if (itemNoun === "Leitstelle(n)") return "leitstelle_rename";
+    return "rename";
   }
 
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
@@ -883,6 +903,15 @@
 
     const workerCount = Math.min(RENAME_CONCURRENCY, plan.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    // Ein zusammengefasster Verlaufs-Eintrag pro Lauf (Typ + Anzahl), keine
+    // Einzeleintraege pro Fahrzeug/Wache - siehe Kommentar bei HISTORY_STORAGE_KEY.
+    if (done > 0) {
+      await logHistoryEntry({
+        type: renameHistoryType(itemNoun, verb),
+        label: `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`,
+      });
+    }
 
     renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
   }
@@ -1381,8 +1410,9 @@
     document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
   }
 
-  // Verlauf: zeigt alle ueber FuxTools gebauten Ausbauten/Lagerraeume/Ausbaustufen mit
-  // Datum, Uhrzeit und Kosten - rein informativ, nur lokal gespeichert (kein Bezug zum
+  // Verlauf: zeigt alle ueber FuxTools durchgefuehrten Aktionen (Ausbauten, Lagerraeume,
+  // Ausbaustufen, Umbenennen/Zuruecksetzen von Fahrzeugen/Wachen/Leitstellen) mit Datum,
+  // Uhrzeit und Kosten - rein informativ, nur lokal gespeichert (kein Bezug zum
   // Spielserver). Gleiches Grundprinzip wie der Wachen-Check: Suchfeld + Dropdown-Filter.
   async function renderHistoryScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
@@ -1406,9 +1436,11 @@
         const date = new Date(entry.timestamp);
         const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
         const costLabel =
-          entry.currency === "coins"
-            ? `${entry.cost.toLocaleString("de-DE")} Coins`
-            : `${entry.cost.toLocaleString("de-DE")} Credits`;
+          entry.cost == null
+            ? "-"
+            : entry.currency === "coins"
+              ? `${entry.cost.toLocaleString("de-DE")} Coins`
+              : `${entry.cost.toLocaleString("de-DE")} Credits`;
         const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
         return `
           <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
@@ -1426,8 +1458,9 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Zeigt Ausbauten, Lagerräume und Ausbaustufen, die über FuxTools gebaut wurden - nur auf
-        diesem Gerät gespeichert.
+        Zeigt Ausbauten, Lagerräume, Ausbaustufen sowie Umbenennen/Zurücksetzen von
+        Fahrzeugen, Wachen und Leitstellen, die über FuxTools durchgeführt wurden - nur
+        auf diesem Gerät gespeichert.
       </p>
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">
@@ -1435,6 +1468,10 @@
           <option value="extension">Ausbau</option>
           <option value="storage">Lagerraum</option>
           <option value="level">Ausbaustufe</option>
+          <option value="vehicle_rename">Fahrzeuge umbenennen</option>
+          <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>
+          <option value="station_rename">Wachen umbenennen</option>
+          <option value="leitstelle_rename">Leitstellen umbenennen</option>
         </select>
         <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
       </div>
