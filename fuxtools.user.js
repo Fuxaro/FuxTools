@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.5
+// @version     0.3.6
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.5";
+  const SCRIPT_VERSION = "0.3.6";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1838,14 +1838,28 @@
       return `<span style="white-space:nowrap;">${label}&nbsp;<span class="glyphicon ${icon}" style="font-size:10px;"></span></span>`;
     }
 
-    function applySearchFilter() {
+    // Welche Kategorien eingeklappt sind - startet komplett eingeklappt, wie bei der
+    // Wachen-Auswahl zum Umbenennen. Bleibt ueber Sortier-/Such-Aktionen hinweg erhalten.
+    const collapsedCategories = new Set(CATEGORY_ORDER.filter(cat => stations.some(s => s.category === cat)));
+
+    // Blendet Wachen-Zeilen anhand von Sucheingabe und Auf-/Zugeklappt-Status ein/aus,
+    // ohne die Tabelle neu aufzubauen. Waehrend einer Suche werden eingeklappte
+    // Kategorien mit Treffern automatisch mitdurchsucht (Klapp-Status bleibt dabei
+    // unveraendert, wird nur voruebergehend ignoriert).
+    function applyRowVisibility() {
       const query = document.getElementById("vn-station-check-search")?.value.trim().toLowerCase() || "";
 
       body.querySelectorAll(".vn-check-station-row").forEach(row => {
-        row.style.display = !query || row.dataset.name.includes(query) ? "" : "none";
+        const matchesQuery = !query || row.dataset.name.includes(query);
+        const hiddenByCollapse = !query && sortColumn === "category" && collapsedCategories.has(row.dataset.category);
+        row.style.display = matchesQuery && !hiddenByCollapse ? "" : "none";
       });
 
       body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
+        if (!query) {
+          headerRow.style.display = ""; // Kopfzeile bleibt immer sichtbar - sonst nicht mehr aufklappbar
+          return;
+        }
         const category = headerRow.dataset.category;
         const hasVisibleStation = [...body.querySelectorAll(".vn-check-station-row")].some(
           row => row.dataset.category === category && row.style.display !== "none",
@@ -1865,8 +1879,10 @@
             currentCategory = s.category;
             const countInCategory = list.filter(x => x.category === currentCategory).length;
             categoryHeaderRow = `
-              <tr class="vn-check-category-row active" data-category="${escapeHtml(currentCategory)}">
-                <td colspan="4">
+              <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}"
+                  style="cursor:pointer; border-top:2px solid rgba(128,128,128,0.4);">
+                <td colspan="4" style="padding-top:10px;">
+                  <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
                   <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
                 </td>
               </tr>
@@ -1911,19 +1927,29 @@
             sortAscending = true;
           }
           renderTable();
-          applySearchFilter();
         });
       });
+
+      body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
+        headerRow.addEventListener("click", () => {
+          const category = headerRow.dataset.category;
+          if (collapsedCategories.has(category)) collapsedCategories.delete(category);
+          else collapsedCategories.add(category);
+          applyRowVisibility();
+        });
+      });
+
+      applyRowVisibility();
     }
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = optional (steht auf der
-        Empfehlungs-Liste), noch nicht gebaut, Grau = nicht auf der Empfehlungs-Liste. Maus über
-        einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im Spiel zum Bauen
-        (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount} von
-        ${stations.length} Wachen haben noch mindestens einen optionalen, aber noch nicht gebauten
-        Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
+        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = optional empfohlen, aber noch
+        nicht gebaut, Grau = noch nicht gebaut. Maus über einen Ausbau halten zeigt den Namen.
+        Klick auf eine Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht
+        automatisiert). ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch
+        mindestens einen optionalen, aber noch nicht gebauten Ausbau. Spaltenüberschriften sind
+        klickbar zum Sortieren.
       </p>
       <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
              style="margin-bottom:8px;">
