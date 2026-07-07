@@ -9,6 +9,13 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.0**
+  - Wachen-Check: Ausbauten, Ausbaustufen und Lagerräume haben jetzt echte Namen und
+    Kosten und können direkt gebaut werden – bei jeder Aktion wählst du selbst, ob mit
+    Credits oder Coins bezahlt wird. Achtung: Das kostet echtes Spielgeld!
+  - Fahrzeuge umbenennen: Daten werden jetzt über die neue, seitenweise ladende API
+    geholt (wichtig für sehr große Accounts) und mehrere Fahrzeuge gleichzeitig statt
+    strikt nacheinander umbenannt – bei mehreren Tausend Fahrzeugen deutlich schneller.
 - **0.3.13**
   - Fix: Spaltenbreiten im Wachen-Check verschoben sich je nachdem, welche Kategorie
     gerade auf-/zugeklappt war (Tabelle passte die Breiten an die sichtbaren Inhalte an) -

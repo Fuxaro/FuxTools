@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.13
+// @version     0.4.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.13";
+  const SCRIPT_VERSION = "0.4.0";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -216,6 +216,299 @@
   };
 
   //////////////////////////////////////////////////
+  // Ausbau-Katalog: echte Namen, Kosten (Credits/Coins) fuer Ausbauten, Lagerraeume und
+  // Ausbaustufen, uebernommen aus einem bekannten Community-Skript ("Erweiterungs-
+  // Manager" von Caddy21). Schluessel: "<building_type>_normal" oder "<building_type>_
+  // small" (Kleinwache). Ermoeglicht das direkte Bauen aus FuxTools heraus.
+  //////////////////////////////////////////////////
+
+  function getBuildingKey(building) {
+    return `${building.building_type}_${building.small_building ? "small" : "normal"}`;
+  }
+
+  const EXTENSION_CATALOG = {
+    "0_normal": [
+      { id: 0, name: "Rettungsdienst", cost: 100000, coins: 20 },
+      { id: 1, name: "1te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 2, name: "2te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 3, name: "3te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 4, name: "4te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 5, name: "5te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 6, name: "Wasserrettung", cost: 400000, coins: 25 },
+      { id: 7, name: "6te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 8, name: "Flughafenfeuerwehr", cost: 300000, coins: 25 },
+      { id: 9, name: "Großwache", cost: 1000000, coins: 50 },
+      { id: 10, name: "7te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 11, name: "8te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 12, name: "9te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 13, name: "Werkfeuerwehr", cost: 100000, coins: 20 },
+      { id: 14, name: "Netzersatzanlage 50", cost: 100000, coins: 20 },
+      { id: 15, name: "Netzersatzanlage 200", cost: 100000, coins: 20 },
+      { id: 16, name: "Großlüfter", cost: 75000, coins: 15 },
+      { id: 17, name: "10te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 18, name: "Drohneneinheit", cost: 150000, coins: 25 },
+      { id: 19, name: "Verpflegungsdienst", cost: 200000, coins: 25 },
+      { id: 20, name: "1te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 21, name: "2te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 22, name: "3te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 23, name: "4te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 24, name: "5te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 25, name: "Bahnrettung", cost: 125000, coins: 25 },
+      { id: 26, name: "11te Ab-Stellplatz", cost: 150000, coins: 20 },
+      { id: 27, name: "12te Ab-Stellplatz", cost: 150000, coins: 20 },
+    ],
+    "0_small": [
+      { id: 0, name: "Rettungsdienst", cost: 100000, coins: 20 },
+      { id: 1, name: "1te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 2, name: "2te AB-Stellplatz", cost: 100000, coins: 20 },
+      { id: 6, name: "Wasserrettung", cost: 400000, coins: 25 },
+      { id: 8, name: "Flughafenfeuerwehr", cost: 300000, coins: 25 },
+      { id: 13, name: "Werkfeuerwehr", cost: 100000, coins: 20 },
+      { id: 14, name: "Netzersatzanlage 50", cost: 100000, coins: 20 },
+      { id: 16, name: "Großlüfter", cost: 75000, coins: 25 },
+      { id: 18, name: "Drohneneinheit", cost: 150000, coins: 25 },
+      { id: 19, name: "Verpflegungsdienst", cost: 200000, coins: 25 },
+      { id: 20, name: "1te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 21, name: "2te Anhänger Stellplatz", cost: 75000, coins: 15 },
+      { id: 25, name: "Bahnrettung", cost: 125000, coins: 25 },
+    ],
+    "1_normal": [
+      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+    ],
+    "2_normal": [{ id: 0, name: "Großwache", cost: 1000000, coins: 50 }],
+    "3_normal": [
+      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+    ],
+    "4_normal": [
+      { id: 0, name: "Allgemeine Innere", cost: 10000, coins: 10 },
+      { id: 1, name: "Allgemeine Chirurgie", cost: 10000, coins: 10 },
+      { id: 2, name: "Gynäkologie", cost: 70000, coins: 15 },
+      { id: 3, name: "Urologie", cost: 70000, coins: 15 },
+      { id: 4, name: "Unfallchirurgie", cost: 70000, coins: 15 },
+      { id: 5, name: "Neurologie", cost: 70000, coins: 15 },
+      { id: 6, name: "Neurochirurgie", cost: 70000, coins: 15 },
+      { id: 7, name: "Kardiologie", cost: 70000, coins: 15 },
+      { id: 8, name: "Kardiochirurgie", cost: 70000, coins: 15 },
+      { id: 9, name: "Großkrankenhaus", cost: 200000, coins: 50 },
+    ],
+    "5_normal": [{ id: 0, name: "Windenrettung", cost: 200000, coins: 15 }],
+    "6_normal": [
+      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
+      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
+      { id: 2, name: "3te Zelle", cost: 25000, coins: 5 },
+      { id: 3, name: "4te Zelle", cost: 25000, coins: 5 },
+      { id: 4, name: "5te Zelle", cost: 25000, coins: 5 },
+      { id: 5, name: "6te Zelle", cost: 25000, coins: 5 },
+      { id: 6, name: "7te Zelle", cost: 25000, coins: 5 },
+      { id: 7, name: "8te Zelle", cost: 25000, coins: 5 },
+      { id: 8, name: "9te Zelle", cost: 25000, coins: 5 },
+      { id: 9, name: "10te Zelle", cost: 25000, coins: 5 },
+      { id: 10, name: "Diensthundestaffel", cost: 100000, coins: 10 },
+      { id: 11, name: "Kriminalpolizei", cost: 100000, coins: 20 },
+      { id: 12, name: "Dienstgruppenleitung", cost: 200000, coins: 25 },
+      { id: 13, name: "Motorradstaffel", cost: 75000, coins: 15 },
+      { id: 14, name: "Großwache", cost: 1000000, coins: 50 },
+      { id: 15, name: "Großgewahrsam", cost: 200000, coins: 50 },
+      { id: 16, name: "Autobahnpolizei", cost: 75000, coins: 15 },
+    ],
+    "6_small": [
+      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
+      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
+      { id: 10, name: "Diensthundestaffel", cost: 100000, coins: 10 },
+      { id: 11, name: "Kriminalpolizei", cost: 100000, coins: 20 },
+      { id: 12, name: "Dienstgruppenleitung", cost: 200000, coins: 25 },
+      { id: 13, name: "Motorradstaffel", cost: 75000, coins: 15 },
+      { id: 16, name: "Autobahnpolizei", cost: 75000, coins: 15 },
+    ],
+    "8_normal": [
+      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+    ],
+    "9_normal": [
+      { id: 0, name: "1. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung", cost: 25000, coins: 5 },
+      { id: 1, name: "1. Technischer Zug: Zugtrupp", cost: 25000, coins: 5 },
+      { id: 2, name: "Fachgruppe Räumen", cost: 25000, coins: 5 },
+      { id: 3, name: "Fachgruppe Wassergefahren", cost: 500000, coins: 15 },
+      { id: 4, name: "2. Technischer Zug - Bergungsgruppe", cost: 25000, coins: 5 },
+      { id: 5, name: "2. Technischer Zug: Notversorgung/Notinstandsetzung", cost: 25000, coins: 5 },
+      { id: 6, name: "2. Technischer Zug: Zugtrupp", cost: 25000, coins: 5 },
+      { id: 7, name: "Fachgruppe Ortung", cost: 450000, coins: 25 },
+      { id: 8, name: "Fachgruppe Wasserschaden/Pumpen", cost: 200000, coins: 25 },
+      { id: 9, name: "Fachgruppe Schwere Bergung", cost: 200000, coins: 25 },
+      { id: 10, name: "Fachgruppe Elektroversorgung", cost: 200000, coins: 25 },
+      { id: 11, name: "Ortsverband-Mannschaftstransportwagen", cost: 50000, coins: 15 },
+      { id: 12, name: "Trupp Unbemannte Luftfahrtsysteme", cost: 50000, coins: 15 },
+      { id: 13, name: "Fachzug Führung und Kommunikation", cost: 300000, coins: 25 },
+      { id: 14, name: "Fachgruppe Logistik-Verpflegung", cost: 50000, coins: 15 },
+      { id: 15, name: "Fachgruppe Brückenbau", cost: 50000, coins: 15 },
+    ],
+    "10_normal": [
+      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+    ],
+    "11_normal": [
+      { id: 0, name: "2. Zug der 1. Hundertschaft", cost: 25000, coins: 5 },
+      { id: 1, name: "3. Zug der 1. Hundertschaft", cost: 25000, coins: 5 },
+      { id: 2, name: "Sonderfahrzeug: Gefangenenkraftwagen", cost: 25000, coins: 5 },
+      { id: 3, name: "Technischer Zug: Wasserwerfer", cost: 25000, coins: 5 },
+      { id: 4, name: "SEK: 1. Zug", cost: 100000, coins: 10 },
+      { id: 5, name: "SEK: 2. Zug", cost: 100000, coins: 10 },
+      { id: 6, name: "MEK: 1. Zug", cost: 100000, coins: 10 },
+      { id: 7, name: "MEK: 2. Zug", cost: 100000, coins: 10 },
+      { id: 8, name: "Diensthundestaffel", cost: 100000, coins: 10 },
+      { id: 9, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 10, name: "Lautsprecherkraftwagen", cost: 100000, coins: 10 },
+    ],
+    "12_normal": [
+      { id: 0, name: "Führung", cost: 25000, coins: 5 },
+      { id: 1, name: "Sanitätsdienst", cost: 25000, coins: 5 },
+      { id: 2, name: "Wasserrettung", cost: 500000, coins: 25 },
+      { id: 3, name: "Rettungshundestaffel", cost: 350000, coins: 25 },
+      { id: 4, name: "SEG-Drohne", cost: 50000, coins: 15 },
+      { id: 5, name: "Betreuungs- und Verpflegungsdienst", cost: 200000, coins: 25 },
+      { id: 6, name: "Technik und Sicherheit", cost: 200000, coins: 25 },
+    ],
+    "13_normal": [
+      { id: 0, name: "Außenlastbehälter", cost: 200000, coins: 15 },
+      { id: 1, name: "Windenrettung", cost: 200000, coins: 15 },
+    ],
+    "17_normal": [
+      { id: 0, name: "SEK: 1. Zug", cost: 100000, coins: 10 },
+      { id: 1, name: "SEK: 2. Zug", cost: 100000, coins: 10 },
+      { id: 2, name: "MEK: 1. Zug", cost: 100000, coins: 10 },
+      { id: 3, name: "MEK: 2. Zug", cost: 100000, coins: 10 },
+      { id: 4, name: "Diensthundestaffel", cost: 100000, coins: 10 },
+    ],
+    "24_normal": [
+      { id: 0, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 1, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 2, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 3, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 4, name: "Reiterstaffel", cost: 300000, coins: 25 },
+      { id: 5, name: "Reiterstaffel", cost: 300000, coins: 25 },
+    ],
+    "25_normal": [
+      { id: 0, name: "Höhenrettung", cost: 50000, coins: 25 },
+      { id: 1, name: "Drohneneinheit", cost: 75000, coins: 25 },
+      { id: 2, name: "Rettungshundestaffel", cost: 350000, coins: 25 },
+      { id: 3, name: "Rettungsdienst", cost: 100000, coins: 20 },
+    ],
+    "27_normal": [
+      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
+    ],
+    "29_normal": [
+      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
+      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
+      { id: 2, name: "3te Zelle", cost: 25000, coins: 5 },
+      { id: 3, name: "4te Zelle", cost: 25000, coins: 5 },
+      { id: 4, name: "5te Zelle", cost: 25000, coins: 5 },
+      { id: 5, name: "6te Zelle", cost: 25000, coins: 5 },
+      { id: 6, name: "7te Zelle", cost: 25000, coins: 5 },
+      { id: 7, name: "8te Zelle", cost: 25000, coins: 5 },
+      { id: 8, name: "9te Zelle", cost: 25000, coins: 5 },
+      { id: 9, name: "10te Zelle", cost: 25000, coins: 5 },
+    ],
+  };
+
+  const STORAGE_CATALOG = {
+    "0_normal": [
+      { id: "initial_containers", name: "Lagerraum", cost: 25000, coins: 10 },
+      { id: "additional_containers_1", name: "1te Zusätzlicher Lagerraum", cost: 50000, coins: 12 },
+      { id: "additional_containers_2", name: "2te Zusätzlicher Lagerraum", cost: 50000, coins: 12 },
+      { id: "additional_containers_3", name: "3te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
+      { id: "additional_containers_4", name: "4te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
+      { id: "additional_containers_5", name: "5te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
+      { id: "additional_containers_6", name: "6te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
+      { id: "additional_containers_7", name: "7te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
+    ],
+    "0_small": [
+      { id: "initial_containers", name: "Lagerraum", cost: 25000, coins: 10 },
+      { id: "additional_containers_1", name: "1te Zusätzlicher Lagerraum", cost: 50000, coins: 10 },
+      { id: "additional_containers_2", name: "2te Zusätzlicher Lagerraum", cost: 50000, coins: 10 },
+    ],
+    "5_normal": [{ id: "initial_helicopter_equipment", name: "Lagerraum", cost: 25000, coins: 10 }],
+    "13_normal": [{ id: "initial_helicopter_equipment", name: "Lagerraum", cost: 25000, coins: 10 }],
+  };
+
+  // Ausbaustufen-Kosten je Stufe (kumulativ ansteigend, direkt auf eine Zielstufe
+  // ausbaubar). Separates System von den einzelnen Ausbauten oben - "level" auf dem
+  // Gebaeude-Objekt ist die aktuell erreichte Stufe.
+  function buildUniformLevels(count, cost, coins) {
+    return Array.from({ length: count }, (_, i) => ({ id: i, cost, coins }));
+  }
+  const LEVEL_CATALOG = {
+    "0_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      ...buildUniformLevels(17, 100000, 20).map((l, i) => ({ id: i + 2, cost: l.cost, coins: l.coins })),
+    ],
+    "0_small": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      { id: 2, cost: 100000, coins: 20 },
+      { id: 3, cost: 100000, coins: 20 },
+      { id: 4, cost: 100000, coins: 20 },
+    ],
+    "2_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
+    ],
+    "2_small": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      { id: 2, cost: 100000, coins: 20 },
+      { id: 3, cost: 100000, coins: 20 },
+      { id: 4, cost: 100000, coins: 20 },
+    ],
+    "4_normal": Array.from({ length: 20 }, (_, i) => ({ id: i, cost: 19000, coins: 11 })),
+    "6_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
+    ],
+    "6_small": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      { id: 2, cost: 100000, coins: 20 },
+      { id: 3, cost: 100000, coins: 20 },
+      { id: 4, cost: 100000, coins: 20 },
+    ],
+    "15_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      { id: 2, cost: 100000, coins: 20 },
+      { id: 3, cost: 100000, coins: 20 },
+      { id: 4, cost: 100000, coins: 20 },
+    ],
+    "25_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
+    ],
+    "26_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      { id: 2, cost: 100000, coins: 20 },
+      { id: 3, cost: 100000, coins: 20 },
+      { id: 4, cost: 100000, coins: 20 },
+    ],
+    "29_normal": [
+      { id: 0, cost: 10000, coins: 10 },
+      { id: 1, cost: 50000, coins: 15 },
+      ...Array.from({ length: 7 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
+    ],
+  };
+
+  //////////////////////////////////////////////////
   // Speicher ueber Tampermonkey (GM.setValue/GM.getValue) statt IndexedDB.
   // Vorteil: haengt am Script, nicht an der Website-Origin - Einstellungen/Namen
   // bleiben so auch zwischen www.leitstellenspiel.de und polizei.leitstellenspiel.de
@@ -237,7 +530,6 @@
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
-    await GM.deleteValue(cacheKeyExtensionCatalog);
 
     // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
     // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
@@ -310,34 +602,6 @@
     }
   }
 
-  const cacheKeyExtensionCatalog = "extensionCatalog";
-  let extensionCatalogByPseudoId = {};
-  let extensionCatalogLoaded = false;
-
-  // Bezeichnungen der Ausbauten je Gebaeudetyp (fuer Tooltips im Wachen-Check) -
-  // gleiche externe Quelle wie initVehicleTypeCaptions, das Spiel selbst liefert
-  // dafuer keine Namen ueber die eigene API. Wird erst beim ersten Aufruf des
-  // Wachen-Checks geladen, nicht beim Start (nicht jeder nutzt die Funktion).
-  async function initExtensionCatalog() {
-    if (extensionCatalogLoaded) return;
-
-    const cached = await retrieveData(cacheKeyExtensionCatalog);
-    let types = cached?.data;
-    const expirationDate = cached?.expirationDate;
-
-    if (!types || !expirationDate || new Date(expirationDate) < new Date()) {
-      types = await fetchAndStoreData("https://api.lss-manager.de/de_DE/buildings", cacheKeyExtensionCatalog);
-    }
-
-    extensionCatalogByPseudoId = {};
-    for (const [pseudoId, buildingType] of Object.entries(types || {})) {
-      extensionCatalogByPseudoId[pseudoId] = (buildingType.extensions || [])
-        .map((extension, index) => (extension ? { id: index, caption: extension.caption } : null))
-        .filter(Boolean);
-    }
-    extensionCatalogLoaded = true;
-  }
-
   async function initNamesStore() {
     namesStore = (await retrieveData("names")) || {};
   }
@@ -358,9 +622,27 @@
     return Array.isArray(result) ? result : Object.values(result);
   }
 
+  // Seitenweises Laden ueber /api/v2/vehicles statt /api/vehicles - bei sehr grossen
+  // Accounts (mehrere Tausend Fahrzeuge) kann eine einzelne /api/vehicles-Anfrage in
+  // das 15-Sekunden-Timeout des Servers laufen. Mehrere kleinere Seiten sind schneller
+  // und zuverlaessiger. Feldnamen sind identisch zu v1 (id, caption, building_id,
+  // vehicle_type, ...), das bestehende Umbenennen funktioniert unveraendert.
+  async function fetchAllVehiclesV2() {
+    let vehicles = [];
+    let nextPage = "/api/v2/vehicles?limit=2000";
+    while (nextPage) {
+      const res = await fetch(nextPage, { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`Fehler beim Laden der Fahrzeuge: ${res.status}`);
+      const data = await res.json();
+      vehicles = vehicles.concat(data.result || []);
+      nextPage = data.paging?.next_page || null;
+    }
+    return vehicles;
+  }
+
   async function loadGameData() {
     const [vehicles, buildings] = await Promise.all([
-      fetchJSON("/api/vehicles"),
+      fetchAllVehiclesV2(),
       fetchJSON("/api/buildings"),
     ]);
     const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
@@ -476,8 +758,10 @@
     throw lastError;
   }
 
-  // Zeit zwischen zwei Umbenennungen - bewusst nicht 0, um den Server nicht zu fluten.
-  const RENAME_DELAY_MS = 400;
+  // Wie viele Umbenennungen gleichzeitig laufen duerfen - moderat gewaehlt, um bei
+  // sehr grossen Mengen (mehrere Tausend Fahrzeuge) deutlich schneller zu sein als
+  // rein sequentiell, ohne den Server mit zu vielen Anfragen auf einmal zu fluten.
+  const RENAME_CONCURRENCY = 5;
 
   // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
   // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
@@ -509,28 +793,40 @@
     });
 
     let done = 0;
+    let finished = 0;
     const failedItems = [];
     const errors = [];
     let cancelled = false;
 
-    for (let i = 0; i < plan.length; i++) {
-      if (renameCancelled) {
-        cancelled = true;
-        break;
+    // Mehrere Eintraege gleichzeitig statt strikt nacheinander - bei sehr grossen
+    // Mengen (mehrere Tausend Fahrzeuge) waere rein sequentiell viel zu langsam.
+    // RENAME_CONCURRENCY begrenzt das bewusst auf einen moderaten Wert statt
+    // unbegrenzt zu parallelisieren, um den Server nicht zu ueberlasten.
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < plan.length) {
+        if (renameCancelled) {
+          cancelled = true;
+          return;
+        }
+        const i = nextIndex++;
+        const item = plan[i];
+        try {
+          await renameItemWithRetry(renameFn, item.id, item.newName);
+          done++;
+        } catch (e) {
+          console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
+          failedItems.push(item);
+          if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
+        }
+        finished++;
+        progressBarEl.style.width = `${Math.round((finished / plan.length) * 100)}%`;
+        progressTextEl.textContent = `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       }
-      const item = plan[i];
-      progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
-      progressTextEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
-      try {
-        await renameItemWithRetry(renameFn, item.id, item.newName);
-        done++;
-      } catch (e) {
-        console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
-        failedItems.push(item);
-        if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
-      }
-      if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
     }
+
+    const workerCount = Math.min(RENAME_CONCURRENCY, plan.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
     renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
   }
@@ -1811,11 +2107,62 @@
   }
 
   //////////////////////////////////////////////////
-  // Wachen-Check: Tabelle je Wache mit empfohlenen Ausbauten (farbige Badges mit
-  // Tooltip zur Namen/Status-Anzeige) sowie aktuellem Personal und automatischem
-  // Werben als reine Info-Spalten. Bauen von Ausbauten kostet Spielgeld und bleibt
-  // deshalb ein manueller Klick zur Wache - keine automatische Aktion in dieser Ansicht.
+  // Wachen-Check: Tabelle je Wache mit Ausbauten, Ausbaustufe und Lagerräumen, jeweils
+  // mit echtem Namen, Kosten und direkter Bau-Moeglichkeit (Credits oder Coins - jede
+  // Aktion fragt vorher, mit welcher Waehrung bezahlt werden soll). Dazu Personal und
+  // automatisches Werben als reine Info-Spalten.
   //////////////////////////////////////////////////
+
+  async function getUserCredits() {
+    const data = await fetchJSON("/api/userinfo");
+    return { credits: data.credits_user_current, coins: data.coins_user_current };
+  }
+
+  // Baut eine einzelne Ausbau/Lager/Stufen-Aktion. Alle drei Endpunkte sind vom
+  // Referenzskript "Erweiterungs-Manager" (Caddy21) uebernommen und dort im Einsatz
+  // bestaetigt. currency ist immer "credits" oder "coins" - der Spieler waehlt das
+  // in einem Bestaetigungsdialog vor jeder Aktion selbst aus.
+  async function buildExtension(buildingId, extensionId, currency) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const res = await fetch(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken,
+      },
+    });
+    if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
+  }
+
+  async function buildStorage(buildingId, storageId, currency) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const res = await fetch(
+      `/buildings/${buildingId}/storage_upgrade/${currency}/${storageId}?redirect_building_id=${buildingId}`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRF-Token": csrfToken,
+        },
+      }
+    );
+    if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
+  }
+
+  async function buildLevel(buildingId, currency, level) {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const res = await fetch(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": csrfToken },
+    });
+    if (!res.ok) throw new Error(`Ausbauen fehlgeschlagen (${res.status})`);
+  }
 
   async function loadBuildingsForCheck() {
     const buildings = await fetchJSON("/api/buildings");
@@ -1830,10 +2177,17 @@
       .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
       .map(b => {
         const pseudoId = getPseudoBuildingTypeId(b);
+        const buildingKey = getBuildingKey(b);
         const recommendedExtensions = pseudoId ? RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [] : [];
         const extensions = Array.isArray(b.extensions) ? b.extensions : [];
         const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
         const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
+
+        const levelCatalog = LEVEL_CATALOG[buildingKey] || null;
+        const currentLevel = typeof b.level === "number" && b.level >= 0 ? b.level : -1;
+
+        const storageCatalog = STORAGE_CATALOG[buildingKey] || null;
+        const ownedStorageIds = new Set((b.storage_upgrades || []).map(u => u.type_id));
 
         return {
           id: String(b.id),
@@ -1841,12 +2195,17 @@
           category: categoryForBuilding(b),
           leitstelleName: leitstelle ? leitstelle.caption : null,
           pseudoId,
+          buildingKey,
           extensions,
           recommendedExtensions,
           missingExtensions,
           personnelCount: b.personal_count ?? null,
           personnelSetPoint: pseudoId ? (PERSONNEL_SET_POINT_BY_PSEUDO_ID[pseudoId] ?? null) : null,
           automaticHiring: b.hiring_automatic === true,
+          levelCatalog,
+          currentLevel,
+          storageCatalog,
+          ownedStorageIds,
         };
       });
   }
@@ -1861,14 +2220,14 @@
   // Ausbau-Badges einer Wache: gruen = gebaut und aktiv, blau = wird gerade gebaut, orange =
   // nicht gebaut, aber auf der Referenz-Liste aus RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID
   // ("gefordert"), grau = nicht gebaut und nicht auf der Liste. Bedeutung 1:1 vom
-  // Referenzskript uebernommen. Der Name kommt, wenn verfuegbar, aus dem externen
-  // Ausbau-Katalog (siehe initExtensionCatalog) und erscheint als Tooltip beim
-  // Draufhalten mit der Maus.
+  // Referenzskript uebernommen. Namen/Kosten kommen aus dem fest einprogrammierten
+  // EXTENSION_CATALOG. Fehlende Ausbauten sind anklickbar und oeffnen den Bau-Dialog
+  // (Kosten werden vorher angezeigt, Waehrung wird dort ausgewaehlt).
   function renderExtensionBadges(station) {
-    const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
+    const catalogEntries = EXTENSION_CATALOG[station.buildingKey] || [];
     const entries = catalogEntries.length
       ? catalogEntries
-      : station.recommendedExtensions.map(id => ({ id, caption: null }));
+      : station.recommendedExtensions.map(id => ({ id, name: null, cost: null, coins: null }));
 
     if (!entries.length) return '<span class="text-muted">-</span>';
 
@@ -1877,20 +2236,68 @@
     return entries
       .map(entry => {
         const owned = station.extensions.find(e => e.type_id === entry.id);
-        let cssClass = "label-default";
-        let title = entry.caption || `Ausbau ${entry.id}`;
+        const label = entry.name || `Ausbau ${entry.id}`;
+
         if (owned) {
-          if (owned.available_at) {
-            cssClass = "label-primary";
-            title += ` (im Bau, verfügbar ab ${owned.available_at})`;
-          } else {
-            cssClass = "label-success";
-          }
-        } else if (recommendedIds.has(entry.id)) {
-          cssClass = "label-warning";
-          title += " (gefordert, noch nicht gebaut)";
+          const cssClass = owned.available_at ? "label-primary" : "label-success";
+          const title = owned.available_at ? `${label} (im Bau, verfügbar ab ${owned.available_at})` : label;
+          return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
         }
-        return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
+
+        const cssClass = recommendedIds.has(entry.id) ? "label-warning" : "label-default";
+        const suffix = recommendedIds.has(entry.id) ? " (gefordert)" : "";
+        const title =
+          entry.cost != null
+            ? `${label}${suffix} – ${entry.cost.toLocaleString("de-DE")} Credits oder ${entry.coins} Coins`
+            : `${label}${suffix} (noch nicht gebaut)`;
+        if (entry.cost == null) {
+          return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
+        }
+        return `<button type="button" class="label ${cssClass} vn-build-extension" title="${escapeHtml(title)}"
+                   style="margin:1px; border:none; cursor:pointer;"
+                   data-building-id="${station.id}" data-extension-id="${entry.id}"
+                   data-name="${escapeHtml(label)}" data-cost="${entry.cost}" data-coins="${entry.coins}">${entry.id}</button>`;
+      })
+      .join("");
+  }
+
+  // Ausbaustufe (getrenntes System von den Ausbauten oben): zeigt "Stufe X von Y" plus
+  // einen Button fuer die naechste Stufe, wenn eine LEVEL_CATALOG-Eintrag existiert und
+  // die Wache noch nicht auf der letzten Stufe ist.
+  function renderLevelCell(station) {
+    if (!station.levelCatalog) return '<span class="text-muted">-</span>';
+    const maxLevel = station.levelCatalog.length - 1;
+    const shownLevel = station.currentLevel < 0 ? 0 : station.currentLevel + 1;
+    const label = `Stufe ${shownLevel} / ${maxLevel + 1}`;
+    if (station.currentLevel >= maxLevel) {
+      return `<span class="label label-success">${label}</span>`;
+    }
+    const nextLevel = station.levelCatalog[station.currentLevel + 1];
+    return `
+      <div>${label}</div>
+      <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"
+              data-building-id="${station.id}" data-level="${nextLevel.id}"
+              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}">
+        Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)
+      </button>
+    `;
+  }
+
+  // Lagerraum-Badges - gleiches Prinzip wie die Ausbau-Badges, aber eigener Katalog
+  // (STORAGE_CATALOG) und eigener Bau-Endpunkt (buildStorage).
+  function renderStorageCell(station) {
+    if (!station.storageCatalog || !station.storageCatalog.length) return '<span class="text-muted">-</span>';
+    return station.storageCatalog
+      .map(room => {
+        const owned = station.ownedStorageIds.has(room.id);
+        if (owned) {
+          return `<span class="label label-success" title="${escapeHtml(room.name)}" style="margin:1px;">✓</span>`;
+        }
+        const title = `${room.name} – ${room.cost.toLocaleString("de-DE")} Credits oder ${room.coins} Coins`;
+        return `<button type="button" class="label label-warning vn-build-storage" title="${escapeHtml(title)}"
+                   style="margin:1px; border:none; cursor:pointer;"
+                   data-building-id="${station.id}" data-storage-id="${room.id}"
+                   data-name="${escapeHtml(room.name)}" data-cost="${room.cost}" data-coins="${room.coins}">+</button>`;
       })
       .join("");
   }
@@ -1898,12 +2305,61 @@
   // Anzahl bereits fertig gebauter (nicht mehr im Bau befindlicher) Ausbauten einer
   // Wache - dient nur als grobe Vergleichsgroesse zum Sortieren nach Ausbau-Fortschritt.
   function getBuiltExtensionsCount(station) {
-    const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
+    const catalogEntries = EXTENSION_CATALOG[station.buildingKey] || [];
     const entries = catalogEntries.length ? catalogEntries : station.recommendedExtensions.map(id => ({ id }));
     return entries.filter(entry => {
       const owned = station.extensions.find(e => e.type_id === entry.id);
       return owned && !owned.available_at;
     }).length;
+  }
+
+  // Kompakter Bau-Bestaetigungs-Bildschirm: zeigt Namen + Kosten, fragt immer nach der
+  // Waehrung (Credits oder Coins - nie automatisch eine Wahl treffen), fuehrt dann den
+  // uebergebenen Bau-Aufruf aus und kehrt zum Wachen-Check zurueck (frisch geladen,
+  // damit der neue Stand sofort sichtbar ist).
+  function renderBuildConfirmScreen({ title, costCredits, costCoins, onConfirm }) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>Bauen: <b>${escapeHtml(title)}</b></p>
+      <p class="text-muted" style="font-size:12px;">Womit soll bezahlt werden?</p>
+      <div class="form-group">
+        <button id="vn-btn-pay-credits" type="button" class="btn btn-success">
+          Mit Credits bauen (${costCredits.toLocaleString("de-DE")})
+        </button>
+        <button id="vn-btn-pay-coins" type="button" class="btn btn-danger">
+          Mit Coins bauen (${costCoins.toLocaleString("de-DE")})
+        </button>
+      </div>
+      <div id="vn-build-status" style="margin-top:10px;"></div>
+      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
+        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+      </button>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderStationCheckScreen);
+
+    const statusEl = document.getElementById("vn-build-status");
+    const creditsBtn = document.getElementById("vn-btn-pay-credits");
+    const coinsBtn = document.getElementById("vn-btn-pay-coins");
+
+    async function pay(currency) {
+      creditsBtn.disabled = true;
+      coinsBtn.disabled = true;
+      statusEl.innerHTML = `<em>Wird gebaut ...</em>`;
+      try {
+        await onConfirm(currency);
+        statusEl.innerHTML = `<span class="text-success">Erfolgreich gebaut. Lade neu ...</span>`;
+        setTimeout(renderStationCheckScreen, 600);
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+        creditsBtn.disabled = false;
+        coinsBtn.disabled = false;
+      }
+    }
+
+    creditsBtn.addEventListener("click", () => pay("credits"));
+    coinsBtn.addEventListener("click", () => pay("coins"));
   }
 
   async function renderStationCheckScreen() {
@@ -1913,7 +2369,6 @@
 
     let stations;
     try {
-      await initExtensionCatalog();
       stations = await loadBuildingsForCheck();
     } catch (e) {
       body.innerHTML = `
@@ -2016,7 +2471,7 @@
               <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}"
                   style="cursor:pointer; border-top:2px solid rgba(128,128,128,0.4);
                          background-color:transparent !important;">
-                <td colspan="4" style="padding-top:10px;">
+                <td colspan="6" style="padding-top:10px;">
                   <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
                   <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
                 </td>
@@ -2037,6 +2492,8 @@
                 </span>
               </td>
               <td>${renderExtensionBadges(s)}</td>
+              <td>${renderLevelCell(s)}</td>
+              <td>${renderStorageCell(s)}</td>
             </tr>
           `;
         })
@@ -2048,6 +2505,8 @@
           <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer; white-space:nowrap;">${headerHtml("personnel")}</th>
           <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer; white-space:nowrap;">${headerHtml("hiring")}</th>
           <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer; white-space:nowrap;">${headerHtml("extensions")}</th>
+          <th>Stufe</th>
+          <th>Lagerräume</th>
         </tr>
       `;
       body.querySelector("tbody").innerHTML = rows;
@@ -2074,26 +2533,70 @@
         });
       });
 
+      body.querySelectorAll(".vn-build-extension").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const buildingId = btn.dataset.buildingId;
+          const extensionId = Number(btn.dataset.extensionId);
+          renderBuildConfirmScreen({
+            title: btn.dataset.name,
+            costCredits: Number(btn.dataset.cost),
+            costCoins: Number(btn.dataset.coins),
+            onConfirm: currency => buildExtension(buildingId, extensionId, currency),
+          });
+        });
+      });
+
+      body.querySelectorAll(".vn-build-storage").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const buildingId = btn.dataset.buildingId;
+          const storageId = btn.dataset.storageId;
+          renderBuildConfirmScreen({
+            title: btn.dataset.name,
+            costCredits: Number(btn.dataset.cost),
+            costCoins: Number(btn.dataset.coins),
+            onConfirm: currency => buildStorage(buildingId, storageId, currency),
+          });
+        });
+      });
+
+      body.querySelectorAll(".vn-build-level").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const buildingId = btn.dataset.buildingId;
+          const level = Number(btn.dataset.level);
+          renderBuildConfirmScreen({
+            title: `Ausbaustufe ${level + 1}`,
+            costCredits: Number(btn.dataset.cost),
+            costCoins: Number(btn.dataset.coins),
+            onConfirm: currency => buildLevel(buildingId, currency, level),
+          });
+        });
+      });
+
       applyRowVisibility();
     }
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
         Grün = gebaut und aktiv, Blau = in Bau, Orange = nicht gebaut, aber gefordert, Grau = nicht
-        gebaut. Maus über einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im
-        Spiel zum Bauen (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount}
-        von ${stations.length} Wachen fehlt noch mindestens ein geforderter Ausbau.
-        Spaltenüberschriften sind klickbar zum Sortieren.
+        gebaut. Maus über einen Ausbau halten zeigt Namen und Kosten. Klick auf einen nicht gebauten
+        Ausbau öffnet den Bau-Dialog (Credits oder Coins, du entscheidest) – kostet Spielgeld!
+        ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch mindestens ein
+        geforderter Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
       </p>
       <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
              style="margin-bottom:8px;">
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
           <colgroup>
-            <col style="width:28%;">
-            <col style="width:10%;">
-            <col style="width:14%;">
-            <col style="width:48%;">
+            <col style="width:20%;">
+            <col style="width:8%;">
+            <col style="width:11%;">
+            <col style="width:33%;">
+            <col style="width:13%;">
+            <col style="width:15%;">
           </colgroup>
           <thead></thead>
           <tbody></tbody>
