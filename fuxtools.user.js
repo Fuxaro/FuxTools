@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.2.1
+// @version     0.2.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.2.1";
+  const SCRIPT_VERSION = "0.2.2";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -60,20 +60,31 @@
   let vehicleTypeCaptions = {};
   let namesStore = {};
 
-  // Kategorisierung der Gebaeudetypen (building_type-ID), analog zu LSSM's buildingCategories
+  // Kategorisierung der Gebaeudetypen (building_type-ID), abgeglichen mit der
+  // offiziellen deutschen Gebaeudetypen-Liste des Spiels
   const BUILDING_CATEGORIES = {
     Feuerwehr: [0, 1, 18],
     Rettungsdienst: [2, 3, 5, 12, 15, 20, 21, 25],
-    Polizei: [6, 8, 11, 13, 17, 19, 24],
+    Krankenhaus: [4],
+    Polizei: [6, 8, 11, 13, 17, 19, 24, 28],
     THW: [9, 10],
-    Seenotrettung: [26, 27, 28],
-    Sonstiges: [4, 7, 14, 16, 22, 23],
+    Seenotrettung: [26, 27],
+    Sonstiges: [7, 14, 16, 22, 23],
   };
   const BUILDING_TYPE_TO_CATEGORY = {};
   for (const [category, ids] of Object.entries(BUILDING_CATEGORIES)) {
     for (const id of ids) BUILDING_TYPE_TO_CATEGORY[id] = category;
   }
-  const CATEGORY_ORDER = ["Feuerwehr", "Rettungsdienst", "Polizei", "THW", "Seenotrettung", "Sonstiges", "Unbekannt"];
+  const CATEGORY_ORDER = [
+    "Feuerwehr",
+    "Rettungsdienst",
+    "Krankenhaus",
+    "Polizei",
+    "THW",
+    "Seenotrettung",
+    "Sonstiges",
+    "Unbekannt",
+  ];
 
   function categoryForBuilding(building) {
     const typeId = building?.building_type ?? building?.type;
@@ -253,33 +264,41 @@
     if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
   }
 
-  // Gebaeude (Wachen/Leitstellen) werden anders umbenannt als Fahrzeuge: kein eigenes
-  // Formular-Fragment zum Abholen, stattdessen direkt POST auf die Gebaeude-Resource
-  // mit Rails-typischem Methode-Override (_method=put) und dem CSRF-Token aus dem
-  // <meta name="csrf-token">-Tag der Seite. "caption" ist dasselbe Feld, das auch
-  // /api/buildings als Namen zurueckgibt.
+  // Gleiches Formular-Muster wie renameVehicle: echtes Bearbeiten-Formular holen statt
+  // Feldnamen zu raten. Das Namensfeld heisst bei Gebaeuden "building[name]" (Input-ID
+  // "building_name"), nicht "caption" - "caption" ist nur der Name in der /api-Antwort.
   async function renameBuilding(buildingId, newName) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const res = await fetch(`/buildings/${buildingId}/edit`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
+    const html = await res.text();
 
-    const formData = new URLSearchParams();
-    formData.append("utf8", "✓");
-    formData.append("_method", "put");
-    formData.append("authenticity_token", csrfToken);
-    formData.append("building[caption]", newName);
+    const container = document.createElement("div");
+    container.innerHTML = html;
 
-    const res = await fetch(`/buildings/${buildingId}`, {
+    const input =
+      container.querySelector("#building_name") ||
+      container.querySelector('input[type="text"]');
+    const form =
+      container.querySelector(`#edit_building_${buildingId}`) ||
+      container.querySelector("form");
+    if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
+
+    input.value = newName;
+
+    const action = form.getAttribute("action") || form.action;
+    const formData = new FormData(form);
+
+    const res2 = await fetch(action, {
       method: "POST",
+      body: formData,
       credentials: "same-origin",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-CSRF-Token": csrfToken,
         "X-Requested-With": "XMLHttpRequest",
+        Accept: "text/javascript, application/json, */*; q=0.01",
       },
-      body: formData.toString(),
     });
 
-    if (!res.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res.status})`);
+    if (!res2.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res2.status})`);
   }
 
   //////////////////////////////////////////////////

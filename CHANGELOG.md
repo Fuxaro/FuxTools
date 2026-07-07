@@ -9,6 +9,11 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.2.2**
+  - Fix: Wachen/Leitstellen umbenennen hat den neuen Namen nicht gespeichert (falsches
+    Formularfeld). Behoben.
+  - Fix: Krankenhäuser landeten fälschlich in der Kategorie "Sonstiges" – haben jetzt eine
+    eigene Kategorie.
 - **0.2.1**
   - Internes Aufräumen: Skript in klar benannte Abschnitte gegliedert (Konfiguration,
     Speicher, Umbenennen-Engine, Bildschirme je Funktion) – keine funktionalen
