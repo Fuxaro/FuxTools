@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.7**
+  - Fix: Wachen-Check zeigte gar keine Wachen mehr an (Tippfehler beim Umbenennen einer
+    Funktion in 0.3.6).
+  - Wortwahl weiter vereinfacht: Orange = "als nächstes bauen", Grau = "optional".
 - **0.3.6**
   - Wachen-Check: Kategorien sind jetzt auf-/zuklappbar (wie bei der Wachen-Auswahl zum
     Umbenennen), statt einer schwer lesbaren Kopfzeile pro Kategorie.
