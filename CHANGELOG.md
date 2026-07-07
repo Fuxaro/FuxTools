@@ -9,6 +9,14 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.11**
+  - Wachen-Check: Kategorien bleiben jetzt auch beim Sortieren/Suchen immer erhalten
+    (vorher flog man beim Sortieren nach Personal/Werben/Ausbauten komplett aus der
+    Kategorie-Gruppierung raus) - sortiert wird nur noch innerhalb jeder Kategorie.
+  - Hauptmenü: Menüpunkte an das dunkle Theme der Seite angepasst (vorher weißer
+    Bootstrap-Standard-Hintergrund), schmaler statt über die volle Fensterbreite.
+  - Logo im Fenster-Titel lädt jetzt zuverlässig (lag vorher nur auf dem beta-Branch,
+    das Bild-Asset liegt jetzt auch auf main).
 - **0.3.10**
   - Fix: Kategorie-Kopfzeilen im Wachen-Check hatten je nach Position abwechselnd
     unterschiedliche Hintergründe (Zebra-Streifen-Effekt der Tabelle).

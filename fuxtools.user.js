@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.10
+// @version     0.3.11
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,13 +40,15 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.10";
+  const SCRIPT_VERSION = "0.3.11";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
+  // Immer main, unabhaengig vom Kanal - das Logo ist ein reines Bild-Asset ohne
+  // Versionsbezug und liegt deshalb nur auf einem Branch (main), nicht auf beta.
   const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
 
   let modalFooterEl = null;
@@ -572,8 +574,41 @@
     }[c]));
   }
 
+  // Eigene Styles fuer Elemente, die vom dunklen Theme der Seite nicht abgedeckt sind
+  // (z.B. Bootstraps list-group-item ist standardmaessig weiss) - schmal auf unser
+  // Modal begrenzt, um den Rest der Seite nicht zu beeinflussen.
+  function addCustomStyles() {
+    if (document.getElementById("fuxtools-custom-styles")) return;
+    const style = document.createElement("style");
+    style.id = "fuxtools-custom-styles";
+    style.textContent = `
+      #vehicle-naming-modal-body .vn-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        background-color: rgba(255, 255, 255, 0.06);
+        color: inherit;
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+      #vehicle-naming-modal-body .vn-menu-item:hover,
+      #vehicle-naming-modal-body .vn-menu-item:focus {
+        background-color: rgba(255, 255, 255, 0.14);
+        color: inherit;
+      }
+      #vehicle-naming-modal-body .vn-menu-item .glyphicon {
+        font-size: 16px;
+        width: 18px;
+        text-align: center;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   async function initModal() {
     if (document.getElementById(modalId)) return;
+
+    addCustomStyles();
 
     const closeSpan = document.createElement("span");
     closeSpan.setAttribute("aria-hidden", "true");
@@ -696,42 +731,44 @@
       "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
 
     body.innerHTML = `
-      <p>${greeting}</p>
+      <div style="max-width:420px; margin:0 auto;">
+        <p>${greeting}</p>
 
-      <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Fahrzeuge</p>
-      <div class="list-group">
-        <button type="button" class="list-group-item" id="vn-menu-vehicles">
-          <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
-          &nbsp; Fahrzeuge umbenennen
-        </button>
-        <button type="button" class="list-group-item" id="vn-menu-reset">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-          &nbsp; Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
-        </button>
-      </div>
+        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Fahrzeuge</p>
+        <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">
+            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
+            Fahrzeuge umbenennen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">
+            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
+            Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
+          </button>
+        </div>
 
-      <p class="text-muted" style="${sectionLabelStyle}">Wachen &amp; Leitstellen</p>
-      <div class="list-group">
-        <button type="button" class="list-group-item" id="vn-menu-stations">
-          <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
-          &nbsp; Wachen umbenennen
-        </button>
-        <button type="button" class="list-group-item" id="vn-menu-leitstellen">
-          <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
-          &nbsp; Leitstellen umbenennen
-        </button>
-        <button type="button" class="list-group-item" id="vn-menu-station-check">
-          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-          &nbsp; Wachen-Check <span class="text-muted">(Ausbauten, Personal, Werben)</span>
-        </button>
-      </div>
+        <p class="text-muted" style="${sectionLabelStyle}">Wachen &amp; Leitstellen</p>
+        <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">
+            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
+            Wachen umbenennen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">
+            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
+            Leitstellen umbenennen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
+            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
+            Wachen-Check <span class="text-muted">(Ausbauten, Personal, Werben)</span>
+          </button>
+        </div>
 
-      <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
-      <div class="list-group">
-        <button type="button" class="list-group-item" id="vn-menu-settings">
-          <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
-          &nbsp; Einstellungen
-        </button>
+        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
+        <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">
+            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
+            Einstellungen
+          </button>
+        </div>
       </div>
     `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
@@ -1839,16 +1876,17 @@
       extensions: "Ausbauten",
     };
 
+    // Kategorien bleiben IMMER erhalten (sonst verliert man bei vielen Wachen die
+    // Uebersicht) - sortColumn/sortAscending bestimmen nur die Reihenfolge INNERHALB
+    // jeder Kategorie, nicht ob ueberhaupt gruppiert wird.
     function sortedStations() {
-      if (sortColumn === "category") {
-        return [...stations].sort((a, b) => {
-          const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
-          return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
-        });
-      }
-
       const dir = sortAscending ? 1 : -1;
       return [...stations].sort((a, b) => {
+        const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+        if (catDiff !== 0) return catDiff;
+
+        if (sortColumn === "category") return a.name.localeCompare(b.name);
+
         let diff = 0;
         if (sortColumn === "personnel") diff = (a.personnelCount ?? -1) - (b.personnelCount ?? -1);
         else if (sortColumn === "hiring") diff = Number(a.automaticHiring) - Number(b.automaticHiring);
@@ -1881,7 +1919,7 @@
 
       body.querySelectorAll(".vn-check-station-row").forEach(row => {
         const matchesQuery = !query || row.dataset.name.includes(query);
-        const hiddenByCollapse = !query && sortColumn === "category" && collapsedCategories.has(row.dataset.category);
+        const hiddenByCollapse = !query && collapsedCategories.has(row.dataset.category);
         row.style.display = matchesQuery && !hiddenByCollapse ? "" : "none";
       });
 
@@ -1905,7 +1943,7 @@
       const rows = list
         .map(s => {
           let categoryHeaderRow = "";
-          if (sortColumn === "category" && s.category !== currentCategory) {
+          if (s.category !== currentCategory) {
             currentCategory = s.category;
             const countInCategory = list.filter(x => x.category === currentCategory).length;
             categoryHeaderRow = `
