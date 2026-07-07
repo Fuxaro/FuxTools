@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.2
+// @version     0.4.3
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.2";
+  const SCRIPT_VERSION = "0.4.3";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2484,15 +2484,18 @@
     // unveraendert, wird nur voruebergehend ignoriert).
     function applyRowVisibility() {
       const query = document.getElementById("vn-station-check-search")?.value.trim().toLowerCase() || "";
+      const typeFilter = document.getElementById("vn-station-check-type-filter")?.value || "";
+      const filterActive = !!query || !!typeFilter;
 
       body.querySelectorAll(".vn-check-station-row").forEach(row => {
         const matchesQuery = !query || row.dataset.name.includes(query);
-        const hiddenByCollapse = !query && collapsedCategories.has(row.dataset.category);
-        row.style.display = matchesQuery && !hiddenByCollapse ? "" : "none";
+        const matchesType = !typeFilter || row.dataset.type === typeFilter;
+        const hiddenByCollapse = !filterActive && collapsedCategories.has(row.dataset.category);
+        row.style.display = matchesQuery && matchesType && !hiddenByCollapse ? "" : "none";
       });
 
       body.querySelectorAll(".vn-check-category-row").forEach(headerRow => {
-        if (!query) {
+        if (!filterActive) {
           headerRow.style.display = ""; // Kopfzeile bleibt immer sichtbar - sonst nicht mehr aufklappbar
           return;
         }
@@ -2527,7 +2530,8 @@
           }
           return `
             ${categoryHeaderRow}
-            <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-category="${escapeHtml(s.category)}">
+            <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}"
+                data-category="${escapeHtml(s.category)}" data-type="${escapeHtml(s.typeName || "")}">
               <td>
                 <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
                 <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}${s.leitstelleName ? ` · ${escapeHtml(s.leitstelleName)}` : ""}</small>
@@ -2625,6 +2629,10 @@
       applyRowVisibility();
     }
 
+    const typeOptions = [...new Set(stations.map(s => s.typeName).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "de"),
+    );
+
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
         Grün = gebaut und aktiv, Blau = in Bau, Orange = nicht gebaut, aber gefordert, Grau = nicht
@@ -2633,8 +2641,14 @@
         ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch mindestens ein
         geforderter Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
       </p>
-      <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
-             style="margin-bottom:8px;">
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
+               style="flex:1;">
+        <select id="vn-station-check-type-filter" class="form-control" style="max-width:260px;">
+          <option value="">Alle Gebäudetypen</option>
+          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+        </select>
+      </div>
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
           <colgroup>
@@ -2656,6 +2670,7 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-station-check-search").addEventListener("input", applyRowVisibility);
+    document.getElementById("vn-station-check-type-filter").addEventListener("change", applyRowVisibility);
 
     renderTable();
   }

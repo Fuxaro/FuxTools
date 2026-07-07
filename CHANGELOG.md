@@ -9,6 +9,9 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.3**
+  - Wachen-Check: Neues Dropdown zum Filtern nach genauem Gebäudetyp (zusätzlich zur
+    Textsuche und der groben Kategorie).
 - **0.4.2**
   - **Wichtiger Fix**: Ausbaustufen-Bau hat teilweise doppelt abgebucht und zwei Stufen
     auf einmal gebaut statt einer. Ursache: der Bau-Endpunkt antwortet mit einer
