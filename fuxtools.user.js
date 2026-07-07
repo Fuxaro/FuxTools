@@ -253,6 +253,44 @@
     if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
   }
 
+  // Gleiches Formular-Muster wie renameVehicle, nur fuer Gebaeude (Wachen/Leitstellen
+  // sind beides Eintraege der /api/buildings-Liste). Noch nicht live gegen das Spiel
+  // verifiziert (im Gegensatz zu renameVehicle) - falls der Endpunkt anders heisst,
+  // schlaegt es mit einer klaren Fehlermeldung fehl statt still zu versagen.
+  async function renameBuilding(buildingId, newName) {
+    const res = await fetch(`/buildings/${buildingId}/editName`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
+    const html = await res.text();
+
+    const container = document.createElement("div");
+    container.innerHTML = html;
+
+    const input =
+      container.querySelector(`#building_new_name_${buildingId}`) ||
+      container.querySelector('input[type="text"]');
+    const form =
+      container.querySelector(`#building_form_${buildingId}`) ||
+      container.querySelector("form");
+    if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
+
+    input.value = newName;
+
+    const action = form.getAttribute("action") || form.action;
+    const formData = new FormData(form);
+
+    const res2 = await fetch(action, {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "text/javascript, application/json, */*; q=0.01",
+      },
+    });
+
+    if (!res2.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res2.status})`);
+  }
+
   //////////////////////////////////////////////////
   // Modal-Markup (Bootstrap, wie im Wachenbauplaene-Script)
   //////////////////////////////////////////////////
@@ -382,13 +420,13 @@
           <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
           &nbsp; Fahrzeuge zurücksetzen <span class="text-muted">(nur Typname, keine Nummer)</span>
         </button>
-        <button type="button" class="list-group-item disabled" id="vn-menu-stations" disabled>
+        <button type="button" class="list-group-item" id="vn-menu-stations">
           <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
-          &nbsp; Wachen umbenennen <span class="text-muted">(bald verfügbar)</span>
+          &nbsp; Wachen umbenennen
         </button>
-        <button type="button" class="list-group-item disabled" id="vn-menu-leitstellen" disabled>
+        <button type="button" class="list-group-item" id="vn-menu-leitstellen">
           <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
-          &nbsp; Leitstellen umbenennen <span class="text-muted">(bald verfügbar)</span>
+          &nbsp; Leitstellen umbenennen
         </button>
         <button type="button" class="list-group-item" id="vn-menu-settings">
           <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
@@ -404,6 +442,8 @@
       currentMode = "reset";
       renderLeitstelleSelection();
     });
+    document.getElementById("vn-menu-stations").addEventListener("click", renderStationRenameScreen);
+    document.getElementById("vn-menu-leitstellen").addEventListener("click", renderLeitstelleRenameScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
   }
 
@@ -1064,17 +1104,17 @@
     document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
   }
 
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled }) {
+  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
     const body = document.getElementById("vehicle-naming-modal-body");
 
-    // Pro Wache zusammenfassen, statt jedes einzelne Fahrzeug aufzulisten
+    // Pro Wache/Kategorie zusammenfassen, statt jedes einzelne Element aufzulisten
     const perStation = new Map();
     for (const item of plan) {
       perStation.set(item.station, (perStation.get(item.station) || 0) + 1);
     }
     const stationRows = [...perStation.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => `<li>${escapeHtml(name)}: ${count} Fahrzeug(e)</li>`)
+      .map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`)
       .join("");
 
     let errorBlock = "";
@@ -1086,7 +1126,7 @@
     }
 
     const cancelledNote = cancelled
-      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten Fahrzeugen.</p>`
+      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>`
       : "";
 
     const retryButton =
@@ -1101,7 +1141,7 @@
       ${cancelledNote}
       <p>
         <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-        <b>${done} Fahrzeug(e) ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
+        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
         (von ${plan.length} geplant).
       </p>
       <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
@@ -1122,18 +1162,19 @@
     document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     if (failedItems && failedItems.length) {
       document.getElementById("vn-btn-retry").addEventListener("click", () => {
-        executeRenamePlan(failedItems, verb, goBack);
+        executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
       });
     }
   }
 
-  // Versucht ein Fahrzeug umzubenennen, mit einem automatischen zweiten Versuch
-  // bei Fehlern (z.B. kurzer Lag/Verbindungsaussetzer).
-  async function renameVehicleWithRetry(id, newName, maxAttempts = 2) {
+  // Versucht ein Umbenennen, mit einem automatischen zweiten Versuch bei Fehlern
+  // (z.B. kurzer Lag/Verbindungsaussetzer). renameFn ist renameVehicle oder
+  // renameBuilding - dieselbe Retry-Logik fuer beide.
+  async function renameItemWithRetry(renameFn, id, newName, maxAttempts = 2) {
     let lastError;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await renameVehicle(id, newName);
+        await renameFn(id, newName);
         return;
       } catch (e) {
         lastError = e;
@@ -1149,7 +1190,9 @@
   // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
   // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
   // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  async function executeRenamePlan(plan, verb, goBack) {
+  // renameFn/itemNoun erlauben die Wiederverwendung fuer Fahrzeuge, Wachen und
+  // Leitstellen (alle drei sind technisch dasselbe Formular-Umbenennen-Muster).
+  async function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
     const body = document.getElementById("vehicle-naming-modal-body");
     renameCancelled = false;
 
@@ -1187,17 +1230,17 @@
       progressBarEl.style.width = `${Math.round(((i + 1) / plan.length) * 100)}%`;
       progressTextEl.textContent = `${i + 1}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
       try {
-        await renameVehicleWithRetry(item.id, item.newName);
+        await renameItemWithRetry(renameFn, item.id, item.newName);
         done++;
       } catch (e) {
-        console.error("[FuxTools] Fehler bei Fahrzeug", item.id, e);
+        console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
         failedItems.push(item);
-        if (errors.length < 5) errors.push(`Fahrzeug ${item.id} (${item.newName}): ${e.message}`);
+        if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
       }
       if (i < plan.length - 1 && !renameCancelled) await sleep(RENAME_DELAY_MS);
     }
 
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled });
+    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
   }
 
   async function runRenaming(selectedStations) {
@@ -1332,6 +1375,193 @@
     }
 
     await executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
+  }
+
+  //////////////////////////////////////////////////
+  // Wachen umbenennen (nach Kategorie sortiert) und
+  // Leitstellen umbenennen (flache Liste, keine Kategorien)
+  //////////////////////////////////////////////////
+
+  // Ermittelt Leitstellen ueber die leitstelle_building_id-Verweise anderer Gebaeude
+  // (dieselbe Methode wie in renderLeitstelleSelection) - eigenstaendig von den
+  // Fahrzeug-Screens, da hier auch Wachen ohne Fahrzeuge auftauchen sollen.
+  async function loadAllBuildings() {
+    const buildings = await fetchJSON("/api/buildings");
+
+    const leitstelleIds = new Set();
+    for (const b of buildings) {
+      if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
+    }
+
+    const leitstellen = buildings
+      .filter(b => leitstelleIds.has(String(b.id)))
+      .map(b => ({ id: String(b.id), name: b.caption || `Leitstelle ${b.id}` }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const stations = buildings
+      .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
+      .map(b => ({ id: String(b.id), name: b.caption || `Wache ${b.id}`, category: categoryForBuilding(b) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return { leitstellen, stations };
+  }
+
+  // Letzter Bestaetigungsschritt vor dem Umbenennen von Wachen/Leitstellen - zeigt
+  // nur die Anzahl, da hier (anders als bei Fahrzeugen) kein Namens-Baustein-System
+  // existiert, das eine Vorschau bräuchte.
+  function renderBuildingRenameConfirm(plan, verb, goBack, itemNoun) {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>Bereit, <b>${plan.length} ${escapeHtml(itemNoun)}</b> umzubenennen.</p>
+      <div class="form-group">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen
+        </button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-confirm-run").addEventListener("click", () => {
+      executeRenamePlan(plan, verb, () => renderMainMenu(), renameBuilding, itemNoun);
+    });
+  }
+
+  async function renderStationRenameScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p><em>Lade Wachen ...</em></p>`;
+
+    let stations;
+    try {
+      ({ stations } = await loadAllBuildings());
+    } catch (e) {
+      body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
+      return;
+    }
+
+    const byCategory = new Map();
+    for (const s of stations) {
+      if (!byCategory.has(s.category)) byCategory.set(s.category, []);
+      byCategory.get(s.category).push(s);
+    }
+
+    const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat))
+      .map((cat, idx) => {
+        const catStations = byCategory.get(cat);
+        const collapseId = `vn-wache-cat-collapse-${idx}`;
+        const rows = catStations
+          .map(
+            s => `
+          <div class="form-group vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <label style="flex: 0 0 45%; margin:0;">${escapeHtml(s.name)}</label>
+            <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
+            <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
+          </div>`
+          )
+          .join("");
+        return `
+        <div class="panel panel-default" style="margin-bottom: 8px;">
+          <div class="panel-heading" style="padding:8px 12px; cursor:pointer;" data-toggle="collapse" data-target="#${collapseId}">
+            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
+            <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
+          </div>
+          <div id="${collapseId}" class="panel-collapse collapse">
+            <div class="panel-body">${rows}</div>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted">Aktueller Name → neuer Name, nach Art sortiert. Leeres Feld = keine Änderung.</p>
+      ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
+      <div class="form-group" style="margin-top: 14px;">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
+      const plan = [];
+      body.querySelectorAll(".vn-building-row").forEach(row => {
+        const newName = row.querySelector(".vn-building-name-input").value.trim();
+        if (!newName) return;
+        plan.push({
+          id: row.dataset.id,
+          oldName: row.querySelector("label").textContent,
+          newName,
+          station: row.dataset.category,
+        });
+      });
+      if (!plan.length) {
+        alert("Kein neuer Name eingetragen.");
+        return;
+      }
+      renderBuildingRenameConfirm(plan, "umbenannt", renderStationRenameScreen, "Wache(n)");
+    });
+  }
+
+  async function renderLeitstelleRenameScreen() {
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p><em>Lade Leitstellen ...</em></p>`;
+
+    let leitstellen;
+    try {
+      ({ leitstellen } = await loadAllBuildings());
+    } catch (e) {
+      body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
+      return;
+    }
+
+    const rows = leitstellen
+      .map(
+        l => `
+      <div class="form-group vn-building-row" data-id="${l.id}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <label style="flex: 0 0 45%; margin:0;">${escapeHtml(l.name)}</label>
+        <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
+        <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
+      </div>`
+      )
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung. Sortierung nach Art ist bei Leitstellen nicht nötig.</p>
+      ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
+      <div class="form-group" style="margin-top: 14px;">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
+      const plan = [];
+      body.querySelectorAll(".vn-building-row").forEach(row => {
+        const newName = row.querySelector(".vn-building-name-input").value.trim();
+        if (!newName) return;
+        plan.push({
+          id: row.dataset.id,
+          oldName: row.querySelector("label").textContent,
+          newName,
+          station: "Leitstellen",
+        });
+      });
+      if (!plan.length) {
+        alert("Kein neuer Name eingetragen.");
+        return;
+      }
+      renderBuildingRenameConfirm(plan, "umbenannt", renderLeitstelleRenameScreen, "Leitstelle(n)");
+    });
   }
 
   //////////////////////////////////////////////////
