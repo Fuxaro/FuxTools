@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.11
+// @version     0.3.12
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.11";
+  const SCRIPT_VERSION = "0.3.12";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -56,6 +56,20 @@
   let lastUpdateCheckAt = 0;
   const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
   let renameCancelled = false;
+
+  // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
+  // breit fuer den Wachen-Check mit seiner Tabelle - vermeidet leere Flaechen links/
+  // rechts bei einfachen Bildschirmen, ohne die Tabelle einzuquetschen.
+  const MODAL_WIDTH_COMPACT = 520;
+  const MODAL_WIDTH_DEFAULT = 900;
+  const MODAL_WIDTH_WIDE = 1100;
+
+  function setModalWidth(px) {
+    const dialog = document.getElementById("vehicle-naming-modal-dialog");
+    if (!dialog) return;
+    dialog.style.minWidth = `min(${px}px, 95%)`;
+    dialog.style.maxWidth = `min(${px}px, 95%)`;
+  }
 
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
@@ -664,11 +678,14 @@
     modalContent.appendChild(modalFooter);
 
     const modalDialog = document.createElement("div");
+    modalDialog.id = "vehicle-naming-modal-dialog";
     modalDialog.className = "modal-dialog";
     modalDialog.role = "document";
-    modalDialog.style.minWidth = "min(1100px, 95%)";
-    modalDialog.style.maxWidth = "min(1100px, 95%)";
     modalDialog.appendChild(modalContent);
+    // Startbreite direkt am Element setzen (noch nicht im DOM - setModalWidth()
+    // findet es ueber getElementById erst, sobald es angehaengt ist).
+    modalDialog.style.minWidth = `min(${MODAL_WIDTH_COMPACT}px, 95%)`;
+    modalDialog.style.maxWidth = `min(${MODAL_WIDTH_COMPACT}px, 95%)`;
 
     const modal = document.createElement("div");
     modal.className = "modal fade";
@@ -724,6 +741,7 @@
 
   function renderMainMenu() {
     checkForUpdateInBackground(); // gedrosselt, blockiert das Rendern nicht (kein await)
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
@@ -841,6 +859,7 @@
   }
 
   function renderSettingsScreen() {
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
@@ -964,6 +983,7 @@
   // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
   // anderen Tab schon eine neue Version installiert wurde.
   function renderReloadOnlyScreen() {
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `
       <p>
@@ -1008,6 +1028,7 @@
   let selectedLeitstelleIds = [];
 
   async function renderLeitstelleSelection() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen, Wachen &amp; Fahrzeuge ...</em></p>`;
 
@@ -1103,6 +1124,7 @@
   //////////////////////////////////////////////////
 
   function renderStationSelection() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
 
     const stations = allStations.filter(s => selectedLeitstelleIds.includes(s.leitstelleId));
@@ -1239,6 +1261,7 @@
   }
 
   function renderNameForm(selectedStations) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const tpl = getTemplate();
 
@@ -1497,6 +1520,7 @@
   // Beispiel aus dem fertigen Plan und laesst zwischen Umbenennen/Zurueck waehlen,
   // bevor irgendetwas im Spiel geaendert wird.
   function renderRenameConfirmation(selectedStations, plan) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const exampleName = plan.length ? plan[0].newName : "-";
 
@@ -1528,6 +1552,7 @@
   //////////////////////////////////////////////////
 
   function renderResetScreen(selectedStations) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const totalVehicles = selectedStations.reduce((sum, s) => sum + s.vehicles.length, 0);
 
@@ -1602,6 +1627,7 @@
   // nur die Anzahl, da hier (anders als bei Fahrzeugen) kein Namens-Baustein-System
   // existiert, das eine Vorschau bräuchte.
   function renderBuildingRenameConfirm(plan, verb, goBack, itemNoun) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `
       <p>Bereit, <b>${plan.length} ${escapeHtml(itemNoun)}</b> umzubenennen.</p>
@@ -1621,6 +1647,7 @@
   }
 
   async function renderStationRenameScreen() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Wachen ...</em></p>`;
 
@@ -1700,6 +1727,7 @@
   }
 
   async function renderLeitstelleRenameScreen() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen ...</em></p>`;
 
@@ -1846,6 +1874,7 @@
   }
 
   async function renderStationCheckScreen() {
+    setModalWidth(MODAL_WIDTH_WIDE);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
 
@@ -1891,7 +1920,11 @@
         if (sortColumn === "personnel") diff = (a.personnelCount ?? -1) - (b.personnelCount ?? -1);
         else if (sortColumn === "hiring") diff = Number(a.automaticHiring) - Number(b.automaticHiring);
         else if (sortColumn === "extensions") diff = getBuiltExtensionsCount(a) - getBuiltExtensionsCount(b);
-        return (diff !== 0 ? diff : a.name.localeCompare(b.name)) * dir;
+        // Der Namens-Rueckfall bei Gleichstand bleibt bewusst IMMER aufsteigend -
+        // sonst dreht sich bei vielen gleichen Werten (z.B. ueberall "300"/"Ja") nur
+        // die Namensreihenfolge mit der Sortierrichtung, was wie ein kaputter Sortierer
+        // aussieht (nur "dir" auf den eigentlichen Spaltenvergleich anwenden).
+        return diff !== 0 ? diff * dir : a.name.localeCompare(b.name);
       });
     }
 

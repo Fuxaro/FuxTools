@@ -9,6 +9,14 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.12**
+  - Fix: Beim Sortieren nach Personal/Werben drehte sich bei vielen gleichen Werten
+    (z.B. überall "300"/"Ja") nur die Namensreihenfolge mit der Sortierrichtung mit -
+    sah aus wie eine kaputte Sortierung. Der Namens-Rückfall bei Gleichstand bleibt
+    jetzt immer aufsteigend.
+  - Fenster-Breite passt sich jetzt dem Bildschirm an: schmal für Menü/Formulare,
+    breit nur für den Wachen-Check mit seiner Tabelle - keine leeren Flächen mehr auf
+    den einfachen Bildschirmen.
 - **0.3.11**
   - Wachen-Check: Kategorien bleiben jetzt auch beim Sortieren/Suchen immer erhalten
     (vorher flog man beim Sortieren nach Personal/Werben/Ausbauten komplett aus der
