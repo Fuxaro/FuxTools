@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.4.7
+// @version     0.4.8
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.4.7";
+  const SCRIPT_VERSION = "0.4.8";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -55,6 +55,13 @@
   let availableUpdateVersion = null;
   let lastUpdateCheckAt = 0;
   const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  // Gesetzt, sobald irgendwo ein Update-Tab geoeffnet wurde (Update-Button in den
+  // Einstellungen oder "Neuinstallation erzwingen") - beim naechsten Oeffnen von
+  // FuxTools in diesem Tab wird dann einmalig neu geladen, damit garantiert die neue
+  // Version laeuft, falls der User sie im anderen Tab installiert hat. Bewusst kein
+  // sofortiger Reload-Zwang, da der User den Tampermonkey-Dialog im anderen Tab erst
+  // in Ruhe bestaetigen koennen soll.
+  let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
@@ -1123,7 +1130,17 @@
     // Seiten-jQuery ueber unsafeWindow: seit @grant nicht mehr "none" ist, laeuft das
     // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
-    pageJQuery(modal).on("show.bs.modal", () => renderMainMenu());
+    pageJQuery(modal).on("show.bs.modal", () => {
+      // Einmaliger Reload, falls seit dem letzten Oeffnen ein Update-Tab geoeffnet wurde
+      // (siehe pendingReloadAfterUpdate) - stellt sicher, dass eine im anderen Tab
+      // installierte neue Version auch tatsaechlich hier laeuft.
+      if (pendingReloadAfterUpdate) {
+        pendingReloadAfterUpdate = false;
+        location.reload();
+        return;
+      }
+      renderMainMenu();
+    });
 
     // Schliessen waehrend einer laufenden Umbenennung (X oben, Klick daneben, Escape)
     // soll die Umbenennung stoppen statt einfach im Hintergrund weiterzulaufen.
@@ -1233,13 +1250,20 @@
   function renderFooter() {
     if (!modalFooterEl) return;
     const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
+    // Bewusst ein Button statt eines Links: das Update selbst wird ausschliesslich in
+    // den Einstellungen ausgeloest (siehe openUpdateTab) - der Badge hier soll nur
+    // dorthin fuehren, nicht selbst schon einen Tab oeffnen.
     const updateBadge = availableUpdateVersion
-      ? `<a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener" style="color:#d9534f; font-weight:bold;">Update verfügbar (v${escapeHtml(availableUpdateVersion)})</a>`
+      ? `<button type="button" id="vn-footer-update-badge" class="btn btn-link"
+                 style="padding:0; border:0; color:#d9534f; font-weight:bold; font-size:inherit;">
+           Update verfügbar (v${escapeHtml(availableUpdateVersion)})
+         </button>`
       : "";
     // margin-left:auto auf der Versions-Span schiebt sie an den rechten Rand, egal ob
     // der Update-Hinweis davor existiert oder nicht (robuster als space-between mit
     // einem Platzhalter-Element, das je nach Inhalt/Whitespace die Verteilung kippt).
     modalFooterEl.innerHTML = `${updateBadge}<span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
+    document.getElementById("vn-footer-update-badge")?.addEventListener("click", renderSettingsScreen);
   }
 
   async function fetchRemoteVersion() {
@@ -1249,6 +1273,14 @@
     const match = text.match(/@version\s+([\d.]+)/);
     if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
     return match[1];
+  }
+
+  // Einzige Stelle, die tatsaechlich einen Update-Tab oeffnet - sowohl "Jetzt
+  // aktualisieren" als auch "Neuinstallation erzwingen" nutzen diese eine Funktion,
+  // statt das Oeffnen+Reload-Merken jeweils selbst zu duplizieren.
+  function openUpdateTab() {
+    pendingReloadAfterUpdate = true;
+    window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
   }
 
   // Gedrosselter Hintergrund-Check (max. alle UPDATE_CHECK_INTERVAL_MS), wird beim
@@ -1309,7 +1341,8 @@
       <p class="text-muted" style="font-size:11px; margin-top:-4px;">
         Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
         die Versionsnummer nicht geändert hat - praktisch beim Testen auf dem Beta-Kanal, ohne
-        jedes Mal die Version hochzählen zu müssen.
+        jedes Mal die Version hochzählen zu müssen. Öffnet wie "Jetzt aktualisieren" einen Tab und
+        lädt FuxTools hier automatisch neu, sobald du das nächste Mal etwas öffnest.
       </p>
       <div id="vn-update-status" style="margin-top: 10px;"></div>
 
@@ -1373,8 +1406,8 @@
     });
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
-      renderReloadOnlyScreen();
-      window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
+      openUpdateTab();
+      renderUpdateTabOpenedStatus(document.getElementById("vn-update-status"));
     });
 
     document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
@@ -1385,11 +1418,7 @@
 
         if (isNewerVersion(remoteVersion, SCRIPT_VERSION)) {
           availableUpdateVersion = remoteVersion;
-          statusEl.innerHTML = `
-            <span class="text-success"><b>Update verfügbar: v${escapeHtml(remoteVersion)}</b></span><br>
-            <a href="${UPDATE_CHECK_URL}" target="_blank" rel="noopener">Script öffnen, um zu aktualisieren</a>
-            (Tampermonkey zeigt dann den Installations-/Update-Dialog).
-          `;
+          renderUpdateAvailableStatus(statusEl, remoteVersion);
         } else {
           availableUpdateVersion = null;
           statusEl.innerHTML = `<span class="text-success">Du bist bereits aktuell (v${escapeHtml(SCRIPT_VERSION)}).</span>`;
@@ -1399,26 +1428,39 @@
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Suchen nach Updates: ${escapeHtml(e.message)}</span>`;
       }
     });
+
+    // Falls schon von einem frueheren (Hintergrund-)Check bekannt, direkt anzeigen -
+    // man muss dann nicht erst nochmal manuell auf "Nach Updates suchen" klicken.
+    if (availableUpdateVersion) {
+      renderUpdateAvailableStatus(document.getElementById("vn-update-status"), availableUpdateVersion);
+    }
   }
 
-  // Exklusiver Screen nach "Neuinstallation erzwingen": bewusst OHNE andere Buttons
-  // (kein Zurueck, kein Hauptmenue) - erst nach dem Neuladen soll man mit FuxTools
-  // weiterarbeiten, damit man nicht mit der alten Version weitermacht, waehrend im
-  // anderen Tab schon eine neue Version installiert wurde.
-  function renderReloadOnlyScreen() {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>
-        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-        Neuer Tab wird geöffnet - bitte dort die Installation/Aktualisierung in Tampermonkey bestätigen.
-      </p>
-      <p>Lade diese Seite danach neu, um mit der aktuellen Version weiterzumachen:</p>
-      <button id="vn-btn-reload-page" type="button" class="btn btn-warning btn-lg">
-        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
-      </button>
+  // Zeigt "Update verfuegbar" mit einem einzigen "Jetzt aktualisieren"-Button, der
+  // ueber openUpdateTab() den Tab oeffnet - gemeinsam genutzt vom manuellen Update-
+  // Check und vom initialen Zustand (wenn schon ein Hintergrund-Check ein Update kannte).
+  function renderUpdateAvailableStatus(statusEl, version) {
+    statusEl.innerHTML = `
+      <span class="text-success"><b>Update verfügbar: v${escapeHtml(version)}</b></span>
+      <div style="margin-top:6px;">
+        <button id="vn-btn-do-update" type="button" class="btn btn-success btn-sm">
+          <span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> Jetzt aktualisieren
+        </button>
+      </div>
     `;
-    document.getElementById("vn-btn-reload-page").addEventListener("click", () => location.reload());
+    document.getElementById("vn-btn-do-update").addEventListener("click", () => {
+      openUpdateTab();
+      renderUpdateTabOpenedStatus(statusEl);
+    });
+  }
+
+  function renderUpdateTabOpenedStatus(statusEl) {
+    statusEl.innerHTML = `
+      <span class="text-success">
+        Tab geöffnet - bitte dort in Tampermonkey bestätigen. FuxTools lädt hier automatisch
+        neu, sobald du das nächste Mal etwas öffnest.
+      </span>
+    `;
   }
 
   // Verlauf: zeigt alle ueber FuxTools durchgefuehrten Aktionen (Ausbauten, Lagerraeume,

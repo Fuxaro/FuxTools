@@ -9,6 +9,17 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.4.8**
+  - Update-Logik aufgeräumt: der "Update verfügbar"-Hinweis unten im Fenster löst
+    jetzt nichts mehr direkt aus, sondern führt nur noch zu den Einstellungen (dort
+    passiert das eigentliche Update).
+  - **Wichtiger Fix**: Nach einem Update über die Einstellungen lief teilweise
+    weiterhin die alte Version, weil nicht zuverlässig neu geladen wurde. FuxTools
+    merkt sich jetzt, wenn ein Update-Tab geöffnet wurde, und lädt die Seite beim
+    nächsten Öffnen einmalig automatisch neu.
+  - "Nach Updates suchen", "Jetzt aktualisieren" und "Neuinstallation erzwingen"
+    laufen jetzt intern über dieselbe Funktion statt das Öffnen des Update-Tabs an
+    drei Stellen einzeln zu duplizieren.
 - **0.4.7**
   - **Wichtiger Fix**: Wachen-Check sprang nach einem Kauf trotzdem auf die
     Standardansicht zurück statt Suche/Filter/Sortierung beizubehalten (der
