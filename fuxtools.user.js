@@ -8,8 +8,8 @@
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
-// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
-// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
+// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
+// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
 // @run-at      document-idle
 // @grant       GM.setValue
 // @grant       GM.getValue
@@ -41,7 +41,7 @@
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
   const SCRIPT_VERSION = "0.5.0";
-  const CHANNEL = "beta"; // "stable" oder "beta"
+  const CHANNEL = "stable"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
