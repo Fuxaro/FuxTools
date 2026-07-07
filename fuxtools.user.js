@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.12
+// @version     0.3.13
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.12";
+  const SCRIPT_VERSION = "0.3.13";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -187,6 +187,32 @@
     "27": [0, 1, 2], // Schule fuer Seefahrt und Seenotrettung
     "28": [], // Hubschrauberstation (Seenotrettung)
     "29": [], // Autobahnpolizei
+  };
+
+  // Soll-Personal je Pseudo-Gebaeudetyp, aus derselben Community-Skript-Quelle wie
+  // RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID - nur zur Anzeige (aktuell/soll, farbig), keine
+  // automatische Korrektur mehr. Gebaeudetypen ohne Eintrag haben kein Soll-Personal
+  // (z.B. Schulen, Krankenhaus, Leitstelle) und zeigen nur die reine Anzahl.
+  const PERSONNEL_SET_POINT_BY_PSEUDO_ID = {
+    "0": 260, // Feuerwache
+    "2": 80, // Rettungswache
+    "5": 20, // Rettungshubschrauber-Station
+    "6": 80, // Polizeiwache
+    "9": 160, // THW
+    "11": 400, // Bereitschaftspolizei
+    "12": 140, // Schnelleinsatzgruppe (SEG)
+    "13": 30, // Polizeihubschrauberstation
+    "15": 20, // Wasserrettung
+    "17": 110, // Polizei-Sondereinheiten
+    "18": 260, // Feuerwache (Kleinwache)
+    "19": 80, // Polizeiwache (Kleinwache)
+    "20": 80, // Rettungswache (Kleinwache)
+    "21": 40, // Rettungshundestaffel
+    "24": 200, // Reiterstaffel
+    "25": 60, // Bergrettungswache
+    "26": 50, // Seenotrettungswache
+    "28": 6, // Hubschrauberstation (Seenotrettung)
+    "29": 20, // Autobahnpolizei
   };
 
   //////////////////////////////////////////////////
@@ -1819,16 +1845,25 @@
           recommendedExtensions,
           missingExtensions,
           personnelCount: b.personal_count ?? null,
+          personnelSetPoint: pseudoId ? (PERSONNEL_SET_POINT_BY_PSEUDO_ID[pseudoId] ?? null) : null,
           automaticHiring: b.hiring_automatic === true,
         };
       });
   }
 
-  // Ausbau-Badges einer Wache: gruen = gebaut, blau = wird gerade gebaut, orange = als
-  // naechstes bauen (nicht auf der Referenz-Liste aus RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID),
-  // grau = optional (steht auf der Referenz-Liste). Der Name kommt, wenn verfuegbar, aus
-  // dem externen Ausbau-Katalog (siehe initExtensionCatalog) und erscheint als Tooltip
-  // beim Draufhalten mit der Maus.
+  // Personal-Zelle: aktuell nur die reine Anzahl (keine Soll-Wert-Farbe) - Soll-Personal
+  // wird schon geladen (siehe personnelSetPoint), aber bewusst noch nicht angezeigt.
+  // Kann spaeter leicht als farbige aktuell/soll-Anzeige ergaenzt werden.
+  function renderPersonnelCell(station) {
+    return `${station.personnelCount ?? "-"}`;
+  }
+
+  // Ausbau-Badges einer Wache: gruen = gebaut und aktiv, blau = wird gerade gebaut, orange =
+  // nicht gebaut, aber auf der Referenz-Liste aus RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID
+  // ("gefordert"), grau = nicht gebaut und nicht auf der Liste. Bedeutung 1:1 vom
+  // Referenzskript uebernommen. Der Name kommt, wenn verfuegbar, aus dem externen
+  // Ausbau-Katalog (siehe initExtensionCatalog) und erscheint als Tooltip beim
+  // Draufhalten mit der Maus.
   function renderExtensionBadges(station) {
     const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
     const entries = catalogEntries.length
@@ -1852,10 +1887,8 @@
             cssClass = "label-success";
           }
         } else if (recommendedIds.has(entry.id)) {
-          title += " (optional)";
-        } else {
           cssClass = "label-warning";
-          title += " (als nächstes bauen)";
+          title += " (gefordert, noch nicht gebaut)";
         }
         return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
       })
@@ -1997,7 +2030,7 @@
                 <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
                 ${s.leitstelleName ? `<br><small class="text-muted">${escapeHtml(s.leitstelleName)}</small>` : ""}
               </td>
-              <td>${s.personnelCount ?? "-"}</td>
+              <td>${renderPersonnelCell(s)}</td>
               <td>
                 <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">
                   ${s.automaticHiring ? "Ja" : "Nein"}
@@ -2046,16 +2079,22 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Grün = gebaut, Blau = wird gerade gebaut, Orange = als nächstes bauen, Grau = optional.
-        Maus über einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im Spiel
-        zum Bauen (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount} von
-        ${stations.length} Wachen fehlt noch mindestens ein optionaler Ausbau. Spaltenüberschriften
-        sind klickbar zum Sortieren.
+        Grün = gebaut und aktiv, Blau = in Bau, Orange = nicht gebaut, aber gefordert, Grau = nicht
+        gebaut. Maus über einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im
+        Spiel zum Bauen (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount}
+        von ${stations.length} Wachen fehlt noch mindestens ein geforderter Ausbau.
+        Spaltenüberschriften sind klickbar zum Sortieren.
       </p>
       <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
              style="margin-bottom:8px;">
       <div style="max-height:55vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px;">
+        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
+          <colgroup>
+            <col style="width:28%;">
+            <col style="width:10%;">
+            <col style="width:14%;">
+            <col style="width:48%;">
+          </colgroup>
           <thead></thead>
           <tbody></tbody>
         </table>

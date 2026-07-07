@@ -9,6 +9,13 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.13**
+  - Fix: Spaltenbreiten im Wachen-Check verschoben sich je nachdem, welche Kategorie
+    gerade auf-/zugeklappt war (Tabelle passte die Breiten an die sichtbaren Inhalte an) -
+    jetzt feste Spaltenbreiten.
+  - Ausbau-Farben zurück auf die Original-Bedeutung: Grün = gebaut und aktiv, Blau = in
+    Bau, Orange = nicht gebaut, aber gefordert, Grau = nicht gebaut. Direkt aus der
+    offiziellen Erklärung des Referenzskripts übernommen.
 - **0.3.12**
   - Fix: Beim Sortieren nach Personal/Werben drehte sich bei vielen gleichen Werten
     (z.B. überall "300"/"Ja") nur die Namensreihenfolge mit der Sortierrichtung mit -
