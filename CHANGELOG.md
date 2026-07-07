@@ -9,11 +9,16 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
-- **0.3.4**
+- **0.3.5**
   - Wachen-Check: Spaltenüberschriften (Personal, Automat. Werben, Ausbauten) sind jetzt
     anklickbar zum Sortieren, "Wache" springt zurück zur Kategorie-Gruppierung.
   - Wortwahl geschärft: orange markierte Ausbauten heißen jetzt "optional" statt
     "empfohlen" (sie stehen auf einer Empfehlungs-Liste, sind aber nicht verpflichtend).
+  - Fix: Sortier-Pfeil in den Spaltenüberschriften brach in eine zweite Zeile um und
+    machte die Kopfzeile unnötig hoch.
+  - Die Ausbau-/Personal-Richtwerte im Wachen-Check stammen ursprünglich aus dem
+    BSD-3-Clause-lizenzierten Community-Skript "Gebäude- & Fuhrparkverwalter" von
+    BOS-Ernie und Thomas Felber.
 - **0.3.3**
   - Fix: Kategorie-Überschriften im Wachen-Check waren im dunklen Theme kaum lesbar
     (fest einprogrammierter heller Hintergrund) - nutzt jetzt eine Bootstrap-Klasse,

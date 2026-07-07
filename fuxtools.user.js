@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.4
+// @version     0.3.5
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.4";
+  const SCRIPT_VERSION = "0.3.5";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1829,11 +1829,13 @@
 
     function headerHtml(column) {
       const label = columnLabels[column];
-      if (column !== sortColumn) {
-        return `${label} <span class="glyphicon glyphicon-sort text-muted" style="font-size:10px;"></span>`;
-      }
-      const icon = sortAscending ? "glyphicon-sort-by-attributes" : "glyphicon-sort-by-attributes-alt";
-      return `${label} <span class="glyphicon ${icon}" style="font-size:10px;"></span>`;
+      const icon =
+        column !== sortColumn
+          ? "glyphicon-sort text-muted"
+          : sortAscending
+            ? "glyphicon-sort-by-attributes"
+            : "glyphicon-sort-by-attributes-alt";
+      return `<span style="white-space:nowrap;">${label}&nbsp;<span class="glyphicon ${icon}" style="font-size:10px;"></span></span>`;
     }
 
     function applySearchFilter() {
@@ -1891,10 +1893,10 @@
 
       body.querySelector("thead").innerHTML = `
         <tr>
-          <th class="vn-check-sort-header" data-column="category" style="cursor:pointer;">${headerHtml("category")}</th>
-          <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer;">${headerHtml("personnel")}</th>
-          <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer;">${headerHtml("hiring")}</th>
-          <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer;">${headerHtml("extensions")}</th>
+          <th class="vn-check-sort-header" data-column="category" style="cursor:pointer; white-space:nowrap;">${headerHtml("category")}</th>
+          <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer; white-space:nowrap;">${headerHtml("personnel")}</th>
+          <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer; white-space:nowrap;">${headerHtml("hiring")}</th>
+          <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer; white-space:nowrap;">${headerHtml("extensions")}</th>
         </tr>
       `;
       body.querySelector("tbody").innerHTML = rows;
