@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.0
+// @version     0.3.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.0";
+  const SCRIPT_VERSION = "0.3.1";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -94,43 +94,80 @@
     return BUILDING_TYPE_TO_CATEGORY[typeId] ?? "Unbekannt";
   }
 
-  // Soll-Personal und Pflicht-Ausbauten je Gebaeudetyp, uebernommen aus einem bekannten
-  // Community-Skript ("Gebaeude- & Fuhrparkverwalter"). Schluessel: "<building_type>:
-  // <small_building>" - Kleinwachen haben teils andere Sollwerte als ihr normales
-  // Pendant, obwohl beide dieselbe building_type-ID haben. personnelSetPoint: null
-  // bedeutet, der Gebaeudetyp hat kein Soll-Personal (z.B. Schulen, Krankenhaus).
-  const BUILDING_REQUIREMENTS = {
-    "0:false": { personnelSetPoint: 260, extensions: [16, 18, 25] }, // Feuerwache
-    "0:true": { personnelSetPoint: 260, extensions: [18] }, // Feuerwache (Kleinwache)
-    "1:false": { personnelSetPoint: null, extensions: [0, 1, 2] }, // Feuerwehrschule
-    "2:false": { personnelSetPoint: 80, extensions: [] }, // Rettungswache
-    "2:true": { personnelSetPoint: 80, extensions: [] }, // Rettungswache (Kleinwache)
-    "3:false": { personnelSetPoint: null, extensions: [0, 1, 2] }, // Rettungsschule
-    "4:false": { personnelSetPoint: null, extensions: [0, 1, 2, 3, 4, 5, 6, 7, 8] }, // Krankenhaus
-    "5:false": { personnelSetPoint: 20, extensions: [] }, // Rettungshubschrauber-Station
-    "6:false": { personnelSetPoint: 80, extensions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16] }, // Polizeiwache
-    "6:true": { personnelSetPoint: 80, extensions: [0, 1, 12] }, // Polizeiwache (Kleinwache)
-    "8:false": { personnelSetPoint: null, extensions: [0, 1, 2] }, // Polizeischule
-    "9:false": { personnelSetPoint: 160, extensions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15] }, // THW
-    "10:false": { personnelSetPoint: null, extensions: [0, 1, 2] }, // THW Bundesschule
-    "11:false": { personnelSetPoint: 400, extensions: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }, // Bereitschaftspolizei
-    "12:false": { personnelSetPoint: 140, extensions: [0, 1, 3, 4, 5, 6] }, // Schnelleinsatzgruppe (SEG)
-    "13:false": { personnelSetPoint: 30, extensions: [] }, // Polizeihubschrauberstation
-    "15:false": { personnelSetPoint: 20, extensions: [] }, // Wasserrettung
-    "17:false": { personnelSetPoint: 110, extensions: [] }, // Polizei-Sondereinheiten
-    "21:false": { personnelSetPoint: 40, extensions: [] }, // Rettungshundestaffel
-    "24:false": { personnelSetPoint: 200, extensions: [] }, // Reiterstaffel
-    "25:false": { personnelSetPoint: 60, extensions: [0, 1, 2, 3] }, // Bergrettungswache
-    "26:false": { personnelSetPoint: 50, extensions: [] }, // Seenotrettungswache
-    "27:false": { personnelSetPoint: null, extensions: [0, 1, 2] }, // Schule fuer Seefahrt und Seenotrettung
-    "28:false": { personnelSetPoint: 6, extensions: [] }, // Hubschrauberstation (Seenotrettung)
-    "29:false": { personnelSetPoint: 20, extensions: [] }, // Autobahnpolizei
-  };
+  // "Pseudo-Gebaeudetypen": Kleinwachen teilen sich die building_type-ID mit ihrem
+  // normalen Pendant (z.B. Feuerwache/Feuerwache Kleinwache sind beide 0), haben aber
+  // teils andere Pflicht-Ausbauten - deshalb eigene IDs hier, analog zur Nummerierung
+  // die auch die externe Ausbau-Bezeichnungs-Quelle (siehe loadExtensionCatalog) nutzt.
+  const PSEUDO_BUILDING_TYPES = [
+    { id: "0", buildingType: 0, smallBuilding: false },
+    { id: "1", buildingType: 1, smallBuilding: false },
+    { id: "2", buildingType: 2, smallBuilding: false },
+    { id: "3", buildingType: 3, smallBuilding: false },
+    { id: "4", buildingType: 4, smallBuilding: false },
+    { id: "5", buildingType: 5, smallBuilding: false },
+    { id: "6", buildingType: 6, smallBuilding: false },
+    { id: "7", buildingType: 7, smallBuilding: false },
+    { id: "8", buildingType: 8, smallBuilding: false },
+    { id: "9", buildingType: 9, smallBuilding: false },
+    { id: "10", buildingType: 10, smallBuilding: false },
+    { id: "11", buildingType: 11, smallBuilding: false },
+    { id: "12", buildingType: 12, smallBuilding: false },
+    { id: "13", buildingType: 13, smallBuilding: false },
+    { id: "14", buildingType: 14, smallBuilding: false },
+    { id: "15", buildingType: 15, smallBuilding: false },
+    { id: "16", buildingType: 16, smallBuilding: false },
+    { id: "17", buildingType: 17, smallBuilding: false },
+    { id: "18", buildingType: 0, smallBuilding: true },
+    { id: "19", buildingType: 6, smallBuilding: true },
+    { id: "20", buildingType: 2, smallBuilding: true },
+    { id: "21", buildingType: 21, smallBuilding: false },
+    { id: "22", buildingType: 22, smallBuilding: false },
+    { id: "23", buildingType: 23, smallBuilding: false },
+    { id: "24", buildingType: 24, smallBuilding: false },
+    { id: "25", buildingType: 25, smallBuilding: false },
+    { id: "26", buildingType: 26, smallBuilding: false },
+    { id: "27", buildingType: 27, smallBuilding: false },
+    { id: "28", buildingType: 28, smallBuilding: false },
+    { id: "29", buildingType: 29, smallBuilding: false },
+  ];
 
-  function getBuildingRequirements(building) {
-    const key = `${building.building_type}:${!!building.small_building}`;
-    return BUILDING_REQUIREMENTS[key] || null;
+  function getPseudoBuildingTypeId(building) {
+    const entry = PSEUDO_BUILDING_TYPES.find(
+      t => t.buildingType === building.building_type && t.smallBuilding === !!building.small_building,
+    );
+    return entry ? entry.id : null;
   }
+
+  // Pflicht-Ausbauten je Pseudo-Gebaeudetyp, uebernommen aus einem bekannten
+  // Community-Skript ("Gebaeude- & Fuhrparkverwalter"). Nur Gebaeudetypen mit
+  // Eintrag hier werden im Wachen-Check auf fehlende Ausbauten geprueft.
+  const REQUIRED_EXTENSIONS_BY_PSEUDO_ID = {
+    "0": [16, 18, 25], // Feuerwache
+    "1": [0, 1, 2], // Feuerwehrschule
+    "2": [], // Rettungswache
+    "3": [0, 1, 2], // Rettungsschule
+    "4": [0, 1, 2, 3, 4, 5, 6, 7, 8], // Krankenhaus
+    "5": [], // Rettungshubschrauber-Station
+    "6": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16], // Polizeiwache
+    "8": [0, 1, 2], // Polizeischule
+    "9": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15], // THW
+    "10": [0, 1, 2], // THW Bundesschule
+    "11": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Bereitschaftspolizei
+    "12": [0, 1, 3, 4, 5, 6], // Schnelleinsatzgruppe (SEG)
+    "13": [], // Polizeihubschrauberstation
+    "15": [], // Wasserrettung
+    "17": [], // Polizei-Sondereinheiten
+    "18": [18], // Feuerwache (Kleinwache)
+    "19": [0, 1, 12], // Polizeiwache (Kleinwache)
+    "20": [], // Rettungswache (Kleinwache)
+    "21": [], // Rettungshundestaffel
+    "24": [], // Reiterstaffel
+    "25": [0, 1, 2, 3], // Bergrettungswache
+    "26": [], // Seenotrettungswache
+    "27": [0, 1, 2], // Schule fuer Seefahrt und Seenotrettung
+    "28": [], // Hubschrauberstation (Seenotrettung)
+    "29": [], // Autobahnpolizei
+  };
 
   //////////////////////////////////////////////////
   // Speicher ueber Tampermonkey (GM.setValue/GM.getValue) statt IndexedDB.
@@ -154,6 +191,7 @@
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
+    await GM.deleteValue(cacheKeyExtensionCatalog);
 
     // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
     // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
@@ -224,6 +262,34 @@
     for (const [id, vehicle] of Object.entries(types || {})) {
       vehicleTypeCaptions[id] = vehicle.caption;
     }
+  }
+
+  const cacheKeyExtensionCatalog = "extensionCatalog";
+  let extensionCatalogByPseudoId = {};
+  let extensionCatalogLoaded = false;
+
+  // Bezeichnungen der Ausbauten je Gebaeudetyp (fuer Tooltips im Wachen-Check) -
+  // gleiche externe Quelle wie initVehicleTypeCaptions, das Spiel selbst liefert
+  // dafuer keine Namen ueber die eigene API. Wird erst beim ersten Aufruf des
+  // Wachen-Checks geladen, nicht beim Start (nicht jeder nutzt die Funktion).
+  async function initExtensionCatalog() {
+    if (extensionCatalogLoaded) return;
+
+    const cached = await retrieveData(cacheKeyExtensionCatalog);
+    let types = cached?.data;
+    const expirationDate = cached?.expirationDate;
+
+    if (!types || !expirationDate || new Date(expirationDate) < new Date()) {
+      types = await fetchAndStoreData("https://api.lss-manager.de/de_DE/buildings", cacheKeyExtensionCatalog);
+    }
+
+    extensionCatalogByPseudoId = {};
+    for (const [pseudoId, buildingType] of Object.entries(types || {})) {
+      extensionCatalogByPseudoId[pseudoId] = (buildingType.extensions || [])
+        .map((extension, index) => (extension ? { id: index, caption: extension.caption } : null))
+        .filter(Boolean);
+    }
+    extensionCatalogLoaded = true;
   }
 
   async function initNamesStore() {
@@ -632,7 +698,7 @@
         </button>
         <button type="button" class="list-group-item" id="vn-menu-station-check">
           <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-          &nbsp; Wachen-Check <span class="text-muted">(Soll-Personal, Werben, Ausbauten)</span>
+          &nbsp; Wachen-Check <span class="text-muted">(Ausbauten, Personal, Werben)</span>
         </button>
         <button type="button" class="list-group-item" id="vn-menu-settings">
           <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
@@ -1626,12 +1692,11 @@
   }
 
   //////////////////////////////////////////////////
-  // Wachen-Check: Uebersicht + automatische Korrektur von Soll-Personal und
-  // automatischem Werben. Fehlende Ausbauten werden nur angezeigt (mit Link zur
-  // Wache) - das Bauen kostet Spielgeld und wird deshalb bewusst nicht automatisiert.
+  // Wachen-Check: Tabelle je Wache mit Pflicht-Ausbauten (farbige Badges mit Tooltip
+  // zur Namen/Status-Anzeige) sowie aktuellem Personal und automatischem Werben als
+  // reine Info-Spalten. Bauen von Ausbauten kostet Spielgeld und bleibt deshalb ein
+  // manueller Klick zur Wache - keine automatische Aktion in dieser Ansicht.
   //////////////////////////////////////////////////
-
-  let stationCheckCancelled = false;
 
   async function loadBuildingsForCheck() {
     const buildings = await fetchJSON("/api/buildings");
@@ -1640,131 +1705,67 @@
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
+    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
 
     return buildings
       .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
       .map(b => {
-        const requirements = getBuildingRequirements(b);
+        const pseudoId = getPseudoBuildingTypeId(b);
+        const requiredExtensions = pseudoId ? REQUIRED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [] : [];
         const extensions = Array.isArray(b.extensions) ? b.extensions : [];
-        const missingExtensions = requirements
-          ? requirements.extensions.filter(id => !extensions.some(e => e.type_id === id))
-          : [];
-        const hasPersonnelCheck = !!requirements && requirements.personnelSetPoint != null;
+        const missingExtensions = requiredExtensions.filter(id => !extensions.some(e => e.type_id === id));
+        const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
 
         return {
           id: String(b.id),
           name: b.caption || `Wache ${b.id}`,
+          category: categoryForBuilding(b),
+          leitstelleName: leitstelle ? leitstelle.caption : null,
+          pseudoId,
+          extensions,
+          requiredExtensions,
           missingExtensions,
-          personnelSetPoint: hasPersonnelCheck ? requirements.personnelSetPoint : null,
-          personnelMismatch: hasPersonnelCheck && b.personal_count_target !== requirements.personnelSetPoint,
-          missingAutomaticHiring: hasPersonnelCheck && b.hiring_automatic !== true,
+          personnelCount: b.personal_count ?? null,
+          automaticHiring: b.hiring_automatic === true,
         };
       });
   }
 
-  async function fixPersonnelSetPoint(station) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Wache ${station.id}).`);
+  // Ausbau-Badges einer Wache: gruen = vorhanden, blau = wird gerade gebaut, orange =
+  // Pflicht-Ausbau fehlt noch, grau = kein Pflicht-Ausbau. Der Name kommt, wenn
+  // verfuegbar, aus dem externen Ausbau-Katalog (siehe initExtensionCatalog) und
+  // erscheint als Tooltip beim Draufhalten mit der Maus.
+  function renderExtensionBadges(station) {
+    const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
+    const entries = catalogEntries.length
+      ? catalogEntries
+      : station.requiredExtensions.map(id => ({ id, caption: null }));
 
-    const formData = new URLSearchParams();
-    formData.append("utf8", "✓");
-    formData.append("_method", "put");
-    formData.append("authenticity_token", csrfToken);
-    formData.append("building[personal_count_target]", station.personnelSetPoint);
+    if (!entries.length) return '<span class="text-muted">-</span>';
 
-    const res = await fetch(`/buildings/${station.id}?personal_count_target_only=1`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-CSRF-Token": csrfToken,
-        "X-Requested-With": "XMLHttpRequest",
-      },
-      body: formData.toString(),
-    });
+    const requiredIds = new Set(station.requiredExtensions);
 
-    if (!res.ok) throw new Error(`Soll-Personal für Wache ${station.id} fehlgeschlagen (${res.status})`);
-  }
-
-  async function enableAutomaticHiring(station) {
-    const res = await fetch(`/buildings/${station.id}/hire_do/automatic`, { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`Automatisches Werben für Wache ${station.id} fehlgeschlagen (${res.status})`);
-  }
-
-  // Fuehrt eine Korrektur-Aktion (Soll-Personal oder automatisches Werben) auf einer
-  // Liste von Wachen aus - gleiches Fortschrittsbalken-/Abbrechen-Muster wie die
-  // Umbenennen-Engine, aber ohne Namens-Semantik.
-  async function executeStationFixPlan(items, verb, fixFn, itemNoun) {
-    const body = document.getElementById("vehicle-naming-modal-body");
-    stationCheckCancelled = false;
-
-    body.innerHTML = `
-      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
-        <div id="vn-check-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
-        <div id="vn-check-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
-             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
-             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">
-        </div>
-      </div>
-      <button id="vn-btn-cancel-check" type="button" class="btn btn-danger">
-        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-      </button>
-    `;
-    const progressBarEl = document.getElementById("vn-check-progress-bar");
-    const progressTextEl = document.getElementById("vn-check-progress-text");
-    document.getElementById("vn-btn-cancel-check").addEventListener("click", () => {
-      stationCheckCancelled = true;
-    });
-
-    let done = 0;
-    const errors = [];
-    let cancelled = false;
-
-    for (let i = 0; i < items.length; i++) {
-      if (stationCheckCancelled) {
-        cancelled = true;
-        break;
-      }
-      const item = items[i];
-      progressBarEl.style.width = `${Math.round(((i + 1) / items.length) * 100)}%`;
-      progressTextEl.textContent = `${i + 1}/${items.length}: ${item.name}`;
-      try {
-        await fixFn(item);
-        done++;
-      } catch (e) {
-        console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
-        if (errors.length < 5) errors.push(`${item.name}: ${e.message}`);
-      }
-      if (i < items.length - 1 && !stationCheckCancelled) await sleep(RENAME_DELAY_MS);
-    }
-
-    const cancelledNote = cancelled
-      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done} von ${items.length} geplanten Wachen.</p>`
-      : "";
-    const errorBlock = errors.length
-      ? `<p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>
-         <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>`
-      : "";
-
-    body.innerHTML = `
-      ${cancelledNote}
-      <p>
-        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-        <b>${done} von ${items.length} Wache(n): ${itemNoun} ${verb}</b>
-      </p>
-      ${errorBlock}
-      <div class="form-group" style="margin-top: 12px;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
-      </div>
-    `;
-
-    document.getElementById("vn-btn-back").addEventListener("click", renderStationCheckScreen);
-    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+    return entries
+      .map(entry => {
+        const owned = station.extensions.find(e => e.type_id === entry.id);
+        let cssClass = "label-default";
+        let title = entry.caption || `Ausbau ${entry.id}`;
+        if (owned) {
+          if (owned.available_at) {
+            cssClass = "label-primary";
+            title += ` (im Bau, verfügbar ab ${owned.available_at})`;
+          } else {
+            cssClass = "label-success";
+          }
+        } else if (requiredIds.has(entry.id)) {
+          cssClass = "label-warning";
+          title += " (Pflicht-Ausbau, noch nicht gebaut)";
+        } else {
+          title += " (kein Pflicht-Ausbau)";
+        }
+        return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
+      })
+      .join("");
   }
 
   async function renderStationCheckScreen() {
@@ -1773,6 +1774,7 @@
 
     let stations;
     try {
+      await initExtensionCatalog();
       stations = await loadBuildingsForCheck();
     } catch (e) {
       body.innerHTML = `
@@ -1783,89 +1785,57 @@
       return;
     }
 
-    const withMissingExtensions = stations.filter(s => s.missingExtensions.length > 0);
-    const withPersonnelMismatch = stations.filter(s => s.personnelMismatch);
-    const withoutAutomaticHiring = stations.filter(s => s.missingAutomaticHiring);
-    const isPremium = unsafeWindow.user_premium === true;
+    stations.sort((a, b) => a.name.localeCompare(b.name));
+    const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
 
-    const extensionRows = withMissingExtensions
-      .map(
-        s => `<li><a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>:
-          Ausbau-Nr. ${s.missingExtensions.join(", ")} fehlt/fehlen noch</li>`,
-      )
+    const rows = stations
+      .map(s => {
+        const subtitle = [s.category, s.leitstelleName].filter(Boolean).join(" | ");
+        return `
+          <tr>
+            <td>
+              <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a><br>
+              <small class="text-muted">${escapeHtml(subtitle)}</small>
+            </td>
+            <td>${s.personnelCount ?? "-"}</td>
+            <td>
+              <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">
+                ${s.automaticHiring ? "Ja" : "Nein"}
+              </span>
+            </td>
+            <td>${renderExtensionBadges(s)}</td>
+          </tr>
+        `;
+      })
       .join("");
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Vergleicht deine Wachen mit Standard-Sollwerten für Soll-Personal und Pflicht-Ausbauten.
-        Ein Klick auf eine Wache öffnet sie direkt im Spiel zum Bauen (kostet Spielgeld,
-        daher nicht automatisiert).
+        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = Pflicht-Ausbau fehlt noch,
+        Grau = kein Pflicht-Ausbau. Maus über einen Ausbau halten zeigt den Namen. Klick auf eine
+        Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht automatisiert).
+        ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch mindestens einen
+        fehlenden Pflicht-Ausbau.
       </p>
-
-      <div class="panel panel-default">
-        <div class="panel-heading">Fehlende Ausbauten (${withMissingExtensions.length})</div>
-        <div class="panel-body">
-          ${
-            withMissingExtensions.length
-              ? `<ul style="max-height:150px; overflow-y:auto;">${extensionRows}</ul>`
-              : `<p class="text-success">Alle Wachen mit Ausbau-Pflicht sind vollständig ausgebaut.</p>`
-          }
-        </div>
+      <div style="max-height:55vh; overflow:auto;">
+        <table class="table table-condensed table-striped" style="font-size:12px;">
+          <thead>
+            <tr>
+              <th>Wache</th>
+              <th>Personal</th>
+              <th>Automat. Werben</th>
+              <th>Ausbauten</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
       </div>
-
-      <div class="panel panel-default">
-        <div class="panel-heading">Abweichendes Soll-Personal (${withPersonnelMismatch.length})</div>
-        <div class="panel-body">
-          ${
-            withPersonnelMismatch.length
-              ? `<button id="vn-btn-fix-personnel" type="button" class="btn btn-warning btn-sm">
-                   Automatisch korrigieren (${withPersonnelMismatch.length})
-                 </button>`
-              : `<p class="text-success">Überall korrekt gesetzt.</p>`
-          }
-        </div>
-      </div>
-
-      <div class="panel panel-default">
-        <div class="panel-heading">
-          Kein automatisches Werben (${withoutAutomaticHiring.length})
-          <span class="text-muted" style="font-size:11px;">(benötigt Premium)</span>
-        </div>
-        <div class="panel-body">
-          ${
-            !withoutAutomaticHiring.length
-              ? `<p class="text-success">Überall aktiviert.</p>`
-              : isPremium
-                ? `<button id="vn-btn-fix-hiring" type="button" class="btn btn-warning btn-sm">
-                     Automatisch aktivieren (${withoutAutomaticHiring.length})
-                   </button>`
-                : `<p class="text-muted">Benötigt einen Premium-Account.</p>`
-          }
-        </div>
-      </div>
-
       <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
         <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
       </button>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
-
-    const fixPersonnelBtn = document.getElementById("vn-btn-fix-personnel");
-    if (fixPersonnelBtn) {
-      fixPersonnelBtn.addEventListener("click", () => {
-        if (!confirm(`Soll-Personal bei ${withPersonnelMismatch.length} Wache(n) korrigieren?`)) return;
-        executeStationFixPlan(withPersonnelMismatch, "korrigiert", fixPersonnelSetPoint, "Soll-Personal");
-      });
-    }
-
-    const fixHiringBtn = document.getElementById("vn-btn-fix-hiring");
-    if (fixHiringBtn) {
-      fixHiringBtn.addEventListener("click", () => {
-        if (!confirm(`Automatisches Werben bei ${withoutAutomaticHiring.length} Wache(n) aktivieren?`)) return;
-        executeStationFixPlan(withoutAutomaticHiring, "aktiviert", enableAutomaticHiring, "automatisches Werben");
-      });
-    }
   }
 
   //////////////////////////////////////////////////

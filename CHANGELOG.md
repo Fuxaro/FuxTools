@@ -9,12 +9,12 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
-- **0.3.0**
-  - Neuer Menüpunkt "Wachen-Check": vergleicht alle Wachen mit Standard-Sollwerten für
-    Soll-Personal, automatisches Werben und Pflicht-Ausbauten. Soll-Personal und
-    automatisches Werben lassen sich per Knopfdruck korrigieren. Fehlende Ausbauten
-    werden nur angezeigt (mit Link zur Wache) – das Bauen kostet Spielgeld und ist
-    deshalb bewusst nicht automatisiert.
+- **0.3.1**
+  - Neuer Menüpunkt "Wachen-Check": Tabelle mit allen Wachen, zeigt je Wache die
+    Pflicht-Ausbauten als farbige Badges (grün = vorhanden, blau = im Bau, orange =
+    fehlt noch, grau = kein Pflicht-Ausbau) inkl. Name als Tooltip beim Draufhalten,
+    außerdem aktuelles Personal und ob automatisches Werben aktiv ist. Bauen von
+    Ausbauten kostet Spielgeld und bleibt daher ein manueller Klick zur Wache.
   - Fix: Gebäudetyp-Kategorisierung korrigiert (fehlender Gebäudetyp verschob seither
     einige IDs, u.a. war Autobahnpolizei fälschlich bei "Seenotrettung" einsortiert).
 - **0.2.3**
