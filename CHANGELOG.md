@@ -9,6 +9,10 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.8**
+  - Wachen-Check: Bedeutung von Orange/Grau bei den Ausbauten getauscht - Orange =
+    "als nächstes bauen", Grau = "optional" (steht auf der Referenz-Liste, aber nicht
+    dringend).
 - **0.3.7**
   - Fix: Wachen-Check zeigte gar keine Wachen mehr an (Tippfehler beim Umbenennen einer
     Funktion in 0.3.6).

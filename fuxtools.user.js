@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.7
+// @version     0.3.8
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.7";
+  const SCRIPT_VERSION = "0.3.8";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1732,10 +1732,11 @@
       });
   }
 
-  // Ausbau-Badges einer Wache: gruen = vorhanden, blau = wird gerade gebaut, orange =
-  // optional, noch nicht gebaut (steht auf der Empfehlungs-Liste), grau = nicht auf der
-  // Empfehlungs-Liste. Der Name kommt, wenn verfuegbar, aus dem externen Ausbau-Katalog
-  // (siehe initExtensionCatalog) und erscheint als Tooltip beim Draufhalten mit der Maus.
+  // Ausbau-Badges einer Wache: gruen = gebaut, blau = wird gerade gebaut, orange = als
+  // naechstes bauen (nicht auf der Referenz-Liste aus RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID),
+  // grau = optional (steht auf der Referenz-Liste). Der Name kommt, wenn verfuegbar, aus
+  // dem externen Ausbau-Katalog (siehe initExtensionCatalog) und erscheint als Tooltip
+  // beim Draufhalten mit der Maus.
   function renderExtensionBadges(station) {
     const catalogEntries = station.pseudoId ? extensionCatalogByPseudoId[station.pseudoId] || [] : [];
     const entries = catalogEntries.length
@@ -1759,10 +1760,10 @@
             cssClass = "label-success";
           }
         } else if (recommendedIds.has(entry.id)) {
+          title += " (optional)";
+        } else {
           cssClass = "label-warning";
           title += " (als nächstes bauen)";
-        } else {
-          title += " (optional)";
         }
         return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px; cursor:help;">${entry.id}</span>`;
       })
@@ -1946,12 +1947,11 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Grün = Ausbau vorhanden, Blau = wird gerade gebaut, Orange = optional empfohlen, aber noch
-        nicht gebaut, Grau = noch nicht gebaut. Maus über einen Ausbau halten zeigt den Namen.
-        Klick auf eine Wache öffnet sie im Spiel zum Bauen (kostet Spielgeld, daher nicht
-        automatisiert). ${withMissingExtensionsCount} von ${stations.length} Wachen haben noch
-        mindestens einen optionalen, aber noch nicht gebauten Ausbau. Spaltenüberschriften sind
-        klickbar zum Sortieren.
+        Grün = gebaut, Blau = wird gerade gebaut, Orange = als nächstes bauen, Grau = optional.
+        Maus über einen Ausbau halten zeigt den Namen. Klick auf eine Wache öffnet sie im Spiel
+        zum Bauen (kostet Spielgeld, daher nicht automatisiert). ${withMissingExtensionsCount} von
+        ${stations.length} Wachen fehlt noch mindestens ein optionaler Ausbau. Spaltenüberschriften
+        sind klickbar zum Sortieren.
       </p>
       <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
              style="margin-bottom:8px;">
