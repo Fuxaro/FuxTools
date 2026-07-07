@@ -9,6 +9,12 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.3.10**
+  - Fix: Kategorie-Kopfzeilen im Wachen-Check hatten je nach Position abwechselnd
+    unterschiedliche Hintergründe (Zebra-Streifen-Effekt der Tabelle).
+  - Kategorie "Krankenhaus" heißt jetzt "Krankenhäuser & Schulen" und enthält jetzt
+    auch alle Ausbildungsgebäude (Feuerwehr-/Rettungs-/Polizeischule, THW-Bundesschule,
+    Schule für Seefahrt und Seenotrettung) statt sie bei ihrer Fachrichtung zu belassen.
 - **0.3.9**
   - Hauptmenü: Logo im Fenster-Titel, Menüpunkte in Abschnitte gruppiert (Fahrzeuge /
     Wachen &amp; Leitstellen / Sonstiges) für mehr Übersicht.

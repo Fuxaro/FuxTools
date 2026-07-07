@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.3.9
+// @version     0.3.10
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.3.9";
+  const SCRIPT_VERSION = "0.3.10";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -65,14 +65,16 @@
   // offiziellen deutschen Gebaeudetypen-Liste des Spiels. Kleinwachen teilen sich
   // die building_type-ID mit ihrem normalen Pendant (z.B. Feuerwache/Feuerwache
   // Kleinwache sind beide 0) und werden separat ueber "small_building" erkannt -
-  // brauchen deshalb keine eigenen IDs in dieser Liste.
+  // brauchen deshalb keine eigenen IDs in dieser Liste. Schulen (Ausbildungsgebaeude)
+  // stehen zusammen mit dem Krankenhaus in einer eigenen Kategorie statt bei ihrer
+  // jeweiligen Fachrichtung.
   const BUILDING_CATEGORIES = {
-    Feuerwehr: [0, 1],
-    Rettungsdienst: [2, 3, 5, 12, 15, 21, 25],
-    Krankenhaus: [4],
-    Polizei: [6, 8, 11, 13, 17, 24, 29],
-    THW: [9, 10],
-    Seenotrettung: [26, 27, 28],
+    Feuerwehr: [0],
+    Rettungsdienst: [2, 5, 12, 15, 21, 25],
+    "Krankenhäuser & Schulen": [1, 3, 4, 8, 10, 27],
+    Polizei: [6, 11, 13, 17, 24, 29],
+    THW: [9],
+    Seenotrettung: [26, 28],
     Sonstiges: [7, 14, 16, 22, 23],
   };
   const BUILDING_TYPE_TO_CATEGORY = {};
@@ -82,7 +84,7 @@
   const CATEGORY_ORDER = [
     "Feuerwehr",
     "Rettungsdienst",
-    "Krankenhaus",
+    "Krankenhäuser & Schulen",
     "Polizei",
     "THW",
     "Seenotrettung",
@@ -1908,7 +1910,8 @@
             const countInCategory = list.filter(x => x.category === currentCategory).length;
             categoryHeaderRow = `
               <tr class="vn-check-category-row" data-category="${escapeHtml(currentCategory)}"
-                  style="cursor:pointer; border-top:2px solid rgba(128,128,128,0.4);">
+                  style="cursor:pointer; border-top:2px solid rgba(128,128,128,0.4);
+                         background-color:transparent !important;">
                 <td colspan="4" style="padding-top:10px;">
                   <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
                   <b>${escapeHtml(currentCategory)}</b> <span class="text-muted">(${countInCategory})</span>
