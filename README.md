@@ -6,20 +6,41 @@
 
 Willkommen bei FuxTools – meinem ersten Script für [leitstellenspiel.de](https://www.leitstellenspiel.de)!
 
-Ein Tampermonkey-Script zur Wachen- und Fahrzeugverwaltung: Fahrzeuge einer oder mehrerer Wachen
-automatisch und durchnummeriert umbenennen – oder wieder auf den reinen Fahrzeugtyp-Namen
-zurücksetzen. Läuft komplett über die bestehende Spiel-Session, kein API-Key nötig.
+Ein Tampermonkey-Script zur Wachen- und Fahrzeugverwaltung: Fahrzeuge, Wachen und Leitstellen
+automatisch umbenennen, den Ausbau-Stand aller Wachen auf einen Blick prüfen und Ausbauten direkt
+aus dem Script heraus bauen. Läuft komplett über die bestehende Spiel-Session, kein API-Key nötig.
 
 ## Aktuelle Funktionen
 
+**Fahrzeuge**
 - Leitstelle(n) und Wache(n) gezielt auswählen (nach Kategorie sortiert: Feuerwehr,
   Rettungsdienst, Polizei, THW, Seenotrettung, Sonstiges).
 - **Fahrzeuge umbenennen** mit frei kombinierbaren Namens-Bausteinen: Text 1 → Fahrzeugtyp-Name →
   Text 2 → Nummer. Jeder Baustein einzeln an-/abschaltbar; Text 1/Text 2 gelten global für alle
-  ausgewählten Fahrzeugtypen, Start-Nummer und führende Nullen frei wählbar.
-- **Zurücksetzen** aller Fahrzeuge einer Auswahl auf ihren reinen Fahrzeugtyp-Namen.
+  ausgewählten Fahrzeugtypen, Start-Nummer und führende Nullen frei wählbar. Die Bausteine-Vorlage
+  lässt sich jederzeit per Klick auf die Standardeinstellung zurücksetzen.
+- **Fahrzeugnamen zurücksetzen**: alle Fahrzeuge einer Auswahl auf ihren reinen Fahrzeugtyp-Namen
+  zurücksetzen.
 - Einmal vergebene Namen und Bausteine werden gespeichert und beim nächsten Mal vorausgefüllt.
-- Geplant: Wachen und Leitstellen selbst umbenennen.
+- Auch für sehr große Accounts ausgelegt: Fahrzeuge werden seitenweise geladen und mehrere
+  gleichzeitig statt strikt nacheinander umbenannt.
+
+**Wachen & Leitstellen**
+- Wachen und Leitstellen selbst umbenennen.
+- **Wachen-Check**: Tabelle aller Wachen mit Suchfeld und Filter nach Gebäudetyp, zeigt je Wache
+  Personal, automatisches Werben, Ausbauten (farbig nach Status), Ausbaustufe und Lagerräume.
+- Fehlende Ausbauten, Lagerräume und die nächste (oder direkt die höchste) Ausbaustufe lassen sich
+  mit echten Namen und Kosten direkt aus der Tabelle heraus bauen – Credits oder Coins, du
+  entscheidest bei jeder Aktion selbst.
+- Welche Ausbauten je Gebäudetyp als "gefordert" gelten, lässt sich in den Einstellungen anpassen
+  (mit Reset auf die Standard-Empfehlungen).
+
+**Sonstiges**
+- **Verlauf**: Liste aller über FuxTools durchgeführten Aktionen (gebaute Ausbauten/Lagerräume/
+  Ausbaustufen mit Kosten, zusammengefasste Umbenennen-Läufe) mit Datum, Uhrzeit und
+  Script-Version – nur lokal gespeichert.
+- Einstellungen: Kanal-Info, manueller Update-Check, Kanal wechseln (Stable/Beta), Speicher
+  löschen (setzt FuxTools auf den Zustand einer Neuinstallation zurück).
 
 ## Installation
 

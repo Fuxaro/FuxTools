@@ -9,6 +9,17 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.5.1**
+  - **Wichtiger Fix**: Script startete nach dem Sprung auf main nicht mehr (doppelt
+    deklarierte Variablen durch einen fehlerhaft aufgelösten Merge beim Release).
+- **0.5.0**
+  - Fahrzeuge umbenennen: neuer Button "Bausteine zurücksetzen" neben "Fahrzeuge
+    umbenennen" - setzt die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2,
+    Nummer) mit Sicherheitsabfrage auf die Standardeinstellung zurück.
+  - Hauptmenü aufgeräumt: "Fahrzeuge zurücksetzen" heißt jetzt "Fahrzeugnamen
+    zurücksetzen", überflüssige Zusatztexte bei den Menüpunkten entfernt.
+  - Internes Aufräumen: totes/unbenutztes Code entfernt, veraltete Kommentare korrigiert,
+    keine funktionalen Änderungen an bestehenden Funktionen.
 - **0.4.9**
   - Neuer Menüpunkt in den Einstellungen: "Geforderte Ausbauten anpassen" - legt fest,
     welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert" markiert
