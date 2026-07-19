@@ -9,9 +9,94 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.6.11**
+  - Internes Aufräumen, keine sichtbaren Änderungen: totes/unfertiges Code (unbenutzte
+    Soll-Personal-Tabelle, unerreichbarer Fallback in der Verlaufs-Typ-Zuordnung), die
+    alte IndexedDB-Migration aus Vor-0.2.0-Zeiten und ihre Lösch-Logik entfernt sowie
+    mehrfach duplizierten Code zusammengelegt (CSRF-Token-Abruf, Such-/Typ-Filter der
+    drei Tabellen-Bildschirme, doppelte Ausbildungs-Listen der Kleinwachen).
+- **0.6.10**
+  - "Zurück"/"Hauptmenü"-Buttons (Einstellungen, Geforderte Ausbauten anpassen,
+    Personal-Standard anpassen, Personal-Check) bleiben jetzt am unteren Rand des
+    Anzeigebereichs fixiert (sticky), statt dass man bei langen Listen erst dorthin
+    scrollen muss.
+- **0.6.9**
+  - **Fix**: Ausbaustufen-Katalog der Feuerwache ging nur bis Stufe 18, tatsächliches
+    Maximum im Spiel ist Stufe 19 - führte im Wachen-Check zu "Stufe 19 / 18" bei bereits
+    voll ausgebauten Wachen. Katalog um eine Stufe erweitert.
+  - Personal-Check und Personal-Standard-Einstellungen zeigen jetzt keine "Sonstiges"-
+    Gebäude mehr (Leitstelle, Großer/Kleiner Komplex, Verbandszellen, Bereitstellungsraum)
+    - haben wie Krankenhäuser/Schulen kein zuweisbares Personal mit Ausbildungen.
+- **0.6.8**
+  - Ausbildungs-Katalog anhand einer vom User bereitgestellten Referenz-Tabelle
+    gegengeprüft: "NEA200 Fortbildung" (Feuerwache) und "Intensivpflege" (Rettungswache)
+    ergänzt, sowie Kleinwachen (Feuerwache/Polizeiwache/Rettungswache) mit demselben
+    Ausbildungs-Pool wie ihre normale Wache versehen (vorher ganz ohne Katalog-Einträge).
+- **0.6.7**
+  - Einstellungen "Personal-Standard anpassen": fester Katalog, welche Ausbildungen es je
+    Gebäudetyp gibt, macht die Liste jetzt von Anfang an vollständig - nicht mehr abhängig
+    davon, ob die jeweilige Kategorie schon einmal gescannt wurde. Ein Eintrag ist erst
+    bedienbar (Eingabefeld), sobald die zugehörige Ausbildung einmal im Personal-Check
+    gescannt wurde, vorher erscheint er ausgegraut mit Schloss-Symbol.
+  - **Fix**: Personal-Check-Übersicht zeigte in der Spalte "Personal-Ausbildungen" immer
+    "-", solange für den Gebäudetyp nichts als "gefordert" konfiguriert war - auch wenn
+    tatsächlich schon Personal mit entsprechender Ausbildung vorhanden war. Vorhandene
+    Ausbildungen werden jetzt immer als Badge angezeigt, bei 0 gefordert entsprechend rot
+    (z. B. "5/0").
+- **0.6.6**
+  - Einstellungen "Personal-Standard anpassen" komplett überarbeitet: statt einer breiten,
+    grösstenteils leeren Tabelle mit allen Ausbildungen als Spalten für alle Gebäudetypen
+    gibt es jetzt einen Block je Gebäudetyp, der nur die Ausbildungen zeigt, die für diesen
+    Typ tatsächlich schon gescannt wurden (nicht jeder Typ hat jede Ausbildung). Label und
+    Eingabefeld stehen direkt nebeneinander, dadurch bleibt beim Scrollen immer erkennbar,
+    wofür eine Zahl steht - zusätzlich bleibt die Kategorie-Überschrift beim Scrollen oben
+    haften (sticky).
+- **0.6.5**
+  - **Fix**: Einstellungen "Personal-Standard anpassen" füllten die Felder beim ersten
+    Öffnen (bzw. nach "Zurücksetzen auf Standard") noch mit fest hinterlegten
+    Referenz-Werten vor (z. B. 15, 3, 18) statt mit 0. Diese Vorausfüllung wurde komplett
+    entfernt - Standard ist jetzt immer überall 0 (nichts gefordert), jeder Spieler
+    konfiguriert die Soll-Anzahlen selbst.
+- **0.6.4**
+  - Einstellungen "Personal-Standard anpassen" komplett neu als kompakte, nach Kategorie
+    gruppierte Tabelle (Gebäudetypen als Zeilen, Ausbildungen als Spalten) statt vieler
+    einzelner Blöcke.
+  - Direkter Button "Personal-Standard anpassen" jetzt auch im Personal-Check selbst,
+    nicht mehr nur in den Einstellungen.
+  - **Wichtig**: Ohne eigene, gespeicherte Konfiguration ist wieder überall 0 Personal
+    gefordert (Standard) - die Referenz-Werte dienen nur noch als Vorausfüllung beim
+    ersten Öffnen der Einstellungen, werden aber erst nach "Speichern" aktiv.
+  - Ausbildungs-Badges: Grün = genau passend, Gelb = zu wenig, Rot = mehr Personal
+    vorhanden als gefordert (Überbesetzung).
+  - Krankenhäuser und Schulen aus dem Personal-Check entfernt (haben kein zuweisbares
+    Personal).
+- **0.6.3**
+  - Personal-Check: Spalte "Zuletzt gescannt" entfernt (steht bereits pro Kategorie oben),
+    Ausbildungs-Badges zeigen jetzt explizit, wie viel Personal fehlt (z. B. "3/18 (15
+    fehlen)"), und die Tabelle lässt sich nach unvollständigsten Wachen sortieren (Klick
+    auf "Personal-Ausbildungen", Klick auf "Wache" zurück zur Kategorie-Sortierung).
+- **0.6.2**
+  - **Fix**: Personal-Ausbildungen-Spalte im Personal-Check war leer, solange in den
+    Einstellungen noch nichts gespeichert wurde. Die Referenz-Standardwerte gelten jetzt
+    direkt (analog zu den geforderten Ausbauten), bis eine eigene Konfiguration
+    gespeichert wird.
+- **0.6.1**
+  - Personal-Check: neue Spalte "Personal" zeigt je Wache Mitarbeiter gesamt, ohne
+    Ausbildung, verfügbar und im Unterricht. Ausbau-Badges zeigen jetzt zusätzlich die
+    Namen der Personen mit der jeweiligen Ausbildung (als Tooltip beim Draufhalten).
+- **0.6.0**
+  - Neuer Menüpunkt "Personal-Check": prüft je Wache, ob genug Personal mit bestimmten
+    Ausbildungen (z. B. ELW-2-Fahrer) vorhanden ist. Da es dafür keine Sammel-API gibt,
+    startet man den Scan gezielt pro Kategorie (Ergebnisse bleiben bis zum nächsten Scan
+    gespeichert, mit Zeitpunkt des letzten Scans).
+  - Neuer Menüpunkt in den Einstellungen: "Personal-Standard anpassen" - legt je
+    Gebäudetyp und Ausbildung eine Soll-Anzahl fest, mit sinnvollen Vorschlagswerten
+    beim ersten Aufruf.
+  - Änderungen an dieser Konfiguration landen mit Details im Verlauf.
 - **0.5.1**
   - **Wichtiger Fix**: Script startete nach dem Sprung auf main nicht mehr (doppelt
-    deklarierte Variablen durch einen fehlerhaft aufgelösten Merge beim Release).
+    deklarierte Variablen durch einen fehlerhaft aufgelösten Merge beim Release). Beta
+    war davon nicht betroffen, Versionsnummer zur Konsistenz trotzdem mitgezogen.
 - **0.5.0**
   - Fahrzeuge umbenennen: neuer Button "Bausteine zurücksetzen" neben "Fahrzeuge
     umbenennen" - setzt die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2,

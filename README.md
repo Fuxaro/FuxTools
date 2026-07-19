@@ -34,6 +34,9 @@ aus dem Script heraus bauen. Läuft komplett über die bestehende Spiel-Session,
   entscheidest bei jeder Aktion selbst.
 - Welche Ausbauten je Gebäudetyp als "gefordert" gelten, lässt sich in den Einstellungen anpassen
   (mit Reset auf die Standard-Empfehlungen).
+- **Personal-Check**: prüft je Wache, ob genug Personal mit bestimmten Ausbildungen vorhanden ist
+  (z. B. ELW-2-Fahrer). Scan gezielt pro Kategorie startbar, Ergebnisse bleiben bis zum nächsten
+  Scan gespeichert. Soll-Anzahl je Ausbildung und Gebäudetyp in den Einstellungen anpassbar.
 
 **Sonstiges**
 - **Verlauf**: Liste aller über FuxTools durchgeführten Aktionen (gebaute Ausbauten/Lagerräume/

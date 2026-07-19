@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.5.1
+// @version     0.6.11
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
-// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
-// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
+// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
+// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @run-at      document-idle
 // @grant       GM.setValue
 // @grant       GM.getValue
@@ -40,8 +40,8 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.5.1";
-  const CHANNEL = "stable"; // "stable" oder "beta"
+  const SCRIPT_VERSION = "0.6.11";
+  const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
@@ -229,32 +229,6 @@
     "27": [0, 1, 2], // Schule fuer Seefahrt und Seenotrettung
     "28": [], // Hubschrauberstation (Seenotrettung)
     "29": [], // Autobahnpolizei
-  };
-
-  // Soll-Personal je Pseudo-Gebaeudetyp, aus derselben Community-Skript-Quelle wie
-  // RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID - nur zur Anzeige (aktuell/soll, farbig), keine
-  // automatische Korrektur mehr. Gebaeudetypen ohne Eintrag haben kein Soll-Personal
-  // (z.B. Schulen, Krankenhaus, Leitstelle) und zeigen nur die reine Anzahl.
-  const PERSONNEL_SET_POINT_BY_PSEUDO_ID = {
-    "0": 260, // Feuerwache
-    "2": 80, // Rettungswache
-    "5": 20, // Rettungshubschrauber-Station
-    "6": 80, // Polizeiwache
-    "9": 160, // THW
-    "11": 400, // Bereitschaftspolizei
-    "12": 140, // Schnelleinsatzgruppe (SEG)
-    "13": 30, // Polizeihubschrauberstation
-    "15": 20, // Wasserrettung
-    "17": 110, // Polizei-Sondereinheiten
-    "18": 260, // Feuerwache (Kleinwache)
-    "19": 80, // Polizeiwache (Kleinwache)
-    "20": 80, // Rettungswache (Kleinwache)
-    "21": 40, // Rettungshundestaffel
-    "24": 200, // Reiterstaffel
-    "25": 60, // Bergrettungswache
-    "26": 50, // Seenotrettungswache
-    "28": 6, // Hubschrauberstation (Seenotrettung)
-    "29": 20, // Autobahnpolizei
   };
 
   //////////////////////////////////////////////////
@@ -490,7 +464,9 @@
     "0_normal": [
       { id: 0, cost: 10000, coins: 10 },
       { id: 1, cost: 50000, coins: 15 },
-      ...buildUniformLevels(17, 100000, 20).map((l, i) => ({ id: i + 2, cost: l.cost, coins: l.coins })),
+      // Bis Stufe 19 (nicht 18) - bestaetigt durch eine Wache, die im Spiel bereits auf
+      // Stufe 19 stand, waehrend der Katalog hier noch bei 18 endete.
+      ...buildUniformLevels(18, 100000, 20).map((l, i) => ({ id: i + 2, cost: l.cost, coins: l.coins })),
     ],
     "0_small": [
       { id: 0, cost: 10000, coins: 10 },
@@ -584,6 +560,7 @@
     station_rename: "Wachen umbenennen",
     leitstelle_rename: "Leitstellen umbenennen",
     required_extensions_config: "Geforderte Ausbauten",
+    personnel_requirements_config: "Personal-Standard",
   };
 
   async function getHistory() {
@@ -598,12 +575,12 @@
   }
 
   // Ordnet einen Umbenennen-/Reset-Lauf (itemNoun+verb aus executeRenamePlan) einem
-  // Verlaufs-Typ zu.
+  // Verlaufs-Typ zu. itemNoun ist immer eine der drei folgenden Werte (siehe alle
+  // executeRenamePlan-Aufrufstellen).
   function renameHistoryType(itemNoun, verb) {
     if (itemNoun === "Fahrzeug(e)") return verb === "zurückgesetzt" ? "vehicle_reset" : "vehicle_rename";
     if (itemNoun === "Wache(n)") return "station_rename";
-    if (itemNoun === "Leitstelle(n)") return "leitstelle_rename";
-    return "rename";
+    return "leitstelle_rename";
   }
 
   // Ueberschreibt optional, welche Ausbauten je Gebaeudetyp im Wachen-Check als
@@ -621,60 +598,42 @@
     return RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [];
   }
 
+  // Personal-Check: es gibt keine JSON-API fuer Personal-Ausbildungen, nur die HTML-
+  // Seite jeder Wache (/buildings/{id}/personals). Dort traegt jede Personal-Zeile ein
+  // data-filterable-by="[...]"-Attribut mit den Ausbildungs-Slugs dieser Person (z.B.
+  // "elw2"), die "Ausbildung"-Spalte zeigt dazu den Klartext-Namen. Da das pro Wache
+  // eine eigene Anfrage braucht (keine Sammel-API wie bei Gebaeuden), wird bewusst
+  // NICHT automatisch gescannt, sondern nur wenn der User explizit "Scan starten" fuer
+  // eine Kategorie klickt - Ergebnisse bleiben mit Zeitstempel gespeichert, bis der
+  // User erneut scannt.
+  const PERSONNEL_SCAN_KEY = "personnelScanData"; // { [buildingId]: { scannedAt, counts: {slug: count} } }
+  const PERSONNEL_QUALIFICATIONS_KEY = "personnelQualifications"; // { [slug]: displayName }, waechst mit jedem Scan
+  const PERSONNEL_REQUIREMENTS_KEY = "personnelRequirements"; // { [pseudoId]: { [slug]: requiredCount } }
+
+  async function getPersonnelScanData() {
+    return (await retrieveData(PERSONNEL_SCAN_KEY)) || {};
+  }
+
+  async function getPersonnelQualifications() {
+    return (await retrieveData(PERSONNEL_QUALIFICATIONS_KEY)) || {};
+  }
+
+  async function getPersonnelRequirements() {
+    return (await retrieveData(PERSONNEL_REQUIREMENTS_KEY)) || {};
+  }
+
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
-  // Einstellungen, Fahrzeugtyp-Cache, Verlauf, geforderte-Ausbauten-Konfiguration) -
-  // fuer den "Speicher loeschen"-Button in den Einstellungen, simuliert damit den
-  // Zustand einer Neuinstallation.
+  // Einstellungen, Fahrzeugtyp-Cache, Verlauf, geforderte-Ausbauten-/Personal-
+  // Konfiguration inkl. Scan-Daten) - fuer den "Speicher loeschen"-Button in den
+  // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
   async function clearAllStoredData() {
     await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
     await GM.deleteValue(HISTORY_STORAGE_KEY);
     await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
-
-    // Alte IndexedDB (Vor-GM-Speicher-Versionen) ebenfalls loeschen - sonst wuerde
-    // migrateLegacyIndexedDbNames() beim naechsten Start die geraden geloeschten
-    // Namen aus der Legacy-Datenbank wiederherstellen.
-    await new Promise(resolve => {
-      const request = window.indexedDB.deleteDatabase("CustomVehicleNaming");
-      request.onsuccess = () => resolve();
-      request.onerror = () => resolve();
-      request.onblocked = () => resolve();
-    });
-  }
-
-  // Einmalige Migration: alte IndexedDB-Daten (Vor-GM-Speicher-Versionen) uebernehmen,
-  // falls im neuen GM-Speicher noch nichts unter "names" liegt. Laeuft fehlerfrei durch,
-  // auch wenn die alte Datenbank gar nicht existiert (z.B. bei Neuinstallation).
-  async function migrateLegacyIndexedDbNames() {
-    try {
-      const alreadyMigrated = await GM.getValue("names", undefined);
-      if (alreadyMigrated !== undefined) return;
-
-      const db = await new Promise((resolve, reject) => {
-        const request = window.indexedDB.open("CustomVehicleNaming", 1);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve(request.result);
-        request.onupgradeneeded = () => {}; // keine alte DB vorhanden - nichts zu migrieren
-      });
-
-      if (!db.objectStoreNames.contains("main")) {
-        db.close();
-        return;
-      }
-
-      const legacyNames = await new Promise((resolve, reject) => {
-        const tx = db.transaction(["main"], "readonly");
-        const store = tx.objectStore("main");
-        const request = store.get("names");
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      db.close();
-
-      if (legacyNames) await GM.setValue("names", legacyNames);
-    } catch (e) {
-      console.warn("[FuxTools] Migration aus altem IndexedDB-Speicher fehlgeschlagen (ignoriert):", e);
-    }
+    await GM.deleteValue(PERSONNEL_SCAN_KEY);
+    await GM.deleteValue(PERSONNEL_QUALIFICATIONS_KEY);
+    await GM.deleteValue(PERSONNEL_REQUIREMENTS_KEY);
   }
 
   async function fetchAndStoreData(url, key) {
@@ -1013,6 +972,22 @@
     }[c]));
   }
 
+  // Gemeinsame Such-/Typ-Filter-Logik fuer die Tabellen-Bildschirme (Verlauf, Wachen-
+  // Check, Personal-Check): blendet Zeilen anhand von Sucheingabe und Typ-Dropdown ein/
+  // aus, ohne die Tabelle neu aufzubauen. rowSelector matcht die Zeilen, deren
+  // data-[searchField]- und data-type-Attribute verglichen werden.
+  function makeRowVisibilityFilter({ container, searchInputId, typeFilterId, rowSelector, searchField }) {
+    return function applyRowVisibility() {
+      const query = document.getElementById(searchInputId)?.value.trim().toLowerCase() || "";
+      const typeFilter = document.getElementById(typeFilterId)?.value || "";
+      container.querySelectorAll(rowSelector).forEach(row => {
+        const matchesQuery = !query || row.dataset[searchField].includes(query);
+        const matchesType = !typeFilter || row.dataset.type === typeFilter;
+        row.style.display = matchesQuery && matchesType ? "" : "none";
+      });
+    };
+  }
+
   // Eigene Styles fuer Elemente, die vom dunklen Theme der Seite nicht abgedeckt sind
   // (z.B. Bootstraps list-group-item ist standardmaessig weiss) - schmal auf unser
   // Modal begrenzt, um den Rest der Seite nicht zu beeinflussen.
@@ -1050,6 +1025,17 @@
         background-color: #8f2626;
         border-color: #7a2020;
         color: #fff;
+      }
+      /* Haelt Aktions-/Zurueck-Buttons am unteren Rand des Modal-Scrollbereichs fest,
+         statt dass man bei langen Screens erst dorthin scrollen muss. */
+      #vehicle-naming-modal-body .vn-sticky-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        margin-top: 10px;
+        padding: 10px 0 2px;
+        background: #333;
+        border-top: 1px solid rgba(255, 255, 255, 0.15);
       }
     `;
     document.head.appendChild(style);
@@ -1224,6 +1210,10 @@
             <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
             Wachen-Check
           </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">
+            <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
+            Personal-Check
+          </button>
         </div>
 
         <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
@@ -1250,6 +1240,7 @@
     document.getElementById("vn-menu-stations").addEventListener("click", renderStationRenameScreen);
     document.getElementById("vn-menu-leitstellen").addEventListener("click", renderLeitstelleRenameScreen);
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
+    document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
   }
@@ -1387,6 +1378,17 @@
       </button>
 
       <hr>
+      <p><b>Personal-Standard (Personal-Check)</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        Legt fest, wie viel Personal mit welcher Ausbildung je Gebäudetyp im Personal-Check
+        gefordert wird. Ausbildungen müssen vorher mindestens einmal im Personal-Check
+        gescannt worden sein.
+      </p>
+      <button id="vn-btn-personnel-requirements" type="button" class="btn btn-default">
+        <span class="glyphicon glyphicon-user" aria-hidden="true"></span> Personal-Standard anpassen
+      </button>
+
+      <hr>
       <p><b>Speicher löschen</b></p>
       <p class="text-muted" style="font-size:12px;">
         Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
@@ -1397,8 +1399,7 @@
       </button>
       <div id="vn-clear-status" style="margin-top:10px;"></div>
 
-      <hr>
-      <div class="form-group">
+      <div class="vn-sticky-footer">
         <button type="button" id="vn-btn-back" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -1407,6 +1408,7 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
+    document.getElementById("vn-btn-personnel-requirements").addEventListener("click", renderPersonnelRequirementsSettingsScreen);
 
     document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
       const confirmed = confirm(
@@ -1490,7 +1492,7 @@
   // Namen nichts sinnvoll anhaken koennte.
   function requiredExtensionsConfigurableTypes() {
     return PSEUDO_BUILDING_TYPES.map(t => {
-      const buildingKey = `${t.buildingType}_${t.smallBuilding ? "small" : "normal"}`;
+      const buildingKey = getBuildingKey({ building_type: t.buildingType, small_building: t.smallBuilding });
       return {
         pseudoId: t.id,
         buildingKey,
@@ -1520,7 +1522,7 @@
     const groupsHtml = types
       .map(
         t => `
-          <div class="vn-required-ext-group" style="margin-bottom:14px;">
+          <div style="margin-bottom:14px;">
             <p style="font-weight:bold; margin:0 0 4px;">${escapeHtml(t.typeName)}</p>
             <div>
               ${t.extensions
@@ -1550,7 +1552,7 @@
         ${groupsHtml}
       </div>
       <div id="vn-required-ext-status" style="margin-top:6px;"></div>
-      <div class="form-group" style="margin-top:10px;">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-save-required" type="button" class="btn btn-success">
           <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern
         </button>
@@ -1621,15 +1623,13 @@
 
     const history = await getHistory();
 
-    function applyRowVisibility() {
-      const query = document.getElementById("vn-history-search")?.value.trim().toLowerCase() || "";
-      const typeFilter = document.getElementById("vn-history-type-filter")?.value || "";
-      body.querySelectorAll(".vn-history-row").forEach(row => {
-        const matchesQuery = !query || row.dataset.search.includes(query);
-        const matchesType = !typeFilter || row.dataset.type === typeFilter;
-        row.style.display = matchesQuery && matchesType ? "" : "none";
-      });
-    }
+    const applyRowVisibility = makeRowVisibilityFilter({
+      container: body,
+      searchInputId: "vn-history-search",
+      typeFilterId: "vn-history-type-filter",
+      rowSelector: ".vn-history-row",
+      searchField: "search",
+    });
 
     const rows = history
       .map(entry => {
@@ -1673,6 +1673,7 @@
           <option value="station_rename">Wachen umbenennen</option>
           <option value="leitstelle_rename">Leitstellen umbenennen</option>
           <option value="required_extensions_config">Geforderte Ausbauten</option>
+          <option value="personnel_requirements_config">Personal-Standard</option>
         </select>
         <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
       </div>
@@ -2517,9 +2518,14 @@
   // Baut eine einzelne Ausbau/Lager/Stufen-Aktion. currency ist immer "credits" oder
   // "coins" - der Spieler waehlt das in einem Bestaetigungsdialog vor jeder Aktion selbst
   // aus.
-  async function buildExtension(buildingId, extensionId, currency) {
+  function getCsrfTokenOrThrow(buildingId) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    return csrfToken;
+  }
+
+  async function buildExtension(buildingId, extensionId, currency) {
+    const csrfToken = getCsrfTokenOrThrow(buildingId);
     const res = await fetch(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
       method: "POST",
       credentials: "same-origin",
@@ -2532,8 +2538,7 @@
   }
 
   async function buildStorage(buildingId, storageId, currency) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const csrfToken = getCsrfTokenOrThrow(buildingId);
     const res = await fetch(
       `/buildings/${buildingId}/storage_upgrade/${currency}/${storageId}?redirect_building_id=${buildingId}`,
       {
@@ -2549,8 +2554,7 @@
   }
 
   async function buildLevel(buildingId, currency, level) {
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
-    if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
+    const csrfToken = getCsrfTokenOrThrow(buildingId);
     // WICHTIG: redirect "manual" statt des fetch()-Standards "follow". Dieser Endpunkt
     // antwortet bei Erfolg mit einer Weiterleitung (302) - mit "follow" wuerde fetch()
     // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken und
@@ -2611,7 +2615,6 @@
           recommendedExtensions,
           missingExtensions,
           personnelCount: b.personal_count ?? null,
-          personnelSetPoint: pseudoId ? (PERSONNEL_SET_POINT_BY_PSEUDO_ID[pseudoId] ?? null) : null,
           automaticHiring: b.hiring_automatic === true,
           levelCatalog,
           currentLevel,
@@ -2621,9 +2624,8 @@
       });
   }
 
-  // Personal-Zelle: aktuell nur die reine Anzahl (keine Soll-Wert-Farbe) - Soll-Personal
-  // wird schon geladen (siehe personnelSetPoint), aber bewusst noch nicht angezeigt.
-  // Kann spaeter leicht als farbige aktuell/soll-Anzeige ergaenzt werden.
+  // Personal-Zelle: reine Anzahl, ohne Soll-Wert-Vergleich (dafuer gibt es den
+  // Personal-Check mit den eigenen, konfigurierbaren PERSONNEL_REQUIREMENTS_KEY-Werten).
   function renderPersonnelCell(station) {
     return `${station.personnelCount ?? "-"}`;
   }
@@ -2885,16 +2887,13 @@
 
     // Blendet Wachen-Zeilen anhand von Sucheingabe und Typ-Filter ein/aus, ohne die
     // Tabelle neu aufzubauen.
-    function applyRowVisibility() {
-      const query = document.getElementById("vn-station-check-search")?.value.trim().toLowerCase() || "";
-      const typeFilter = document.getElementById("vn-station-check-type-filter")?.value || "";
-
-      body.querySelectorAll(".vn-check-station-row").forEach(row => {
-        const matchesQuery = !query || row.dataset.name.includes(query);
-        const matchesType = !typeFilter || row.dataset.type === typeFilter;
-        row.style.display = matchesQuery && matchesType ? "" : "none";
-      });
-    }
+    const applyRowVisibility = makeRowVisibilityFilter({
+      container: body,
+      searchInputId: "vn-station-check-search",
+      typeFilterId: "vn-station-check-type-filter",
+      rowSelector: ".vn-check-station-row",
+      searchField: "name",
+    });
 
     function renderTable() {
       const list = sortedStations();
@@ -3061,6 +3060,728 @@
   }
 
   //////////////////////////////////////////////////
+  // Personal-Check: prueft je Wache, ob genug Personal mit bestimmten Ausbildungen
+  // vorhanden ist (z.B. ELW-2-Fahrer). Es gibt dafuer keine JSON-API - die Personal-
+  // Seite jeder Wache (/buildings/{id}/personals) wird als HTML geladen und die
+  // Tabelle darin ausgewertet (data-filterable-by-Attribut = Ausbildungs-Slugs pro
+  // Person). Bewusst kein automatischer Scan beim Oeffnen (eine Anfrage PRO Wache
+  // waere bei vielen Wachen zu langsam) - der User startet ihn gezielt pro Kategorie.
+  //////////////////////////////////////////////////
+
+  const PERSONNEL_SCAN_CONCURRENCY = 5;
+
+  async function loadPersonnelCheckStations() {
+    const buildings = await fetchJSON("/api/buildings");
+    const leitstelleIds = new Set();
+    for (const b of buildings) {
+      if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
+    }
+    return buildings
+      .filter(
+        b =>
+          !leitstelleIds.has(String(b.id)) &&
+          categoryForBuilding(b) !== "Unbekannt" &&
+          // Krankenhaeuser und Schulen haben kein zuweisbares Personal (nur Betten
+          // bzw. Lehrgaenge), "Sonstiges" (Leitstelle, Komplexe, Verbandszellen,
+          // Bereitstellungsraum) hat ebenfalls kein Personal mit Ausbildungen - fuer den
+          // Personal-Check ohne Bedeutung.
+          categoryForBuilding(b) !== "Krankenhäuser & Schulen" &&
+          categoryForBuilding(b) !== "Sonstiges",
+      )
+      .map(b => {
+        const pseudoId = getPseudoBuildingTypeId(b);
+        const buildingKey = getBuildingKey(b);
+        return {
+          id: String(b.id),
+          name: b.caption || `Wache ${b.id}`,
+          category: categoryForBuilding(b),
+          typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
+          pseudoId,
+        };
+      });
+  }
+
+  // Liest jede Personal-Zeile aus der HTML-Personalseite einer Wache aus: Name, die
+  // Ausbildungs-Slugs (data-filterable-by), den Klartext-Namen der Ausbildung (Spalte
+  // "Ausbildung" - nur eindeutig, wenn die Person genau einen Slug hat) und den Status
+  // (Spalte "Status", z.B. "Verfügbar" oder "Im Unterricht"). Liefert ALLE Zeilen, auch
+  // Personen ganz ohne Ausbildung, damit sich Gesamtzahlen berechnen lassen.
+  function parsePersonalPageHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const rows = doc.querySelectorAll("#personal_table tbody tr");
+    const entries = [];
+    rows.forEach(row => {
+      let slugs;
+      try {
+        slugs = JSON.parse(row.dataset.filterableBy || "[]");
+      } catch {
+        slugs = [];
+      }
+      if (!Array.isArray(slugs)) slugs = [];
+      const name = row.children[1]?.textContent.trim() || "";
+      const educationText = row.children[2]?.textContent.trim() || "";
+      const statusText = row.children[4]?.textContent.trim() || "";
+      entries.push({ slugs, name, educationText, statusText });
+    });
+    return entries;
+  }
+
+  async function fetchPersonalPage(buildingId) {
+    const res = await fetch(`/buildings/${buildingId}/personals`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Fehler beim Laden von Personal (Gebäude ${buildingId}): ${res.status}`);
+    return await res.text();
+  }
+
+  // Scannt alle Wachen einer Kategorie (Concurrency begrenzt, wie beim Umbenennen
+  // grosser Fahrzeugmengen) und speichert je Wache die Ausbildungs-Anzahl pro Slug samt
+  // Zeitstempel. Neu entdeckte Slug->Name-Zuordnungen werden dauerhaft mitgesammelt.
+  async function scanPersonnelForCategory(category, onProgress) {
+    const stations = (await loadPersonnelCheckStations()).filter(s => s.category === category);
+    const scanData = await getPersonnelScanData();
+    const qualifications = await getPersonnelQualifications();
+
+    let nextIndex = 0;
+    let finished = 0;
+    async function worker() {
+      while (nextIndex < stations.length) {
+        const station = stations[nextIndex++];
+        try {
+          const html = await fetchPersonalPage(station.id);
+          const entries = parsePersonalPageHtml(html);
+          const counts = {};
+          const names = {};
+          let withoutEducation = 0;
+          let available = 0;
+          let inTraining = 0;
+          entries.forEach(({ slugs, name, educationText, statusText }) => {
+            if (!slugs.length) withoutEducation++;
+            if (statusText.includes("Unterricht")) inTraining++;
+            else if (statusText.includes("Verfügbar")) available++;
+            slugs.forEach(slug => {
+              counts[slug] = (counts[slug] || 0) + 1;
+              if (name) (names[slug] || (names[slug] = [])).push(name);
+              if (!qualifications[slug] && slugs.length === 1 && educationText) {
+                qualifications[slug] = educationText;
+              }
+            });
+          });
+          scanData[station.id] = {
+            scannedAt: Date.now(),
+            counts,
+            names,
+            total: entries.length,
+            withoutEducation,
+            available,
+            inTraining,
+          };
+        } catch (e) {
+          console.warn("[FuxTools] Personal-Scan fehlgeschlagen für Wache", station.id, e);
+        }
+        finished++;
+        onProgress?.(finished, stations.length);
+      }
+    }
+    const workerCount = Math.min(PERSONNEL_SCAN_CONCURRENCY, stations.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+    await storeData(scanData, PERSONNEL_SCAN_KEY);
+    await storeData(qualifications, PERSONNEL_QUALIFICATIONS_KEY);
+    return stations.length;
+  }
+
+  // Zeigt je Wache, ob genug Personal mit den in den Einstellungen GESPEICHERTEN
+  // Ausbildungs-Anforderungen vorhanden ist. Ohne eigene, gespeicherte Konfiguration ist
+  // ueberall 0 gefordert (Standard). Badges erscheinen aber nicht nur fuer konfigurierte
+  // Anforderungen, sondern auch fuer jede tatsaechlich vorhandene Ausbildung (have > 0) -
+  // sonst wuerde bereits vorhandenes Personal mit Ausbildung bei "0 gefordert" komplett
+  // unter den Tisch fallen ("-" statt z.B. "5/0").
+  // Gruen = genau passend, Gelb = zu wenig, Rot = mehr als gefordert (ueberbesetzt, auch
+  // bei 0 gefordert), Grau = fuer diesen Gebaeudetyp weder etwas gefordert noch vorhanden,
+  // "Nicht gescannt" = noch keine Scan-Daten vorhanden. Die Namen der Personen mit der
+  // jeweiligen Ausbildung stehen im Tooltip (title).
+  function renderPersonnelBadges(station, requirements, qualifications, scanData) {
+    const scan = scanData[station.id];
+    if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
+
+    const req = requirements[station.pseudoId] || {};
+    const slugs = new Set([
+      ...Object.keys(req).filter(slug => req[slug] > 0),
+      ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0),
+    ]);
+
+    const badges = [...slugs]
+      .sort((a, b) => (qualifications[a] || a).localeCompare(qualifications[b] || b, "de"))
+      .map(slug => {
+        const required = req[slug] || 0;
+        const have = scan.counts[slug] || 0;
+        const name = qualifications[slug] || slug;
+        const namesList = (scan.names?.[slug] || []).join(", ");
+        const title = namesList ? `${name}: ${namesList}` : name;
+
+        let cssClass;
+        let label;
+        if (have < required) {
+          cssClass = "label-warning";
+          label = `${name} ${have}/${required} (${required - have} fehlen)`;
+        } else if (have === required) {
+          cssClass = "label-success";
+          label = `${name} ${have}/${required}`;
+        } else {
+          cssClass = "label-danger";
+          label = `${name} ${have}/${required} (${have - required} zu viel)`;
+        }
+        return `<span class="label ${cssClass}" style="margin:1px;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+      });
+    return badges.join(" ") || '<span class="text-muted">-</span>';
+  }
+
+  // Kompakte Personal-Gesamtuebersicht einer Wache (gesamt / ohne Ausbildung /
+  // verfuegbar / im Unterricht), analog zu einer im Forum gesehenen Referenz - eigene,
+  // kompakte Umsetzung im FuxTools-Stil statt einer grossen Detail-Ansicht.
+  function renderPersonnelOverview(station, scanData) {
+    const scan = scanData[station.id];
+    if (!scan) return '<span class="text-muted">-</span>';
+    return `
+      <div>${scan.total} gesamt</div>
+      <div class="text-muted">${scan.withoutEducation} ohne Ausbildung</div>
+      <div class="text-muted">${scan.available} verfügbar · ${scan.inTraining} im Unterricht</div>
+    `;
+  }
+
+  async function renderPersonalCheckScreen() {
+    setModalWidth(MODAL_WIDTH_WIDE);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
+
+    let stations;
+    try {
+      stations = await loadPersonnelCheckStations();
+    } catch (e) {
+      body.innerHTML = `
+        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>
+        <button id="vn-btn-back" type="button" class="btn btn-default">Hauptmenü</button>
+      `;
+      document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+      return;
+    }
+
+    let scanData = await getPersonnelScanData();
+    const requirements = await getPersonnelRequirements();
+    const qualifications = await getPersonnelQualifications();
+
+    function categoryLastScan(category) {
+      let latest = null;
+      stations
+        .filter(s => s.category === category)
+        .forEach(s => {
+          const t = scanData[s.id]?.scannedAt;
+          if (t && (!latest || t > latest)) latest = t;
+        });
+      return latest;
+    }
+
+    const applyRowVisibility = makeRowVisibilityFilter({
+      container: body,
+      searchInputId: "vn-personnel-search",
+      typeFilterId: "vn-personnel-type-filter",
+      rowSelector: ".vn-personnel-row",
+      searchField: "name",
+    });
+
+    // Summe der fehlenden Personen ueber alle geforderten Ausbildungen einer Wache -
+    // Grundlage fuer "nach unvollstaendigen Wachen sortieren". Nicht gescannte Wachen
+    // zaehlen als am unvollstaendigsten (unbekannt = zuerst pruefen), Wachen ohne
+    // Anforderung als am vollstaendigsten (0).
+    function personnelMissingCount(station) {
+      const req = requirements[station.pseudoId] || {};
+      const entries = Object.entries(req).filter(([, required]) => required > 0);
+      if (!entries.length) return 0;
+      const scan = scanData[station.id];
+      if (!scan) return Number.MAX_SAFE_INTEGER;
+      return entries.reduce((sum, [slug, required]) => sum + Math.max(0, required - (scan.counts[slug] || 0)), 0);
+    }
+
+    // "category" (Standard, nach Kategorie+Name) oder "missing" (nach fehlendem
+    // Personal) - umschaltbar ueber Klick auf die Spaltenueberschriften.
+    let sortColumn = "category";
+    let sortAscending = true;
+
+    function sortedStations() {
+      const dir = sortAscending ? 1 : -1;
+      return [...stations].sort((a, b) => {
+        if (sortColumn === "category") {
+          const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+          return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
+        }
+        const diff = personnelMissingCount(b) - personnelMissingCount(a);
+        return diff !== 0 ? diff * dir : a.name.localeCompare(b.name);
+      });
+    }
+
+    function sortIcon(column) {
+      if (column !== sortColumn) return "glyphicon-sort text-muted";
+      return sortAscending ? "glyphicon-sort-by-attributes" : "glyphicon-sort-by-attributes-alt";
+    }
+
+    function renderTable() {
+      const list = sortedStations();
+
+      const rows = list
+        .map(s => {
+          return `
+            <tr class="vn-personnel-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-type="${escapeHtml(s.typeName || "")}">
+              <td>
+                <a href="/buildings/${s.id}/personals" target="_blank">${escapeHtml(s.name)}</a>
+                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}</small>
+              </td>
+              <td><small>${renderPersonnelOverview(s, scanData)}</small></td>
+              <td>${renderPersonnelBadges(s, requirements, qualifications, scanData)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+
+      document.getElementById("vn-personnel-results-body").innerHTML = rows;
+      body.querySelector("#vn-personnel-header-wache .glyphicon").className = `glyphicon ${sortIcon("category")}`;
+      body.querySelector("#vn-personnel-header-ausbildungen .glyphicon").className = `glyphicon ${sortIcon("missing")}`;
+      applyRowVisibility();
+    }
+
+    const typeOptions = [...new Set(stations.map(s => s.typeName).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, "de"),
+    );
+
+    const categoryRows = CATEGORY_ORDER.filter(cat => cat !== "Unbekannt" && stations.some(s => s.category === cat))
+      .map(cat => {
+        const lastScan = categoryLastScan(cat);
+        const lastScanLabel = lastScan ? new Date(lastScan).toLocaleString("de-DE") : "Noch nie gescannt";
+        return `
+          <tr data-category="${escapeHtml(cat)}">
+            <td>${escapeHtml(cat)}</td>
+            <td><small class="text-muted vn-personnel-scan-status">${escapeHtml(lastScanLabel)}</small></td>
+            <td>
+              <button type="button" class="btn btn-xs btn-primary vn-personnel-scan-btn" data-category="${escapeHtml(cat)}">
+                <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan starten
+              </button>
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Prüft je Wache, ob genug Personal mit bestimmten Ausbildungen vorhanden ist. Grün =
+        genau passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
+        Da es dafür keine Sammel-API gibt, musst du pro Kategorie einen Scan starten -
+        Ergebnisse bleiben bis zum nächsten Scan gespeichert.
+      </p>
+      <button type="button" id="vn-personnel-goto-settings" class="btn btn-default btn-sm" style="margin-bottom:12px;">
+        <span class="glyphicon glyphicon-cog" aria-hidden="true"></span> Personal-Standard anpassen
+      </button>
+      <table class="table table-condensed" style="font-size:12px; margin-bottom:16px;">
+        <thead><tr><th>Kategorie</th><th>Letzter Scan</th><th></th></tr></thead>
+        <tbody>${categoryRows}</tbody>
+      </table>
+
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <select id="vn-personnel-type-filter" class="form-control" style="max-width:260px;">
+          <option value="">Alle Gebäudetypen</option>
+          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
+        </select>
+        <input type="text" id="vn-personnel-search" class="form-control" placeholder="Wache suchen ..." style="flex:1;">
+      </div>
+      <div style="max-height:45vh; overflow:auto;">
+        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
+          <colgroup>
+            <col style="width:25%;">
+            <col style="width:18%;">
+            <col style="width:57%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th id="vn-personnel-header-wache" style="cursor:pointer; white-space:nowrap;">
+                Wache <span class="glyphicon ${sortIcon("category")}" style="font-size:10px;"></span>
+              </th>
+              <th>Personal</th>
+              <th id="vn-personnel-header-ausbildungen" style="cursor:pointer; white-space:nowrap;">
+                Personal-Ausbildungen <span class="glyphicon ${sortIcon("missing")}" style="font-size:10px;"></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="vn-personnel-results-body"></tbody>
+        </table>
+      </div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-personnel-search").addEventListener("input", applyRowVisibility);
+    document.getElementById("vn-personnel-type-filter").addEventListener("change", applyRowVisibility);
+    document
+      .getElementById("vn-personnel-goto-settings")
+      .addEventListener("click", renderPersonnelRequirementsSettingsScreen);
+    document.getElementById("vn-personnel-header-wache").addEventListener("click", () => {
+      sortColumn = "category";
+      sortAscending = true;
+      renderTable();
+    });
+    document.getElementById("vn-personnel-header-ausbildungen").addEventListener("click", () => {
+      if (sortColumn === "missing") {
+        sortAscending = !sortAscending;
+      } else {
+        sortColumn = "missing";
+        sortAscending = true;
+      }
+      renderTable();
+    });
+
+    body.querySelectorAll(".vn-personnel-scan-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const category = btn.dataset.category;
+        const row = btn.closest("tr");
+        const statusEl = row.querySelector(".vn-personnel-scan-status");
+        btn.disabled = true;
+        try {
+          const total = await scanPersonnelForCategory(category, (done, of) => {
+            statusEl.textContent = `Scanne ${done}/${of} ...`;
+          });
+          scanData = await getPersonnelScanData();
+          statusEl.textContent = total
+            ? new Date().toLocaleString("de-DE")
+            : "Keine Wachen in dieser Kategorie";
+          renderTable();
+        } catch (e) {
+          statusEl.textContent = `Fehler: ${e.message}`;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    renderTable();
+  }
+
+  // Fest hinterlegter Katalog, welche Ausbildungen es je Gebaeudetyp ueberhaupt gibt (nur
+  // Namen, keine Vorschlagswerte) - macht die Liste im Einstellungs-Screen von Anfang an
+  // vollstaendig, statt sie erst nach und nach durch Scannen aufzubauen. Ein Feld wird erst
+  // bedienbar, sobald der zugehoerige echte Slug (data-filterable-by) einmal beim Scannen
+  // entdeckt wurde - siehe normalizeQualificationName()/nameToSlug unten. Quelle: vom User
+  // bereitgestellte Referenz-Tabelle (nur Ausbildungen mit "max. Personal" > 0 je Typ).
+  // Kleinwachen (18/19/20) nutzen denselben Ausbildungs-Pool wie ihre normale Wache
+  // (0/6/2) - die Referenz-Tabelle listet sie nicht separat auf. Deshalb hier einmal
+  // definiert und unten fuer beide Pseudo-IDs je Paar referenziert, statt dupliziert.
+  const FEUERWACHE_QUALIFICATION_NAMES = [
+    "Bahnrettung",
+    "Dekon-P-Lehrgang",
+    "Drohnen-Schulung",
+    "ELW 2 Lehrgang",
+    "Feuerwehr-Verpflegungseinheit",
+    "Feuerwehrkran Lehrgang",
+    "GW-Gefahrgut Lehrgang",
+    "GW-Messtechnik Lehrgang",
+    "Höhenrettung Lehrgang",
+    "NEA200 Fortbildung",
+    "Verpflegungshelfer",
+    "Wechsellader Lehrgang",
+  ];
+  const POLIZEIWACHE_QUALIFICATION_NAMES = [
+    "Autobahnpolizei",
+    "Dienstgruppenleitung",
+    "Kriminalpolizei",
+    "Motorradstaffel",
+  ];
+  const RETTUNGSWACHE_QUALIFICATION_NAMES = [
+    "Intensivpflege",
+    "LNA-Ausbildung",
+    "Notarzt-Ausbildung",
+    "OrgL-Ausbildung",
+  ];
+
+  const KNOWN_QUALIFICATION_NAMES_BY_PSEUDO_ID = {
+    "11": [
+      // Bereitschaftspolizei
+      "Hundertschaftsführer (FüKW)",
+      "Lautsprecheroperator",
+      "MEK",
+      "Reiterstaffel",
+      "SEK",
+      "Wasserwerfer",
+      "Zugführer (leBefKw)",
+    ],
+    "25": [
+      // Bergrettungswache
+      "Einsatzleiter Bergrettung",
+      "Höhenretter",
+      "Notarzt-Ausbildung",
+      "Rettungshundeführer",
+    ],
+    "0": FEUERWACHE_QUALIFICATION_NAMES,
+    "18": FEUERWACHE_QUALIFICATION_NAMES, // Feuerwache (Kleinwache)
+    "6": POLIZEIWACHE_QUALIFICATION_NAMES,
+    "19": POLIZEIWACHE_QUALIFICATION_NAMES, // Polizeiwache (Kleinwache)
+    "13": [
+      // Polizeihubschrauberstation
+      "Polizeihubschrauber",
+      "Windenoperator",
+    ],
+    "2": RETTUNGSWACHE_QUALIFICATION_NAMES,
+    "20": RETTUNGSWACHE_QUALIFICATION_NAMES, // Rettungswache (Kleinwache)
+    "5": [
+      // Rettungshubschrauber-Station
+      "Notarzt-Ausbildung",
+      "Windenoperator",
+    ],
+    "12": [
+      // Schnelleinsatzgruppe (SEG)
+      "Betreuungsdienst",
+      "Drohnenoperator",
+      "GW-Taucher Lehrgang",
+      "GW-Wasserrettung Lehrgang",
+      "Rettungshundeführer",
+      "SEG - Einsatzleitung",
+      "SEG - GW-San",
+      "Verpflegungshelfer",
+    ],
+    "26": [
+      // Seenotrettungswache
+      "Seenotretter",
+    ],
+    "28": [
+      // Hubschrauberstation (Seenotrettung)
+      "Hubschrauberpilot (Seenotrettung)",
+      "Wasserrettungsausbildung für Notfallsanitäter",
+      "Windenoperator",
+    ],
+    "9": [
+      // THW
+      "Fachgruppe Bergungstaucher",
+      "Fachgruppe Brückenbau",
+      "Fachgruppe Elektroversorgung",
+      "Fachgruppe Räumen",
+      "Fachgruppe Rettungshundeführer",
+      "Fachgruppe Schwere Bergung",
+      "Fachgruppe Wassergefahren",
+      "Fachgruppe Wasserschaden/Pumpen",
+      "Fachzug Führung und Kommunikation",
+      "Kranführer",
+      "Logistik-Verpflegung",
+      "Trupp Unbemannte Luftfahrtsysteme",
+      "Verpflegungshelfer",
+      "Zugtrupp",
+    ],
+    "15": [
+      // Wasserrettung
+      "GW-Taucher Lehrgang",
+      "GW-Wasserrettung Lehrgang",
+    ],
+  };
+
+  function normalizeQualificationName(name) {
+    return (name || "")
+      .toLowerCase()
+      .replace(/\s*(lehrgang|ausbildung|fortbildung|schulung)\s*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // Einstellungen > "Personal-Standard anpassen": pro Gebaeudetyp eine Soll-Anzahl je
+  // Ausbildung. Die Liste je Gebaeudetyp kommt aus dem festen Katalog oben, ergaenzt um
+  // ggf. zusaetzlich entdeckte, dort noch nicht gelistete Ausbildungen. Bedienbar (echtes
+  // Eingabefeld) ist ein Eintrag erst, sobald der echte Slug bekannt ist - vorher nur als
+  // gesperrter Hinweis sichtbar.
+  async function renderPersonnelRequirementsSettingsScreen() {
+    setModalWidth(MODAL_WIDTH_WIDE);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade ...</p>`;
+
+    const requirements = await getPersonnelRequirements();
+    const qualifications = await getPersonnelQualifications();
+    const scanData = await getPersonnelScanData();
+    const stations = await loadPersonnelCheckStations();
+
+    // Nach Kategorie gruppiert (wie im Wachen-Check/Personal-Check), statt alphabetisch
+    // durcheinander - macht die grosse Anzahl an Gebaeudetypen ueberschaubarer.
+    const types = Object.keys(BUILDING_TYPE_NAMES)
+      .map(buildingKey => {
+        const [buildingTypeStr, size] = buildingKey.split("_");
+        const entry = PSEUDO_BUILDING_TYPES.find(
+          t => t.buildingType === Number(buildingTypeStr) && t.smallBuilding === (size === "small"),
+        );
+        if (!entry) return null;
+        const category = categoryForBuilding({
+          building_type: entry.buildingType,
+          small_building: entry.smallBuilding,
+        });
+        return { pseudoId: entry.id, typeName: BUILDING_TYPE_NAMES[buildingKey], category };
+      })
+      // Krankenhaeuser/Schulen und "Sonstiges" haben kein zuweisbares Personal - siehe
+      // loadPersonnelCheckStations().
+      .filter(t => t && t.category !== "Krankenhäuser & Schulen" && t.category !== "Sonstiges")
+      .sort((a, b) => {
+        const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
+        return catDiff !== 0 ? catDiff : a.typeName.localeCompare(b.typeName, "de");
+      });
+
+    // Ohne gespeicherte Konfiguration ist der Standard ueberall 0 (nichts gefordert) -
+    // jeder Spieler konfiguriert die Soll-Anzahlen selbst.
+    function currentValue(pseudoId, slug) {
+      return requirements[pseudoId]?.[slug] ?? 0;
+    }
+
+    // Ausbildungs-Slugs, die je Wache beim Scannen tatsaechlich gefunden wurden - dient
+    // dazu, bekannte Katalog-Namen mit ihrem echten Slug zu verknuepfen (nur dann ist ein
+    // Feld bedienbar) und um zusaetzlich entdeckte, im Katalog noch fehlende Ausbildungen
+    // zu ergaenzen.
+    const slugsByPseudoId = {};
+    for (const station of stations) {
+      const scan = scanData[station.id];
+      if (!scan) continue;
+      const set = slugsByPseudoId[station.pseudoId] || (slugsByPseudoId[station.pseudoId] = new Set());
+      Object.keys(scan.counts).forEach(slug => set.add(slug));
+    }
+
+    // Normalisierter Name -> Slug, aus allen bisher entdeckten Ausbildungen (ueber alle
+    // Gebaeudetypen hinweg entdeckt, siehe getPersonnelQualifications()).
+    const nameToSlug = {};
+    for (const [slug, name] of Object.entries(qualifications)) {
+      nameToSlug[normalizeQualificationName(name)] = slug;
+    }
+
+    // Ein Block je Gebaeudetyp (Ausbildung direkt neben dem zugehoerigen Feld) statt einer
+    // breiten Tabelle - Label und Zahl bleiben beim Scrollen immer zusammen sichtbar, die
+    // Kategorie-Ueberschrift bleibt beim Scrollen oben haengen (sticky).
+    const groups = [];
+    let lastCategory = null;
+    for (const t of types) {
+      if (t.category !== lastCategory) {
+        lastCategory = t.category;
+        groups.push(`
+          <div style="font-weight:bold; background:#333; padding:4px 6px; position:sticky; top:0; z-index:1;">
+            ${escapeHtml(lastCategory)}
+          </div>
+        `);
+      }
+
+      // Kombinierte Liste: fester Katalog (auch ohne bekannten Slug) + zusaetzlich
+      // entdeckte Ausbildungen, die im Katalog (noch) nicht stehen.
+      const entries = new Map(); // normalisierter Name -> { name, slug|null }
+      (KNOWN_QUALIFICATION_NAMES_BY_PSEUDO_ID[t.pseudoId] || []).forEach(name => {
+        const key = normalizeQualificationName(name);
+        entries.set(key, { name, slug: nameToSlug[key] || null });
+      });
+      [...(slugsByPseudoId[t.pseudoId] || [])].forEach(slug => {
+        const name = qualifications[slug] || slug;
+        const key = normalizeQualificationName(name);
+        if (!entries.has(key)) entries.set(key, { name, slug });
+      });
+      const sortedEntries = [...entries.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+      const fields = sortedEntries.length
+        ? sortedEntries
+            .map(({ name, slug }) =>
+              slug
+                ? `
+                <label style="display:flex; align-items:center; gap:4px; margin:2px 12px 2px 0; font-weight:normal;">
+                  <span style="font-size:11px;">${escapeHtml(name)}</span>
+                  <input type="number" min="0" class="form-control input-sm vn-personnel-req-input"
+                         data-pseudo-id="${t.pseudoId}" data-slug="${slug}"
+                         value="${currentValue(t.pseudoId, slug)}" style="width:55px;">
+                </label>
+              `
+                : `
+                <span class="text-muted" style="display:inline-flex; align-items:center; gap:3px;
+                     margin:2px 12px 2px 0; font-size:11px;"
+                     title="Wird bedienbar, sobald diese Ausbildung im Personal-Check einmal gescannt wurde.">
+                  ${escapeHtml(name)} <span class="glyphicon glyphicon-lock" style="font-size:9px;"></span>
+                </span>
+              `,
+            )
+            .join("")
+        : `<span class="text-muted" style="font-size:11px;">
+             Für diesen Gebäudetyp sind keine Ausbildungen bekannt.
+           </span>`;
+      groups.push(`
+        <div style="padding:5px 6px; border-bottom:1px solid rgba(255,255,255,0.08);">
+          <div style="white-space:nowrap; margin-bottom:3px;">${escapeHtml(t.typeName)}</div>
+          <div style="display:flex; flex-wrap:wrap; align-items:center;">${fields}</div>
+        </div>
+      `);
+    }
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Soll-Anzahl je Ausbildung, sortiert nach Gebäudetyp - nicht jeder Typ hat jede
+        Ausbildung. Ausgegraute Einträge (<span class="glyphicon glyphicon-lock" style="font-size:9px;"></span>)
+        werden bedienbar, sobald sie im Personal-Check einmal gescannt wurden. 0 = nichts
+        gefordert. Änderungen gelten erst nach "Speichern".
+      </p>
+      <div style="max-height:60vh; overflow:auto;">${groups.join("")}</div>
+      <div id="vn-personnel-req-status" style="margin-top:6px;"></div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-save-personnel-req" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern
+        </button>
+        <button id="vn-btn-reset-personnel-req" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Zurücksetzen auf Standard
+        </button>
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderSettingsScreen);
+
+    document.getElementById("vn-btn-save-personnel-req").addEventListener("click", async () => {
+      const newRequirements = {};
+      for (const t of types) newRequirements[t.pseudoId] = {};
+      body.querySelectorAll(".vn-personnel-req-input").forEach(input => {
+        const value = Math.max(0, parseInt(input.value, 10) || 0);
+        if (value > 0) newRequirements[input.dataset.pseudoId][input.dataset.slug] = value;
+      });
+
+      const changes = [];
+      for (const t of types) {
+        const before = requirements[t.pseudoId] || {};
+        const after = newRequirements[t.pseudoId];
+        const parts = [];
+        for (const slug of new Set([...Object.keys(before), ...Object.keys(after)])) {
+          const b = before[slug] || 0;
+          const a = after[slug] || 0;
+          if (a !== b) parts.push(`${qualifications[slug] || slug}: ${b}→${a}`);
+        }
+        if (parts.length) changes.push(`${t.typeName}: ${parts.join(", ")}`);
+      }
+
+      await storeData(newRequirements, PERSONNEL_REQUIREMENTS_KEY);
+      if (changes.length) {
+        await logHistoryEntry({ type: "personnel_requirements_config", label: changes.join(" · ") });
+      }
+      document.getElementById("vn-personnel-req-status").innerHTML =
+        '<span class="text-success">Gespeichert.</span>';
+    });
+
+    document.getElementById("vn-btn-reset-personnel-req").addEventListener("click", async () => {
+      const confirmed = confirm("Eigene Einstellung löschen und auf 0 (nichts gefordert) zurücksetzen?");
+      if (!confirmed) return;
+      const hadRequirements = Object.keys(requirements).length > 0;
+      await GM.deleteValue(PERSONNEL_REQUIREMENTS_KEY);
+      if (hadRequirements) {
+        await logHistoryEntry({
+          type: "personnel_requirements_config",
+          label: "Zurückgesetzt auf 0",
+        });
+      }
+      renderPersonnelRequirementsSettingsScreen();
+    });
+  }
+
+  //////////////////////////////////////////////////
   // Main
   //////////////////////////////////////////////////
 
@@ -3070,7 +3791,6 @@
       "color:#337ab7; font-weight:bold;",
       "color:inherit; font-weight:normal;"
     );
-    await migrateLegacyIndexedDbNames();
     await Promise.all([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
     addMenuEntry();
     checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
