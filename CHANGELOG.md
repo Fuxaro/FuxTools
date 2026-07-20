@@ -6,9 +6,59 @@ hochgezählt – **und nur nach Rücksprache**, d. h. bevor z. B. auf `0.2.0` ho
 das vorher abgestimmt. Der Sprung auf `1.0.0` markiert den ersten stabilen Release und wird
 ebenfalls erst nach Absprache gesetzt.
 
+**Stand 2026-07-20:** Ab jetzt bumpt Claude nur noch die letzte Ziffer (Patch), auch bei neuen
+Funktionen - die mittlere Ziffer (Minor) und `1.0.0` bleiben ausschließlich Fuxaro selbst
+vorbehalten, damit wir nicht ungewollt in Richtung `1.0` rutschen.
+
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.9.4**
+  - Fahrzeug-Besatzung: die roten Knöpfe für nicht passende Fahrzeuge sind wieder eine
+    normale Tabelle (wie überall sonst im Script) - und nur noch EINE gemeinsame Liste
+    unter allen Kategorien statt einer je Kategorie.
+- **0.9.3**
+  - Neu: "Wachen-Baupläne" (Einstellungen) - Vorlagen, wie eine Wache eines bestimmten Typs
+    ausgebaut/ausgestattet sein soll (Ausbauten, Fahrzeuge+Anzahl, Sollpersonal - Personal
+    wird automatisch aus den Fahrzeugen berechnet). Je Bauplan "Anwenden" zeigt alle
+    passenden Wachen (optional per Namensfilter/Regex eingeschränkt, z.B. Normalwache vs.
+    Werkfeuerwehr) mit Soll/Ist-Vergleich für Ausbauten (direkt baubar), Fahrzeuge (Link zum
+    Kauf - noch nicht automatisiert) und Personal (Verweis auf Fahrzeug-Besatzung/
+    Schulungen). Konzept/Datenmodell vom Community-Script "Wachenbaupläne" (BOS-Ernie)
+    übernommen, Personal-Bedarf nutzt aber unsere eigene, an echten Teil-Anforderungen
+    korrekte Berechnung.
+  - Fahrzeug-Besatzung: Layout aufgeräumt (Kategorie-Buttons jetzt in einer Linie, Minimum/
+    Volle-Besatzung-Buttons mit sichtbarem Abstand statt zusammengeklebt).
+- **0.9.2**
+  - Bugfix Fahrzeug-Besatzung: "vollständig besetzt"-Prüfung konnte bei Fahrzeugen ohne
+    zugewiesene Person fälschlich "passt" melden (leere Liste erfüllt ".every()" immer) -
+    jetzt wird explizit verlangt, dass überhaupt jemand zugewiesen ist.
+  - Fahrzeug-Besatzung überarbeitet: keine lange Tabelle aller Fahrzeuge mehr (bei vielen
+    Fahrzeugen unübersichtlich) - stattdessen nur noch anklickbare Links zu Fahrzeugen, die
+    nach der Prüfung nicht passen (direkter Sprung ins Fahrzeug im Spiel).
+  - Neue Einstellung direkt im Bildschirm: bei Fahrzeugen mit Teil-Anforderung (z.B. GRTW/NAW,
+    nur 1 von 6 mit Notarzt-Ausbildung) wählbar, ob nur das echte Minimum oder gleich die
+    volle Besatzung mit der Ausbildung belegt wird - sichtbar markiert, was aktiv ist.
+- **0.9.1**
+  - Fahrzeug-Besatzung überarbeitet: die Fahrzeugtyp→Ausbildungs-Zuordnung kommt jetzt direkt
+    aus dem ohnehin geladenen Fahrzeug-Katalog (api.lss-manager.de) statt aus einer von Hand
+    gepflegten, teils ungenauen Liste - dadurch jetzt korrekt auch Fahrzeuge, bei denen nur
+    EIN TEIL der Besatzung die Ausbildung braucht (z.B. GRTW/NAW: nur 1 von 6 mit Notarzt-
+    Ausbildung, statt fälschlich alle 6) sowie Fahrzeuge mit MEHREREN Anforderungen
+    gleichzeitig (z.B. GW-Verpflegung/GW-Küche). Fahrzeuge, deren Ausbildung nur am
+    Einsatzort (nicht in der eigenen Besatzung) gebraucht wird (z.B. Dekon-P), werden nicht
+    mehr fälschlich einbezogen.
+  - Statt eines Buttons pro einzelnem Fahrzeug (bei vielen Fahrzeugen unübersichtlich) gibt es
+    jetzt EINEN "Alle ... prüfen & zuweisen"-Button je Kategorie (Feuerwehr/Rettungsdienst/
+    Polizei/...), der alle betroffenen Fahrzeuge der Kategorie nacheinander abarbeitet.
+- **0.9.0**
+  - Neu: "Fahrzeug-Besatzung" im Hauptmenü. Zeigt Fahrzeugtypen, deren Besatzung KOMPLETT
+    eine bestimmte Ausbildung braucht (z.B. ELW 2), weist freie Plätze mit verfügbarem,
+    passend ausgebildetem Personal zu und setzt danach automatisch den Fahrzeugstatus: FMS 6
+    (nicht besetzt), wenn die Besatzung nicht vollständig passt, sonst FMS 2 (frei auf
+    Funk) - Fahrzeuge im Einsatz werden dabei nie angefasst. Verhindert außerdem, dass
+    bereits zugewiesenes, ausgebildetes Personal versehentlich einem anderen Fahrzeug
+    zugeteilt wird.
 - **0.8.3**
   - Bugfix: FuxTools startete gar nicht mehr (Absturz beim allerersten Öffnen). Der neue
     "Beenden"-Button im Fußbereich wurde per `document.getElementById` gesucht, bevor das
