@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.6.11
+// @version     0.8.3
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.6.11";
+  const SCRIPT_VERSION = "0.8.3";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -561,6 +561,7 @@
     leitstelle_rename: "Leitstellen umbenennen",
     required_extensions_config: "Geforderte Ausbauten",
     personnel_requirements_config: "Personal-Standard",
+    schooling_start: "Schulung gestartet",
   };
 
   async function getHistory() {
@@ -602,16 +603,26 @@
   // Seite jeder Wache (/buildings/{id}/personals). Dort traegt jede Personal-Zeile ein
   // data-filterable-by="[...]"-Attribut mit den Ausbildungs-Slugs dieser Person (z.B.
   // "elw2"), die "Ausbildung"-Spalte zeigt dazu den Klartext-Namen. Da das pro Wache
-  // eine eigene Anfrage braucht (keine Sammel-API wie bei Gebaeuden), wird bewusst
-  // NICHT automatisch gescannt, sondern nur wenn der User explizit "Scan starten" fuer
-  // eine Kategorie klickt - Ergebnisse bleiben mit Zeitstempel gespeichert, bis der
-  // User erneut scannt.
-  const PERSONNEL_SCAN_KEY = "personnelScanData"; // { [buildingId]: { scannedAt, counts: {slug: count} } }
+  // eine eigene Anfrage braucht (keine Sammel-API wie bei Gebaeuden), scannt ein Lauf
+  // IMMER alle Kategorien zusammen (schnell genug), nicht mehr einzeln - siehe
+  // scanAllPersonnel(). Wird automatisch angestossen, wenn der letzte Scan laut
+  // PERSONNEL_SCAN_META_KEY laenger als PERSONNEL_SCAN_STALE_MS her ist (siehe
+  // ensureFreshPersonnelScan()), zusaetzlich jederzeit manuell ausloesbar.
+  const PERSONNEL_SCAN_KEY = "personnelScanData"; // { [buildingId]: { counts, names, total, ... } }
+  const PERSONNEL_SCAN_META_KEY = "personnelScanMeta"; // { lastScanAt: timestamp } - EIN Zeitstempel fuer alle Kategorien
   const PERSONNEL_QUALIFICATIONS_KEY = "personnelQualifications"; // { [slug]: displayName }, waechst mit jedem Scan
   const PERSONNEL_REQUIREMENTS_KEY = "personnelRequirements"; // { [pseudoId]: { [slug]: requiredCount } }
+  // Mindest-Personalstaerke (scan.total) einer Wache, bevor Schulungen (siehe unten) ueberhaupt
+  // Personal von ihr einplant - schuetzt frisch gebaute/kleine Wachen mit wenig Personal davor,
+  // sofort leergeraeumt zu werden. 0 = Standard = keine Einschraenkung.
+  const PERSONNEL_SCHOOLING_MIN_STAFF_KEY = "personnelSchoolingMinStaff";
 
   async function getPersonnelScanData() {
     return (await retrieveData(PERSONNEL_SCAN_KEY)) || {};
+  }
+
+  async function getPersonnelScanMeta() {
+    return (await retrieveData(PERSONNEL_SCAN_META_KEY)) || {};
   }
 
   async function getPersonnelQualifications() {
@@ -622,18 +633,56 @@
     return (await retrieveData(PERSONNEL_REQUIREMENTS_KEY)) || {};
   }
 
+  async function getPersonnelSchoolingMinStaff() {
+    return (await retrieveData(PERSONNEL_SCHOOLING_MIN_STAFF_KEY)) || 0;
+  }
+
+  // Alle von FuxTools angelegten GM-Speicher-Eintraege - EINZIGE Quelle dieser Liste,
+  // genutzt fuer "Speicher loeschen" UND fuer Einstellungen exportieren/importieren
+  // (siehe renderSettingsScreen). vehicleTypes bewusst NICHT enthalten: reiner, jederzeit
+  // neu ladbarer API-Cache, keine echte Einstellung.
+  const ALL_SETTINGS_KEYS = [
+    "names",
+    HISTORY_STORAGE_KEY,
+    CUSTOM_REQUIRED_EXTENSIONS_KEY,
+    PERSONNEL_SCAN_KEY,
+    PERSONNEL_SCAN_META_KEY,
+    PERSONNEL_QUALIFICATIONS_KEY,
+    PERSONNEL_REQUIREMENTS_KEY,
+    PERSONNEL_SCHOOLING_MIN_STAFF_KEY,
+  ];
+
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
   // Einstellungen, Fahrzeugtyp-Cache, Verlauf, geforderte-Ausbauten-/Personal-
   // Konfiguration inkl. Scan-Daten) - fuer den "Speicher loeschen"-Button in den
   // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
   async function clearAllStoredData() {
-    await GM.deleteValue("names");
     await GM.deleteValue(cacheKeyVehicleTypes);
-    await GM.deleteValue(HISTORY_STORAGE_KEY);
-    await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
-    await GM.deleteValue(PERSONNEL_SCAN_KEY);
-    await GM.deleteValue(PERSONNEL_QUALIFICATIONS_KEY);
-    await GM.deleteValue(PERSONNEL_REQUIREMENTS_KEY);
+    for (const key of ALL_SETTINGS_KEYS) await GM.deleteValue(key);
+  }
+
+  // Buendelt alle Einstellungen (siehe ALL_SETTINGS_KEYS) in ein JSON-Objekt, fuer den
+  // "Herunterladen"-Button in den Einstellungen (Backup vor Neuinstallation o.ae.).
+  async function exportAllSettings() {
+    const data = {};
+    for (const key of ALL_SETTINGS_KEYS) {
+      const value = await GM.getValue(key, undefined);
+      if (value !== undefined) data[key] = value;
+    }
+    return { fuxtools: true, version: SCRIPT_VERSION, exportedAt: Date.now(), data };
+  }
+
+  // Gegenstueck zu exportAllSettings(): schreibt nur bekannte Schluessel (ALL_SETTINGS_KEYS)
+  // zurueck - ignoriert alles andere in der Datei, statt beliebige Schluessel zu uebernehmen.
+  async function importAllSettings(parsed) {
+    if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") {
+      throw new Error("Datei hat kein gültiges FuxTools-Einstellungen-Format.");
+    }
+    for (const key of ALL_SETTINGS_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(parsed.data, key)) {
+        await GM.setValue(key, parsed.data[key]);
+      }
+    }
   }
 
   async function fetchAndStoreData(url, key) {
@@ -942,7 +991,7 @@
       <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
       ${errorBlock}
       <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
-      <div class="form-group" style="margin-top: 12px;">
+      <div class="vn-sticky-footer">
         ${retryButton}
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
@@ -1015,6 +1064,12 @@
         width: 18px;
         text-align: center;
       }
+      #vehicle-naming-modal-body .vn-settings-card {
+        padding: 12px 14px;
+        background-color: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 4px;
+      }
       #vehicle-naming-modal-body .vn-btn-max-level {
         background-color: #7a2020;
         border-color: #6b1c1c;
@@ -1034,7 +1089,7 @@
         z-index: 2;
         margin-top: 10px;
         padding: 10px 0 2px;
-        background: #333;
+        background: var(--vn-modal-bg, #333);
         border-top: 1px solid rgba(255, 255, 255, 0.15);
       }
     `;
@@ -1045,17 +1100,6 @@
     if (document.getElementById(modalId)) return;
 
     addCustomStyles();
-
-    const closeSpan = document.createElement("span");
-    closeSpan.setAttribute("aria-hidden", "true");
-    closeSpan.textContent = "\u00d7";
-
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "close";
-    closeButton.setAttribute("data-dismiss", "modal");
-    closeButton.setAttribute("aria-label", "Close");
-    closeButton.appendChild(closeSpan);
 
     const logoImg = document.createElement("img");
     logoImg.src = LOGO_URL;
@@ -1075,7 +1119,6 @@
 
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
-    modalHeader.appendChild(closeButton);
     modalHeader.appendChild(modalTitle);
 
     const modalBody = document.createElement("div");
@@ -1119,6 +1162,11 @@
     modal.style.zIndex = "5000";
 
     document.body.appendChild(modal);
+    // Sticky-Footer (siehe .vn-sticky-footer) braucht einen deckenden Hintergrund, damit
+    // beim Scrollen nichts durchscheint - liest dafuer die TATSAECHLICHE Hintergrundfarbe
+    // des Modals aus (Seiten-Theme, kein von uns geratener Farbwert), statt einen festen
+    // Hex-Wert zu hinterlegen, der bei einem anderen Theme/Subdomain nicht mehr passt.
+    modalBody.style.setProperty("--vn-modal-bg", getComputedStyle(modalContent).backgroundColor);
 
     // show.bs.modal feuert SOFORT beim Oeffnen, noch bevor die Fade-in-Animation
     // startet - so wird das Hauptmenue gesetzt, bevor ueberhaupt etwas sichtbar ist.
@@ -1128,12 +1176,11 @@
     // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
     pageJQuery(modal).on("show.bs.modal", () => {
-      // Einmaliger Reload, falls seit dem letzten Oeffnen ein Update-Tab geoeffnet wurde
-      // (siehe pendingReloadAfterUpdate) - stellt sicher, dass eine im anderen Tab
-      // installierte neue Version auch tatsaechlich hier laeuft.
+      // Falls seit dem letzten Oeffnen ein Update-Tab geoeffnet wurde (siehe
+      // pendingReloadAfterUpdate), bleibt der Neuladen-Bildschirm bestehen statt des
+      // Hauptmenues - kein automatischer Reload, der Nutzer klickt bewusst selbst.
       if (pendingReloadAfterUpdate) {
-        pendingReloadAfterUpdate = false;
-        location.reload();
+        renderUpdateRequiredScreen();
         return;
       }
       renderMainMenu();
@@ -1214,6 +1261,10 @@
             <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
             Personal-Check
           </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">
+            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
+            Schulungen
+          </button>
         </div>
 
         <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
@@ -1241,6 +1292,7 @@
     document.getElementById("vn-menu-leitstellen").addEventListener("click", renderLeitstelleRenameScreen);
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
     document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
+    document.getElementById("vn-menu-schooling").addEventListener("click", () => renderSchoolingScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
   }
@@ -1264,8 +1316,18 @@
     // margin-left:auto auf der Versions-Span schiebt sie an den rechten Rand, egal ob
     // der Update-Hinweis davor existiert oder nicht (robuster als space-between mit
     // einem Platzhalter-Element, das je nach Inhalt/Whitespace die Verteilung kippt).
-    modalFooterEl.innerHTML = `${updateBadge}<span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>`;
-    document.getElementById("vn-footer-update-badge")?.addEventListener("click", renderSettingsScreen);
+    modalFooterEl.innerHTML = `
+      ${updateBadge}
+      <span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>
+      <button type="button" id="vn-footer-close" class="btn btn-default btn-xs" style="margin-left:10px;">
+        <span class="glyphicon glyphicon-remove" aria-hidden="true"></span> Beenden
+      </button>
+    `;
+    // Ueber modalFooterEl.querySelector statt document.getElementById: renderFooter() wird
+    // beim allerersten Aufruf (initModal()) VOR dem Anhaengen ans Dokument ausgefuehrt -
+    // document.getElementById wuerde die Buttons dann noch nicht finden (null).
+    modalFooterEl.querySelector("#vn-footer-update-badge")?.addEventListener("click", renderSettingsScreen);
+    modalFooterEl.querySelector("#vn-footer-close").addEventListener("click", closeModal);
   }
 
   async function fetchRemoteVersion() {
@@ -1279,10 +1341,34 @@
 
   // Einzige Stelle, die tatsaechlich einen Update-Tab oeffnet - sowohl "Jetzt
   // aktualisieren" als auch "Neuinstallation erzwingen" nutzen diese eine Funktion,
-  // statt das Oeffnen+Reload-Merken jeweils selbst zu duplizieren.
+  // statt das Oeffnen+Reload-Merken jeweils selbst zu duplizieren. Sperrt das Script HIER
+  // (nicht erst beim naechsten Oeffnen) auf einen Neuladen-Bildschirm, damit garantiert
+  // nicht mit der alten Version weitergearbeitet wird, waehrend im anderen Tab schon eine
+  // neue Version installiert wird.
   function openUpdateTab() {
     pendingReloadAfterUpdate = true;
     window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
+    renderUpdateRequiredScreen();
+  }
+
+  // Blockierender Bildschirm nach dem Oeffnen eines Update-Tabs: absichtlich ohne
+  // "Zurück"/Navigation zu anderen Bildschirmen - einzige Aktion ist der Neuladen-Button,
+  // damit nicht versehentlich mit der alten Version weiter agiert wird.
+  function renderUpdateRequiredScreen() {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p><span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> <b>Update-Tab geöffnet</b></p>
+      <p class="text-muted" style="font-size:12px;">
+        Bitte im geöffneten Tab die neue Version in Tampermonkey bestätigen. FuxTools ist hier
+        erst nach einem Neuladen der Seite wieder bedienbar - so wird garantiert nicht
+        versehentlich mit der alten Version weitergearbeitet.
+      </p>
+      <button id="vn-btn-reload-now" type="button" class="btn btn-primary">
+        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
+      </button>
+    `;
+    document.getElementById("vn-btn-reload-now").addEventListener("click", () => location.reload());
   }
 
   // Gedrosselter Hintergrund-Check (max. alle UPDATE_CHECK_INTERVAL_MS), wird beim
@@ -1316,88 +1402,110 @@
   }
 
   function renderSettingsScreen() {
-    setModalWidth(MODAL_WIDTH_COMPACT);
+    setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
     body.innerHTML = `
-      <p>
-        Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
-        <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
-      </p>
-      <p class="text-muted" style="font-size:12px;">
-        ${
-          CHANNEL === "beta"
-            ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)."
-            : "Du nutzt den Stable-Kanal (main-Branch)."
-        }
-      </p>
-      <div class="form-group">
-        <button id="vn-btn-check-update" type="button" class="btn btn-primary">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen
-        </button>
-        <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen
-        </button>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">
+        <div class="vn-settings-card">
+          <p style="margin-top:0;">
+            Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
+            <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
+          </p>
+          <p class="text-muted" style="font-size:12px;">
+            ${
+              CHANNEL === "beta"
+                ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)."
+                : "Du nutzt den Stable-Kanal (main-Branch)."
+            }
+          </p>
+          <div class="form-group">
+            <button id="vn-btn-check-update" type="button" class="btn btn-primary">
+              <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen
+            </button>
+            <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">
+              <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen
+            </button>
+          </div>
+          <p class="text-muted" style="font-size:11px;">
+            Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
+            die Versionsnummer nicht geändert hat.
+          </p>
+          <div id="vn-update-status"></div>
+        </div>
+
+        <div class="vn-settings-card">
+          <p style="margin-top:0;"><b>Kanal wechseln</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            ${
+              CHANNEL === "beta"
+                ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
+                : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
+            }
+          </p>
+          <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">
+            <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>
+            ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
+          </a>
+          <p class="text-muted" style="font-size:11px; margin-top:6px; margin-bottom:0;">
+            Öffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
+            Update dieses Scripts und fragt einmal um Bestätigung.
+          </p>
+        </div>
+
+        <div class="vn-settings-card">
+          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachen-Check)</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            Legt fest, welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert"
+            markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.
+          </p>
+          <button id="vn-btn-required-extensions" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
+          </button>
+        </div>
+
+        <div class="vn-settings-card">
+          <p style="margin-top:0;"><b>Personal-Standard (Personal-Check)</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            Legt fest, wie viel Personal mit welcher Ausbildung je Gebäudetyp im Personal-Check
+            gefordert wird. Ausbildungen müssen vorher mindestens einmal im Personal-Check
+            gescannt worden sein.
+          </p>
+          <button id="vn-btn-personnel-requirements" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-user" aria-hidden="true"></span> Personal-Standard anpassen
+          </button>
+        </div>
+
+        <div class="vn-settings-card">
+          <p style="margin-top:0;"><b>Einstellungen sichern</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Personal-Standard, geforderte
+            Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder
+            her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.
+          </p>
+          <button id="vn-btn-export-settings" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Herunterladen
+          </button>
+          <button id="vn-btn-import-settings" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-upload" aria-hidden="true"></span> Hochladen
+          </button>
+          <input type="file" id="vn-import-settings-file" accept="application/json" style="display:none;">
+          <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>
+        </div>
+
+        <div class="vn-settings-card" style="border-color:#a94442;">
+          <p style="margin-top:0;"><b>Speicher löschen</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
+            Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.
+          </p>
+          <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
+            <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
+          </button>
+          <div id="vn-clear-status" style="margin-top:10px;"></div>
+        </div>
       </div>
-      <p class="text-muted" style="font-size:11px; margin-top:-4px;">
-        Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
-        die Versionsnummer nicht geändert hat - praktisch beim Testen auf dem Beta-Kanal, ohne
-        jedes Mal die Version hochzählen zu müssen. Öffnet wie "Jetzt aktualisieren" einen Tab und
-        lädt FuxTools hier automatisch neu, sobald du das nächste Mal etwas öffnest.
-      </p>
-      <div id="vn-update-status" style="margin-top: 10px;"></div>
-
-      <hr>
-      <p><b>Kanal wechseln</b></p>
-      <p class="text-muted" style="font-size:12px;">
-        ${
-          CHANNEL === "beta"
-            ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
-            : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
-        }
-      </p>
-      <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">
-        <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>
-        ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
-      </a>
-      <p class="text-muted" style="font-size:11px; margin-top:6px;">
-        Öffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
-        Update dieses Scripts und fragt einmal um Bestätigung - danach läuft der neue Kanal
-        inklusive Auto-Update, bis du hier erneut wechselst.
-      </p>
-
-      <hr>
-      <p><b>Geforderte Ausbauten (Wachen-Check)</b></p>
-      <p class="text-muted" style="font-size:12px;">
-        Legt fest, welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert"
-        markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.
-      </p>
-      <button id="vn-btn-required-extensions" type="button" class="btn btn-default">
-        <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
-      </button>
-
-      <hr>
-      <p><b>Personal-Standard (Personal-Check)</b></p>
-      <p class="text-muted" style="font-size:12px;">
-        Legt fest, wie viel Personal mit welcher Ausbildung je Gebäudetyp im Personal-Check
-        gefordert wird. Ausbildungen müssen vorher mindestens einmal im Personal-Check
-        gescannt worden sein.
-      </p>
-      <button id="vn-btn-personnel-requirements" type="button" class="btn btn-default">
-        <span class="glyphicon glyphicon-user" aria-hidden="true"></span> Personal-Standard anpassen
-      </button>
-
-      <hr>
-      <p><b>Speicher löschen</b></p>
-      <p class="text-muted" style="font-size:12px;">
-        Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
-        Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.
-      </p>
-      <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
-        <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
-      </button>
-      <div id="vn-clear-status" style="margin-top:10px;"></div>
 
       <div class="vn-sticky-footer">
         <button type="button" id="vn-btn-back" class="btn btn-default">
@@ -1408,7 +1516,54 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
-    document.getElementById("vn-btn-personnel-requirements").addEventListener("click", renderPersonnelRequirementsSettingsScreen);
+    document.getElementById("vn-btn-personnel-requirements").addEventListener("click", () => renderPersonnelRequirementsSettingsScreen());
+
+    document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
+      const statusEl = document.getElementById("vn-settings-transfer-status");
+      statusEl.innerHTML = `<em>Einstellungen werden zusammengestellt ...</em>`;
+      try {
+        const bundle = await exportAllSettings();
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `fuxtools-einstellungen-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        statusEl.innerHTML = `<span class="text-success">Herunterladen gestartet.</span>`;
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+      }
+    });
+
+    document.getElementById("vn-btn-import-settings").addEventListener("click", () => {
+      document.getElementById("vn-import-settings-file").click();
+    });
+
+    document.getElementById("vn-import-settings-file").addEventListener("change", async e => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+
+      const statusEl = document.getElementById("vn-settings-transfer-status");
+      const confirmed = confirm(
+        "Achtung: Dadurch werden die aktuellen FuxTools-Einstellungen mit dem Inhalt der " +
+          "Datei überschrieben. Fortfahren?"
+      );
+      if (!confirmed) return;
+
+      statusEl.innerHTML = `<em>Einstellungen werden importiert ...</em>`;
+      try {
+        const parsed = JSON.parse(await file.text());
+        await importAllSettings(parsed);
+        statusEl.innerHTML = `<span class="text-success">Importiert. Seite wird neu geladen ...</span>`;
+        location.reload();
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler beim Importieren: ${escapeHtml(e.message)}</span>`;
+      }
+    });
 
     document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
       const confirmed = confirm(
@@ -1431,7 +1586,6 @@
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
       openUpdateTab();
-      renderUpdateTabOpenedStatus(document.getElementById("vn-update-status"));
     });
 
     document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
@@ -1472,19 +1626,7 @@
         </button>
       </div>
     `;
-    document.getElementById("vn-btn-do-update").addEventListener("click", () => {
-      openUpdateTab();
-      renderUpdateTabOpenedStatus(statusEl);
-    });
-  }
-
-  function renderUpdateTabOpenedStatus(statusEl) {
-    statusEl.innerHTML = `
-      <span class="text-success">
-        Tab geöffnet - bitte dort in Tampermonkey bestätigen. FuxTools lädt hier automatisch
-        neu, sobald du das nächste Mal etwas öffnest.
-      </span>
-    `;
+    document.getElementById("vn-btn-do-update").addEventListener("click", openUpdateTab);
   }
 
   // Gebaeudetypen, die im "Geforderte Ausbauten anpassen"-Bildschirm ueberhaupt gezeigt
@@ -1674,6 +1816,7 @@
           <option value="leitstelle_rename">Leitstellen umbenennen</option>
           <option value="required_extensions_config">Geforderte Ausbauten</option>
           <option value="personnel_requirements_config">Personal-Standard</option>
+          <option value="schooling_start">Schulung gestartet</option>
         </select>
         <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
       </div>
@@ -1698,9 +1841,11 @@
           </tbody>
         </table>
       </div>
-      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
-        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
-      </button>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
@@ -1805,7 +1950,7 @@
       <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
         ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
       </div>
-      <div class="form-group" style="margin-top: 14px;">
+      <div class="vn-sticky-footer">
         <button type="button" id="vn-btn-back" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -1886,7 +2031,7 @@
       <div style="max-height: 460px; overflow-y: auto; padding: 4px;">
         ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}
       </div>
-      <div class="form-group" style="margin-top: 14px;">
+      <div class="vn-sticky-footer">
         <button type="button" id="vn-btn-back" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2068,7 +2213,7 @@
         </label>
       </div>
       <p class="text-muted" style="font-size:11px;">Nummeriert wird <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer).</p>
-      <div class="form-group">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2254,7 +2399,7 @@
         Vorschau: <b>${escapeHtml(exampleName)}</b>
       </div>
       <p class="text-muted" style="font-size:12px;">Wirklich umbenennen, oder nochmal zurück zu den Einstellungen?</p>
-      <div class="form-group">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2283,7 +2428,7 @@
     body.innerHTML = `
       <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>
       <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurückgesetzt (keine Nummer, kein Präfix).</p>
-      <div class="form-group">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2355,7 +2500,7 @@
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `
       <p>Bereit, <b>${plan.length} ${escapeHtml(itemNoun)}</b> umzubenennen.</p>
-      <div class="form-group">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2419,7 +2564,7 @@
     body.innerHTML = `
       <p class="text-muted">Aktueller Name → neuer Name, nach Art sortiert. Leeres Feld = keine Änderung.</p>
       ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
-      <div class="form-group" style="margin-top: 14px;">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2477,7 +2622,7 @@
     body.innerHTML = `
       <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung. Sortierung nach Art ist bei Leitstellen nicht nötig.</p>
       ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
-      <div class="form-group" style="margin-top: 14px;">
+      <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
@@ -2771,9 +2916,11 @@
         </button>
       </div>
       <div id="vn-build-status" style="margin-top:10px;"></div>
-      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
-        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-      </button>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+      </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", back);
@@ -2819,7 +2966,7 @@
     } catch (e) {
       body.innerHTML = `
         <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>
-        <button id="vn-btn-back" type="button" class="btn btn-default">Hauptmenü</button>
+        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>
       `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
@@ -3044,9 +3191,11 @@
           <tbody></tbody>
         </table>
       </div>
-      <button id="vn-btn-back" type="button" class="btn btn-default" style="margin-top:10px;">
-        <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
-      </button>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
@@ -3064,8 +3213,9 @@
   // vorhanden ist (z.B. ELW-2-Fahrer). Es gibt dafuer keine JSON-API - die Personal-
   // Seite jeder Wache (/buildings/{id}/personals) wird als HTML geladen und die
   // Tabelle darin ausgewertet (data-filterable-by-Attribut = Ausbildungs-Slugs pro
-  // Person). Bewusst kein automatischer Scan beim Oeffnen (eine Anfrage PRO Wache
-  // waere bei vielen Wachen zu langsam) - der User startet ihn gezielt pro Kategorie.
+  // Person). Automatischer Scan beim Oeffnen von Personal-Check/Schulungen, wenn der
+  // letzte Scan mehr als PERSONNEL_SCAN_STALE_MS her ist (siehe ensureFreshPersonnelScan),
+  // zusaetzlich jederzeit per Button manuell ausloesbar.
   //////////////////////////////////////////////////
 
   const PERSONNEL_SCAN_CONCURRENCY = 5;
@@ -3132,11 +3282,17 @@
     return await res.text();
   }
 
-  // Scannt alle Wachen einer Kategorie (Concurrency begrenzt, wie beim Umbenennen
-  // grosser Fahrzeugmengen) und speichert je Wache die Ausbildungs-Anzahl pro Slug samt
-  // Zeitstempel. Neu entdeckte Slug->Name-Zuordnungen werden dauerhaft mitgesammelt.
-  async function scanPersonnelForCategory(category, onProgress) {
-    const stations = (await loadPersonnelCheckStations()).filter(s => s.category === category);
+  // Ab wann ein vorhandener Scan als "veraltet" gilt und automatisch neu gescannt wird
+  // (siehe ensureFreshPersonnelScan()) - beim Oeffnen von Personal-Check oder Schulungen.
+  const PERSONNEL_SCAN_STALE_MS = 15 * 60 * 1000;
+
+  // Scannt ALLE Wachen aller Kategorien in einem Lauf (Concurrency begrenzt, wie beim
+  // Umbenennen grosser Fahrzeugmengen) und speichert je Wache die Ausbildungs-Anzahl pro
+  // Slug. Ein einzelner, gemeinsamer Zeitstempel (PERSONNEL_SCAN_META_KEY) statt einem
+  // Zeitstempel pro Wache - das Laden ist schnell genug, um nicht mehr pro Kategorie
+  // einzeln zu scannen. Neu entdeckte Slug->Name-Zuordnungen werden dauerhaft mitgesammelt.
+  async function scanAllPersonnel(onProgress) {
+    const stations = await loadPersonnelCheckStations();
     const scanData = await getPersonnelScanData();
     const qualifications = await getPersonnelQualifications();
 
@@ -3165,15 +3321,7 @@
               }
             });
           });
-          scanData[station.id] = {
-            scannedAt: Date.now(),
-            counts,
-            names,
-            total: entries.length,
-            withoutEducation,
-            available,
-            inTraining,
-          };
+          scanData[station.id] = { counts, names, total: entries.length, withoutEducation, available, inTraining };
         } catch (e) {
           console.warn("[FuxTools] Personal-Scan fehlgeschlagen für Wache", station.id, e);
         }
@@ -3186,7 +3334,20 @@
 
     await storeData(scanData, PERSONNEL_SCAN_KEY);
     await storeData(qualifications, PERSONNEL_QUALIFICATIONS_KEY);
+    await storeData({ lastScanAt: Date.now() }, PERSONNEL_SCAN_META_KEY);
     return stations.length;
+  }
+
+  // Wird beim Oeffnen von Personal-Check/Schulungen aufgerufen: scannt automatisch neu,
+  // wenn noch nie oder vor mehr als PERSONNEL_SCAN_STALE_MS gescannt wurde, sonst werden
+  // einfach die vorhandenen Daten verwendet (kein Zwangs-Scan bei jedem Oeffnen).
+  async function ensureFreshPersonnelScan(onProgress) {
+    const meta = await getPersonnelScanMeta();
+    if (meta.lastScanAt && Date.now() - meta.lastScanAt < PERSONNEL_SCAN_STALE_MS) {
+      return false;
+    }
+    await scanAllPersonnel(onProgress);
+    return true;
   }
 
   // Zeigt je Wache, ob genug Personal mit den in den Einstellungen GESPEICHERTEN
@@ -3259,26 +3420,21 @@
     } catch (e) {
       body.innerHTML = `
         <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>
-        <button id="vn-btn-back" type="button" class="btn btn-default">Hauptmenü</button>
+        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>
       `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
 
+    body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
+    await ensureFreshPersonnelScan((done, of) => {
+      body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
+    });
+
     let scanData = await getPersonnelScanData();
+    let scanMeta = await getPersonnelScanMeta();
     const requirements = await getPersonnelRequirements();
     const qualifications = await getPersonnelQualifications();
-
-    function categoryLastScan(category) {
-      let latest = null;
-      stations
-        .filter(s => s.category === category)
-        .forEach(s => {
-          const t = scanData[s.id]?.scannedAt;
-          if (t && (!latest || t > latest)) latest = t;
-        });
-      return latest;
-    }
 
     const applyRowVisibility = makeRowVisibilityFilter({
       container: body,
@@ -3351,38 +3507,26 @@
       a.localeCompare(b, "de"),
     );
 
-    const categoryRows = CATEGORY_ORDER.filter(cat => cat !== "Unbekannt" && stations.some(s => s.category === cat))
-      .map(cat => {
-        const lastScan = categoryLastScan(cat);
-        const lastScanLabel = lastScan ? new Date(lastScan).toLocaleString("de-DE") : "Noch nie gescannt";
-        return `
-          <tr data-category="${escapeHtml(cat)}">
-            <td>${escapeHtml(cat)}</td>
-            <td><small class="text-muted vn-personnel-scan-status">${escapeHtml(lastScanLabel)}</small></td>
-            <td>
-              <button type="button" class="btn btn-xs btn-primary vn-personnel-scan-btn" data-category="${escapeHtml(cat)}">
-                <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan starten
-              </button>
-            </td>
-          </tr>
-        `;
-      })
-      .join("");
+    function lastScanLabel() {
+      return scanMeta.lastScanAt
+        ? `Letzter Scan: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
+        : "Noch nie gescannt";
+    }
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
         Prüft je Wache, ob genug Personal mit bestimmten Ausbildungen vorhanden ist. Grün =
         genau passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
-        Da es dafür keine Sammel-API gibt, musst du pro Kategorie einen Scan starten -
-        Ergebnisse bleiben bis zum nächsten Scan gespeichert.
+        Scannt automatisch neu, wenn der letzte Scan mehr als 15 Minuten her ist.
       </p>
-      <button type="button" id="vn-personnel-goto-settings" class="btn btn-default btn-sm" style="margin-bottom:12px;">
-        <span class="glyphicon glyphicon-cog" aria-hidden="true"></span> Personal-Standard anpassen
-      </button>
-      <table class="table table-condensed" style="font-size:12px; margin-bottom:16px;">
-        <thead><tr><th>Kategorie</th><th>Letzter Scan</th><th></th></tr></thead>
-        <tbody>${categoryRows}</tbody>
-      </table>
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <button type="button" id="vn-personnel-goto-settings" class="btn btn-default btn-sm">
+          <span class="glyphicon glyphicon-cog" aria-hidden="true"></span> Personal-Standard anpassen
+        </button>
+        <button type="button" id="vn-personnel-goto-schooling" class="btn btn-primary btn-sm">
+          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Schulungen starten
+        </button>
+      </div>
 
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <select id="vn-personnel-type-filter" class="form-control" style="max-width:260px;">
@@ -3414,7 +3558,7 @@
       </div>
       <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Hauptmenü
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
       </div>
     `;
@@ -3424,7 +3568,10 @@
     document.getElementById("vn-personnel-type-filter").addEventListener("change", applyRowVisibility);
     document
       .getElementById("vn-personnel-goto-settings")
-      .addEventListener("click", renderPersonnelRequirementsSettingsScreen);
+      .addEventListener("click", () => renderPersonnelRequirementsSettingsScreen(renderPersonalCheckScreen));
+    document
+      .getElementById("vn-personnel-goto-schooling")
+      .addEventListener("click", () => renderSchoolingScreen(renderPersonalCheckScreen));
     document.getElementById("vn-personnel-header-wache").addEventListener("click", () => {
       sortColumn = "category";
       sortAscending = true;
@@ -3440,30 +3587,580 @@
       renderTable();
     });
 
-    body.querySelectorAll(".vn-personnel-scan-btn").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const category = btn.dataset.category;
-        const row = btn.closest("tr");
-        const statusEl = row.querySelector(".vn-personnel-scan-status");
+    document.getElementById("vn-personnel-scan-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("vn-personnel-scan-btn");
+      const statusEl = document.getElementById("vn-personnel-scan-status");
+      btn.disabled = true;
+      try {
+        await scanAllPersonnel((done, of) => {
+          statusEl.textContent = `Scanne ${done}/${of} Wachen ...`;
+        });
+        scanData = await getPersonnelScanData();
+        scanMeta = await getPersonnelScanMeta();
+        statusEl.textContent = lastScanLabel();
+        renderTable();
+      } catch (e) {
+        statusEl.textContent = `Fehler: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    renderTable();
+  }
+
+  //////////////////////////////////////////////////
+  // Schulungen: nutzt die im Personal-Check gescannten Zahlen (counts pro Wache+Slug)
+  // und die dort gespeicherten Anforderungen (PERSONNEL_REQUIREMENTS_KEY), um fehlendes
+  // Personal automatisch in die passende Schule zu schicken - ein Klassenraum fasst immer
+  // 10 Personen (siehe free_space_for_personnel_selection() im Spiel selbst). Es gibt
+  // dafuer keine JSON-API: der Lehrgang-Tab jeder Schule ist eine grosse HTML-Seite, und
+  // die Personal-Auswahl pro Wache wird darin erst per AJAX nachgeladen (schooling_
+  // personal_select) - deshalb zwei Anfragen pro Lauf (Schule fuer Token+Raum+Lehrgangs-
+  // ID, dann jede betroffene Wache fuer die tatsaechlichen Personal-IDs).
+  //////////////////////////////////////////////////
+
+  // Schule (building_type) je Kategorie, in die Personal dieser Kategorie geschickt wird.
+  const SCHOOL_BUILDING_TYPE_BY_CATEGORY = {
+    Feuerwehr: 1, // Feuerwehrschule
+    Rettungsdienst: 3, // Rettungsschule
+    Polizei: 8, // Polizeischule
+    THW: 10, // THW-Bundesschule
+    Seenotrettung: 27, // Schule fuer Seefahrt und Seenotrettung
+  };
+
+  const SCHOOLING_SEATS_PER_ROOM = 10;
+
+  async function loadOwnedSchoolsByCategory() {
+    const buildings = await fetchJSON("/api/buildings");
+    const byCategory = {};
+    for (const b of buildings) {
+      const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(
+        cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type,
+      );
+      if (!category) continue;
+      (byCategory[category] || (byCategory[category] = [])).push({
+        id: String(b.id),
+        name: b.caption || `Schule ${b.id}`,
+      });
+    }
+    return byCategory;
+  }
+
+  // Welche eigene Schule fuer eine Kategorie genutzt wird, ist fuer den Spieler egal (es gibt
+  // keinen Unterschied zwischen zwei Feuerwehrschulen) - deshalb einfach die erste gefundene,
+  // keine Auswahl-Notwendigkeit im UI.
+  function pickSchoolForCategory(schoolsByCategory, category) {
+    return (schoolsByCategory[category] || [])[0] || null;
+  }
+
+  // Ermittelt je Kategorie+Ausbildungs-Slug, wie viel Personal insgesamt fehlt (Summe ueber
+  // alle Wachen dieser Kategorie) - Grundlage fuer die Schulungen-Uebersicht. Wachen ohne
+  // Scan-Daten werden ausgelassen (wie bei den Badges im Personal-Check: unbekannt statt
+  // faelschlich "fehlt nichts"), ebenso Wachen unter der Mindest-Personalstaerke (schuetzt
+  // frisch gebaute/kleine Wachen davor, sofort leergeraeumt zu werden).
+  function computeTrainingNeeds(stations, requirements, scanData, minStaff) {
+    const needs = new Map();
+    for (const station of stations) {
+      const scan = scanData[station.id];
+      if (!scan) continue;
+      if (scan.total < minStaff) continue;
+      const schoolBuildingType = SCHOOL_BUILDING_TYPE_BY_CATEGORY[station.category];
+      if (!schoolBuildingType) continue;
+
+      const req = requirements[station.pseudoId] || {};
+      for (const [slug, required] of Object.entries(req)) {
+        const deficit = required - (scan.counts[slug] || 0);
+        if (deficit <= 0) continue;
+
+        const key = `${station.category}::${slug}`;
+        if (!needs.has(key)) {
+          needs.set(key, { category: station.category, slug, stations: [], totalDeficit: 0 });
+        }
+        const need = needs.get(key);
+        need.stations.push({ id: station.id, name: station.name, deficit });
+        need.totalDeficit += deficit;
+      }
+    }
+    return [...needs.values()];
+  }
+
+  // Laedt den Lehrgang-Tab der Schule und liest die maximale Raumzahl (Anzahl <option> in
+  // #building_rooms_use) aus - "slug" ist optional und liefert zusaetzlich authenticity_token
+  // sowie den Formular-Wert des gewuenschten Lehrgangs (Format "<slug>:<lehrgangsId>", siehe
+  // #education_select), wird also nur gebraucht, wenn tatsaechlich ausgebildet werden soll.
+  async function fetchSchoolPageInfo(schoolId, slug = null) {
+    const res = await fetch(`/buildings/${schoolId}`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Schule (Gebäude ${schoolId}) konnte nicht geladen werden (${res.status}).`);
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const form = doc.querySelector(`form[action="/buildings/${schoolId}/education"]`);
+    if (!form) throw new Error("Ausbildungs-Formular an dieser Schule nicht gefunden.");
+
+    const roomOptions = [...form.querySelectorAll("#building_rooms_use option")];
+    const maxRooms = roomOptions.length ? Math.max(...roomOptions.map(o => Number(o.value) || 1)) : 1;
+
+    const result = { maxRooms };
+    if (slug) {
+      const authenticityToken = form.querySelector('input[name="authenticity_token"]')?.value;
+      if (!authenticityToken) throw new Error("CSRF-Token im Ausbildungs-Formular nicht gefunden.");
+      const educationOption = [...form.querySelectorAll("#education_select option")].find(o =>
+        o.value.startsWith(`${slug}:`),
+      );
+      if (!educationOption) throw new Error("Dieser Lehrgang wird an dieser Schule nicht angeboten.");
+      result.authenticityToken = authenticityToken;
+      result.educationValue = educationOption.value;
+      result.educationLabel = educationOption.textContent.trim();
+    }
+    return result;
+  }
+
+  // Liest die Lehrgangsdauer aus dem Options-Text (z.B. "Dekon-P Lehrgang (3 Tage)") - fuer
+  // die Fertig-Schaetzung in der eigenen Bestaetigungs-Ansicht (siehe renderSchoolingConfirm-
+  // Screen). null, falls das Format mal nicht passt (Anzeige laesst die Schaetzung dann weg).
+  function parseEducationDurationDays(educationLabel) {
+    const match = educationLabel?.match(/\((\d+)\s*Tage?\)/);
+    return match ? Number(match[1]) : null;
+  }
+
+  // Echte Auslastung ueber /api/schoolings statt HTML-Raten: liefert je Lehrgangs-Instanz
+  // (ein Eintrag = EIN belegter Klassenraum) building_id, ob sie noch laeuft und wann sie
+  // fertig ist. Mehrere Instanzen pro Schule moeglich (mehrere Raeume gleichzeitig belegt).
+  async function fetchSchoolingRuns() {
+    return await fetchJSON("/api/schoolings");
+  }
+
+  // Anzahl der GERADE belegten Klassenraeume einer Schule - "running" UND Fertig-Zeitpunkt
+  // noch in der Zukunft (doppelt geprueft, falls das Flag mal hinterherhinkt).
+  function countOccupiedRooms(schoolingRuns, schoolId) {
+    const now = Date.now();
+    return schoolingRuns.filter(
+      run => String(run.building_id) === String(schoolId) && run.running && new Date(run.finish_time).getTime() > now,
+    ).length;
+  }
+
+  // Laedt die Personal-Auswahl EINER Wache fuer den Lehrgang-Tab (eigene AJAX-Anfrage im
+  // Spiel selbst, siehe personal-select-heading href) und liefert alle Personen, die diese
+  // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
+  // haben (echte Vor-Ort-Daten statt der ggf. veralteten Scan-Zahlen).
+  async function fetchAvailablePersonnelForEducation(stationId, slug) {
+    const res = await fetch(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${res.status}).`);
+    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
+      .filter(cb => cb.getAttribute(slug) === "false")
+      .map(cb => ({
+        id: cb.value,
+        name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value,
+      }));
+  }
+
+  // Ermittelt fuer einen Bedarf (eine Kategorie+Ausbildung, ueber ggf. mehrere Wachen) an
+  // einer gewaehlten Schule GENAU, wer ausgebildet wuerde, OHNE etwas abzuschicken - Raeume/
+  // Lehrgang ermitteln, je Wache (groesster Mangel zuerst) so viele freie Personen wie noetig
+  // einsammeln (bis zur tatsaechlich freien Kapazitaet). Grundlage fuer die eigene
+  // Bestaetigungs-Ansicht (siehe renderSchoolingConfirmScreen) statt eines blossen
+  // Browser-confirm() - der Spieler soll VOR dem Klick exakt sehen, wer betroffen ist.
+  async function planTrainingRun(need, schoolId) {
+    const [{ authenticityToken, maxRooms, educationValue, educationLabel }, schoolingRuns] = await Promise.all([
+      fetchSchoolPageInfo(schoolId, need.slug),
+      fetchSchoolingRuns(),
+    ]);
+    const freeRooms = Math.max(0, maxRooms - countOccupiedRooms(schoolingRuns, schoolId));
+    if (freeRooms <= 0) {
+      throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
+    }
+
+    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(need.totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
+    const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
+
+    const stationsByDeficit = [...need.stations].sort((a, b) => b.deficit - a.deficit);
+    const selectedByStation = [];
+    for (const station of stationsByDeficit) {
+      const alreadySelected = selectedByStation.reduce((sum, s) => sum + s.people.length, 0);
+      if (alreadySelected >= capacity) break;
+      const takeCount = Math.min(station.deficit, capacity - alreadySelected);
+      if (takeCount <= 0) continue;
+      const available = await fetchAvailablePersonnelForEducation(station.id, need.slug);
+      const people = available.slice(0, takeCount);
+      if (people.length) selectedByStation.push({ stationId: station.id, stationName: station.name, people });
+    }
+
+    const selected = selectedByStation.flatMap(s => s.people);
+    if (!selected.length) {
+      throw new Error("Kein verfügbares Personal ohne diese Ausbildung gefunden (evtl. schon in Ausbildung).");
+    }
+
+    const actualRooms = Math.min(freeRooms, Math.max(1, Math.ceil(selected.length / SCHOOLING_SEATS_PER_ROOM)));
+    const durationDays = parseEducationDurationDays(educationLabel);
+    const finishEstimate = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000) : null;
+
+    return {
+      schoolId,
+      authenticityToken,
+      educationValue,
+      educationLabel,
+      durationDays,
+      finishEstimate,
+      actualRooms,
+      selectedByStation,
+      selected,
+    };
+  }
+
+  // Schickt einen zuvor mit planTrainingRun() erstellten, vom Spieler bestaetigten Plan
+  // tatsaechlich ab (das echte Ausbilden-Formular der Schule).
+  async function submitTrainingRun(plan) {
+    const params = new URLSearchParams();
+    params.append("utf8", "✓");
+    params.append("authenticity_token", plan.authenticityToken);
+    params.append("building_rooms_use", String(plan.actualRooms));
+    params.append("education_select", plan.educationValue);
+    params.append("alliance[duration]", "0"); // 0 = direkt starten, keine Verbandsfreigabe
+    params.append("alliance[cost]", "0");
+    plan.selected.forEach(p => params.append("personal_ids[]", p.id));
+
+    const res = await fetch(`/buildings/${plan.schoolId}/education`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString(),
+    });
+    // Erfolg = echte Weiterleitung (redirect_to der Rails-Action). Ohne Weiterleitung wird
+    // stattdessen das Formular mit einer Fehlermeldung neu gerendert (z.B. keine freien
+    // Plaetze mehr) - das ist trotz HTTP 200 KEIN Erfolg.
+    if (!res.ok || !res.redirected) {
+      throw new Error(`Ausbildung wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
+    }
+  }
+
+  // Eigene Bestaetigungs-Ansicht statt eines blossen Browser-confirm() - zeigt GENAU, wer
+  // (aus welcher Wache, wie viele) zu welchem Lehrgang an welche Schule geschickt wird und
+  // eine Fertig-Schaetzung, bevor tatsaechlich etwas an das Spiel abgeschickt wird.
+  function renderSchoolingConfirmScreen({ need, school, qualificationName, plan, goBack }) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    const stationRows = plan.selectedByStation
+      .map(
+        s => `
+          <tr>
+            <td>${escapeHtml(s.stationName)}</td>
+            <td>${s.people.length}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const finishLabel = plan.finishEstimate
+      ? plan.finishEstimate.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" })
+      : "unbekannt (Lehrgangsdauer nicht erkannt)";
+
+    body.innerHTML = `
+      <p>
+        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>
+        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}
+      </p>
+      <table class="table table-condensed table-striped" style="font-size:12px;">
+        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>
+        <tbody>${stationRows}</tbody>
+      </table>
+      <p>
+        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>
+        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.
+      </p>
+      <p class="text-muted" style="font-size:12px;">
+        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.
+      </p>
+      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">
+          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-confirm-schooling").addEventListener("click", async () => {
+      const confirmBtn = document.getElementById("vn-btn-confirm-schooling");
+      const backBtn = document.getElementById("vn-btn-back");
+      const statusEl = document.getElementById("vn-schooling-confirm-status");
+      confirmBtn.disabled = true;
+      backBtn.disabled = true;
+      statusEl.innerHTML = `<em>Wird gestartet ...</em>`;
+      try {
+        await submitTrainingRun(plan);
+        await logHistoryEntry({
+          type: "schooling_start",
+          label: qualificationName,
+          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.name).join(", ")})`,
+        });
+        statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
+        setTimeout(goBack, 600);
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+        confirmBtn.disabled = false;
+        backBtn.disabled = false;
+      }
+    });
+  }
+
+  async function renderSchoolingScreen(goBack = renderMainMenu) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade Bedarf ...</p>`;
+
+    let stations, schoolsByCategory;
+    try {
+      [stations, schoolsByCategory] = await Promise.all([loadPersonnelCheckStations(), loadOwnedSchoolsByCategory()]);
+    } catch (e) {
+      body.innerHTML = `
+        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
+        <div class="vn-sticky-footer">
+          <button id="vn-btn-back" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+          </button>
+        </div>
+      `;
+      document.getElementById("vn-btn-back").addEventListener("click", goBack);
+      return;
+    }
+
+    body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
+    await ensureFreshPersonnelScan((done, of) => {
+      body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
+    });
+
+    const requirements = await getPersonnelRequirements();
+    let scanData = await getPersonnelScanData();
+    let scanMeta = await getPersonnelScanMeta();
+    const qualifications = await getPersonnelQualifications();
+    let minStaff = await getPersonnelSchoolingMinStaff();
+
+    // Schule je Kategorie ist fix fuer den ganzen Bildschirm (welche konkrete Schule genutzt
+    // wird, ist egal - siehe pickSchoolForCategory) - Kapazitaet/Auslastung nur einmal pro
+    // tatsaechlich benoetigter Schule laden, nicht pro Zeile.
+    const schoolByCategory = {};
+    for (const category of Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY)) {
+      schoolByCategory[category] = pickSchoolForCategory(schoolsByCategory, category);
+    }
+    const capacityBySchoolId = {};
+    let schoolingRuns = [];
+    try {
+      schoolingRuns = await fetchSchoolingRuns();
+    } catch (e) {
+      console.warn("[FuxTools] /api/schoolings konnte nicht geladen werden:", e);
+    }
+    await Promise.all(
+      Object.values(schoolByCategory)
+        .filter(Boolean)
+        .map(async school => {
+          try {
+            const { maxRooms } = await fetchSchoolPageInfo(school.id);
+            const occupied = countOccupiedRooms(schoolingRuns, school.id);
+            capacityBySchoolId[school.id] = { maxRooms, freeRooms: Math.max(0, maxRooms - occupied) };
+          } catch (e) {
+            capacityBySchoolId[school.id] = { error: e.message };
+          }
+        }),
+    );
+
+    let needs = [];
+    function recomputeNeeds() {
+      needs = computeTrainingNeeds(stations, requirements, scanData, minStaff);
+    }
+    recomputeNeeds();
+
+    function capacityLabel(school) {
+      if (!school) return `<span class="text-muted">Keine eigene Schule</span>`;
+      const info = capacityBySchoolId[school.id];
+      if (!info) return "";
+      if (info.error) {
+        return `${escapeHtml(school.name)} · <span class="text-danger">Kapazität unbekannt (${escapeHtml(info.error)})</span>`;
+      }
+      const freeSeats = info.freeRooms * SCHOOLING_SEATS_PER_ROOM;
+      const statusBadge =
+        info.freeRooms > 0
+          ? `<span class="label label-success">${info.freeRooms}/${info.maxRooms} Klassenräume frei (${freeSeats} Plätze)</span>`
+          : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt</span>`;
+      return `${escapeHtml(school.name)} · ${statusBadge}`;
+    }
+
+    // Kompakte Uebersicht ALLER eigenen Schulen samt Auslastung, unabhaengig davon, ob es
+    // gerade einen Bedarf gibt - immer ganz oben sichtbar (anders als die Gruppen weiter
+    // unten, die nur bei tatsaechlichem Personalmangel auftauchen).
+    function renderSchoolOverview() {
+      const categoriesWithSchool = CATEGORY_ORDER.filter(cat => schoolByCategory[cat]);
+      if (!categoriesWithSchool.length) return "";
+      const cards = categoriesWithSchool
+        .map(
+          category => `
+            <div class="vn-settings-card" style="flex:1; min-width:220px;">
+              <b>${escapeHtml(category)}</b><br>
+              <small>${capacityLabel(schoolByCategory[category])}</small>
+            </div>
+          `,
+        )
+        .join("");
+      return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
+    }
+
+    function renderGroups() {
+      if (!needs.length) {
+        return `<p class="text-muted">Kein fehlendes Personal gefunden (oder noch nicht gescannt).</p>`;
+      }
+      const byCategory = new Map();
+      for (const need of needs) {
+        if (!byCategory.has(need.category)) byCategory.set(need.category, []);
+        byCategory.get(need.category).push(need);
+      }
+
+      return CATEGORY_ORDER.filter(cat => byCategory.has(cat))
+        .map(category => {
+          const school = schoolByCategory[category];
+          const categoryNeeds = byCategory
+            .get(category)
+            .sort((a, b) =>
+              (qualifications[a.slug] || a.slug).localeCompare(qualifications[b.slug] || b.slug, "de"),
+            );
+
+          const rows = categoryNeeds
+            .map(need => {
+              const qualificationName = qualifications[need.slug] || need.slug;
+              const stationTitle = need.stations.map(s => `${s.name} (${s.deficit} fehlen)`).join(", ");
+              const needKey = `${need.category}::${need.slug}`;
+              return `
+                <tr>
+                  <td>${escapeHtml(qualificationName)}</td>
+                  <td title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>
+                  <td>
+                    <button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" ${school ? "" : "disabled"}>
+                      <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden
+                    </button>
+                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          return `
+            <div style="margin-bottom:16px;">
+              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>
+              <table class="table table-condensed table-striped" style="font-size:12px;">
+                <thead>
+                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    function render() {
+      body.innerHTML = `
+        <p class="text-muted" style="font-size:12px;">
+          Zeigt, wie viel Personal laut Personal-Standard (Einstellungen) und dem letzten
+          Personal-Check-Scan noch fehlt, gruppiert nach Schultyp, und schickt es automatisch
+          (bis zu ${SCHOOLING_SEATS_PER_ROOM} Personen pro Klassenraum) in den passenden
+          Lehrgang der eigenen Schule. Startet echte Lehrgänge (mehrere Tage, Personal steht
+          währenddessen nicht für Einsätze zur Verfügung) - bitte die Anzahl vor dem Klick
+          prüfen.
+        </p>
+        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>
+        <div class="form-inline" style="margin-bottom:10px;">
+          <label for="vn-schooling-min-staff" style="font-size:12px;">
+            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?
+          </label>
+          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"
+                 value="${minStaff}" style="width:70px; margin-left:8px;">
+        </div>
+        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>
+        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
+          <button id="vn-btn-back" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+          </button>
+          <button type="button" id="vn-schooling-scan-btn" class="btn btn-primary">
+            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan jetzt starten
+          </button>
+          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">
+            ${
+              scanMeta.lastScanAt
+                ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}`
+                : "Noch nie gescannt"
+            }
+          </span>
+        </div>
+      `;
+
+      document.getElementById("vn-btn-back").addEventListener("click", goBack);
+
+      document.getElementById("vn-schooling-min-staff").addEventListener("change", async e => {
+        minStaff = Math.max(0, parseInt(e.target.value, 10) || 0);
+        await storeData(minStaff, PERSONNEL_SCHOOLING_MIN_STAFF_KEY);
+        recomputeNeeds();
+        document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
+        wireStartButtons();
+      });
+
+      document.getElementById("vn-schooling-scan-btn").addEventListener("click", async () => {
+        const btn = document.getElementById("vn-schooling-scan-btn");
+        const statusEl = document.getElementById("vn-schooling-scan-status");
         btn.disabled = true;
         try {
-          const total = await scanPersonnelForCategory(category, (done, of) => {
-            statusEl.textContent = `Scanne ${done}/${of} ...`;
+          await scanAllPersonnel((done, of) => {
+            statusEl.textContent = `Scanne ${done}/${of} Wachen ...`;
           });
           scanData = await getPersonnelScanData();
-          statusEl.textContent = total
-            ? new Date().toLocaleString("de-DE")
-            : "Keine Wachen in dieser Kategorie";
-          renderTable();
+          scanMeta = await getPersonnelScanMeta();
+          statusEl.textContent = `Letzter Scan: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`;
+          recomputeNeeds();
+          document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
+          wireStartButtons();
         } catch (e) {
           statusEl.textContent = `Fehler: ${e.message}`;
         } finally {
           btn.disabled = false;
         }
       });
-    });
 
-    renderTable();
+      wireStartButtons();
+    }
+
+    function wireStartButtons() {
+      body.querySelectorAll(".vn-schooling-start").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const need = needs.find(n => `${n.category}::${n.slug}` === btn.dataset.key);
+          if (!need) return;
+          const school = schoolByCategory[need.category];
+          if (!school) return;
+          const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
+          const qualificationName = qualifications[need.slug] || need.slug;
+
+          btn.disabled = true;
+          statusEl.textContent = "Lade Vorschau ...";
+          try {
+            const plan = await planTrainingRun(need, school.id);
+            renderSchoolingConfirmScreen({
+              need,
+              school,
+              qualificationName,
+              plan,
+              goBack: () => renderSchoolingScreen(goBack),
+            });
+          } catch (e) {
+            statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    render();
   }
 
   // Fest hinterlegter Katalog, welche Ausbildungen es je Gebaeudetyp ueberhaupt gibt (nur
@@ -3594,7 +4291,7 @@
   // ggf. zusaetzlich entdeckte, dort noch nicht gelistete Ausbildungen. Bedienbar (echtes
   // Eingabefeld) ist ein Eintrag erst, sobald der echte Slug bekannt ist - vorher nur als
   // gesperrter Hinweis sichtbar.
-  async function renderPersonnelRequirementsSettingsScreen() {
+  async function renderPersonnelRequirementsSettingsScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_WIDE);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
@@ -3661,7 +4358,7 @@
       if (t.category !== lastCategory) {
         lastCategory = t.category;
         groups.push(`
-          <div style="font-weight:bold; background:#333; padding:4px 6px; position:sticky; top:0; z-index:1;">
+          <div style="font-weight:bold; background:var(--vn-modal-bg, #333); padding:4px 6px; position:sticky; top:0; z-index:1;">
             ${escapeHtml(lastCategory)}
           </div>
         `);
@@ -3735,7 +4432,7 @@
       </div>
     `;
 
-    document.getElementById("vn-btn-back").addEventListener("click", renderSettingsScreen);
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
 
     document.getElementById("vn-btn-save-personnel-req").addEventListener("click", async () => {
       const newRequirements = {};
@@ -3777,7 +4474,7 @@
           label: "Zurückgesetzt auf 0",
         });
       }
-      renderPersonnelRequirementsSettingsScreen();
+      renderPersonnelRequirementsSettingsScreen(goBack);
     });
   }
 

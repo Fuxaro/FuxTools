@@ -9,6 +9,66 @@ ebenfalls erst nach Absprache gesetzt.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.8.3**
+  - Bugfix: FuxTools startete gar nicht mehr (Absturz beim allerersten Öffnen). Der neue
+    "Beenden"-Button im Fußbereich wurde per `document.getElementById` gesucht, bevor das
+    Fenster überhaupt im Dokument hing - dadurch war das Element `null` und der Absturz
+    verhinderte, dass das Menü sich öffnet.
+- **0.8.2**
+  - Schulungen: "Ausbilden" zeigt jetzt eine eigene Bestätigungs-Ansicht (statt des
+    generischen Browser-Fensters) mit exakter Personen-Anzahl je Wache, genutzter
+    Klassenraumzahl und einer Fertig-Schätzung anhand der Lehrgangsdauer.
+  - Bugfix: "Zurück" funktionierte nicht, wenn man direkt über den neuen Hauptmenü-Punkt
+    "Schulungen" oder über "Personal-Standard anpassen" (Einstellungen) dorthin kam - der
+    Klick löste dort fälschlich ein Event statt der Zurück-Funktion aus.
+  - Modal-Fenster: das "×" oben rechts entfernt, dafür unten rechts im Fußbereich ein
+    "Beenden"-Button.
+- **0.8.1**
+  - Schulungen: Scan-Button und Scan-Datum ins Sticky-Footer neben "Zurück" verschoben
+    (besser sichtbar als grauer Text, Scan-Button jetzt blau). Neue Übersicht ganz oben
+    zeigt IMMER alle eigenen Schulen (Feuerwehr/Rettungsdienst/Polizei/...) mit Auslastung,
+    auch wenn dort aktuell kein Personal fehlt.
+  - Personal-Check: gleiche Verschiebung von Scan-Button/-Datum ins Sticky-Footer.
+  - Neuer Hauptmenü-Eintrag "Schulungen" direkt neben Personal-Check - kein Umweg mehr über
+    den Personal-Check nötig.
+- **0.8.0**
+  - Personal-Check: EIN gemeinsamer Scan über alle Kategorien statt einzelner Scans pro
+    Kategorie (schnell genug, um alles zusammen zu laden). Scannt automatisch neu, wenn
+    der letzte Scan mehr als 15 Minuten her ist, beim Öffnen von Personal-Check oder
+    Schulungen - weiterhin auch jederzeit manuell über "Scan jetzt starten" auslösbar,
+    mit sichtbarem Fortschritt.
+  - Schulungen: nutzt jetzt die echte `/api/schoolings`-API statt einer HTML-Schätzung, um
+    zu wissen, wie viele Klassenräume einer Schule aktuell belegt sind - zeigt "X/Y
+    Klassenräume frei" statt der bisherigen ungenauen "läuft/frei"-Vermutung, und wählt bei
+    "Ausbilden" nur so viele Räume, wie tatsächlich frei sind.
+  - Einstellungen: neuer Bereich "Einstellungen sichern" - alle FuxTools-Einstellungen als
+    Datei herunterladen bzw. aus so einer Datei wiederherstellen (z. B. vor einer
+    Neuinstallation oder für einen anderen Rechner).
+  - Speicher-Aufräumen: Scan-Daten haben jetzt einen einzigen gemeinsamen Zeitstempel statt
+    einem pro Wache (unnötig doppelt gespeichert).
+- **0.7.1**
+  - Update-Ablauf: FuxTools sperrt sich jetzt SOFORT nach dem Öffnen des Update-Tabs (statt
+    erst beim nächsten Öffnen) auf einen Neuladen-Bildschirm mit explizitem "Seite neu
+    laden"-Button - kein Weiterarbeiten mehr mit der alten Version möglich, kein stiller
+    automatischer Reload mehr.
+  - Design-Konsistenz: alle Bildschirme haben jetzt denselben "Zurück"-Button (nicht mehr
+    teils "Zurück", teils "Hauptmenü") und halten ihn per Sticky-Footer immer sichtbar am
+    unteren Rand, ohne Scrollen. Der Sticky-Footer-Hintergrund liest jetzt die tatsächliche
+    Modal-Hintergrundfarbe aus, statt einen festen (falschen) Grauton zu zeigen.
+  - Bugfix: "Personal-Standard anpassen" aus dem Personal-Check landete beim Zurück-Klick
+    immer im Einstellungsmenü statt zurück im Personal-Check.
+  - Einstellungen: von einer langen Liste zu einem breiten Karten-Raster umgebaut (weniger
+    Scrollen, übersichtlicher).
+  - Schulungen starten: keine Schulwahl mehr nötig (welche eigene Schule genutzt wird, ist
+    egal) - zeigt statt einer Dropdown-Auswahl die Kapazität/Auslastung der Schule an und
+    gruppiert die Bedarfe nach Schultyp. Neue Einstellung "Mindest-Personalstärke pro Wache"
+    schützt frisch gebaute/kleine Wachen davor, sofort für Schulungen leergeräumt zu werden.
+- **0.7.0**
+  - Neu: "Schulungen starten" im Personal-Check. Zeigt anhand des Personal-Standards und des
+    letzten Scans, wie viel Personal je Ausbildung über alle Wachen einer Kategorie fehlt, und
+    schickt es nach Bestätigung automatisch (bis zu 10 Personen pro Klassenraum, größter Mangel
+    zuerst) in den passenden Lehrgang der eigenen Schule - kein manuelles Anklicken einzelner
+    Personen mehr nötig.
 - **0.6.11**
   - Internes Aufräumen, keine sichtbaren Änderungen: totes/unfertiges Code (unbenutzte
     Soll-Personal-Tabelle, unerreichbarer Fallback in der Verlaufs-Typ-Zuordnung), die
