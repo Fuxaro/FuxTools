@@ -13,6 +13,85 @@ vorbehalten, damit wir nicht ungewollt in Richtung `1.0` rutschen.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.9.13**
+  - Bugfix Schulungen: Anzeige "alle X Klassenräume belegt" nutzte einen hart codierten
+    Rückfallwert (X=1), wenn die Raum-Auswahl im Formular fehlte, statt die Raumzahl aus
+    tatsächlich belegten + frei wählbaren Räumen zu berechnen - per Live-Diagnose im Browser
+    bestätigt: die Raum-Auswahl existiert nur, wenn mindestens ein komplett ungenutzter Raum
+    frei ist; "offene Plätze" eines bereits laufenden Lehrgangs sind NICHT mehr nutzbar.
+- **0.9.12**
+  - Schulungen-Übersicht: "alle Klassenräume belegt" zeigt jetzt zusätzlich, bis wann (laut
+    /api/schoolings frühester Fertig-Zeitpunkt der gerade laufenden Lehrgänge), statt nur
+    "belegt" ohne weitere Info.
+- **0.9.11**
+  - Bugfix Personal-Check: Bildschirm stürzte beim Öffnen ab (fehlender "Scan jetzt
+    starten"-Button in der Vorlage, obwohl die Anzeige-Logik dafür schon existierte) - dadurch
+    blieb die Liste immer leer, da der Absturz vor dem eigentlichen Befüllen der Tabelle
+    passierte. Button + Zeitstempel ("Letzter Scan: ...") jetzt ergänzt, wie bei Schulungen.
+  - Fahrzeug-Besatzung: neue Checkbox "Normale Fahrzeuge (ohne Ausbildungsanforderung)
+    einbeziehen" - fügt sie direkt in die bestehende Kategorie-Logik ein (kein separater
+    Button/Screen). Normale Fahrzeuge werden dabei einfach mit beliebigem verfügbarem
+    Personal bis Minimum bzw. volle Besatzung aufgefüllt (je nach Einstellung), statt dass
+    ein einzelnes Fahrzeug alles verfügbare Personal bekommt und andere leer bleiben.
+- **0.9.10**
+  - Bugfix Layout: Modal hat jetzt eine feste Gesamthöhe mit Flexbox (Header/Footer fix, nur
+    der Inhalt scrollt) statt variabler Höhe - vorher konnte je nach Bildschirmgröße/
+    Inhaltslänge ein zweiter, verschachtelter Scrollbereich entstehen, wodurch die "Zurück"/
+    Speichern-Buttons nicht am echten unteren Rand des Fensters standen und der Hintergrund
+    darunter durchscrollte. Betrifft jetzt JEDEN Screen einheitlich.
+  - Fahrzeug-Besatzung: "X/Y passend besetzt" (wirkte wie ein Bruchteil der Gesamtkapazität)
+    heißt jetzt "X/Y erforderliches Personal zugewiesen" und zeigt wirklich nur die
+    geforderte Ausbildung gegen ihr Ziel, nicht die Gesamtbelegung gegen die Maximalkapazität.
+  - Hauptmenü neu sortiert: Wachen-Baupläne, Fahrzeug-Besatzung, Wachenausbau (vorher
+    "Wachen-Check"), Personal-Check, Schulungen jetzt oben in einer Sektion; alle
+    Umbenennen-Werkzeuge (Fahrzeuge/Wachen/Leitstellen) jetzt gebündelt in einer eigenen
+    "Umbenennen"-Sektion.
+  - Wachen-Baupläne "Anwenden": neuer "Aktualisieren"-Button (lädt Wachen/Fahrzeuge neu und
+    scannt Personal frisch) plus Anzeige, wann der Personal-Stand zuletzt gescannt wurde -
+    wie bei Schulungen/Personal-Check.
+  - Neu: Breadcrumb im Fenster-Header zeigt jetzt immer, in welchem Menü/Untermenü man sich
+    gerade befindet (z.B. "› Wachen-Baupläne › Anwenden").
+- **0.9.9**
+  - Wachen-Baupläne "Anwenden": zu viele Fahrzeuge eines Typs (rote Markierung) können jetzt
+    direkt verkauft werden (mit eigenem, deutlich rot markiertem Bestätigungsfenster statt der
+    Spiel-eigenen Abfrage) - vorher nur ein Link zum manuellen Verkaufen. Endpunkt per
+    Live-Diagnose im Browser bestätigt: der echte "Verkaufen"-Link im Spiel ist ein
+    Rails-UJS-Link mit `data-method="delete"` auf `/vehicles/{id}`.
+- **0.9.8**
+  - Bugfix Schulungen: "Kapazität unbekannt (Ausbildungs-Formular an dieser Schule nicht
+    gefunden.)" kam faelschlich als Fehler, obwohl die Schule ganz normal funktioniert - das
+    Lehrgangs-Formular existiert im Spiel schlicht nur, solange mindestens ein Klassenraum
+    frei ist (per Live-Diagnose im Browser bestätigt). Sind alle Klassenräume belegt, wird das
+    jetzt korrekt als "alle Klassenräume belegt" angezeigt statt als Fehler.
+- **0.9.7**
+  - Wachen-Baupläne "Bearbeiten": Namensfilter (Regex) entfernt (unnötige Komplexität - ein
+    Bauplan gilt jetzt einfach für alle Wachen des gewählten Gebäudetyps). Ausbauten werden
+    jetzt wie im Vorbild-Script "Wachenbaupläne" (BOS-Ernie) über zwei Listen
+    (Verfügbar/Zugewiesen, per Doppelklick oder Pfeil-Buttons verschiebbar) statt Checkboxen
+    ausgewählt.
+  - Benötigtes Personal (Wachen-Baupläne, sowohl beim Bearbeiten als auch beim Anwenden) geht
+    jetzt immer von der minimalen Besatzung aus statt von der vollen Besatzung bei
+    Spezialfahrzeugen mit "alle brauchen die Ausbildung"-Anforderung (z.B. ELW 2) - verlangt
+    nicht mehr mehr Personal, als für den Betrieb wirklich nötig ist.
+  - Wachen-Baupläne "Anwenden": Spaltenüberschriften (Wache/Ausbauten/Fahrzeuge/Personal) sind
+    jetzt anklickbar zum Sortieren. Zu viele Fahrzeuge eines Typs werden jetzt rot markiert und
+    verlinken direkt auf ein überzähliges Fahrzeug zum manuellen Verkaufen (kein bestätigter
+    Verkaufs-Endpunkt vorhanden, daher kein automatischer Verkauf). Der separate "Zur
+    Wache"-Button entfällt, da der Wachenname selbst schon in einem neuen Tab öffnet.
+- **0.9.6**
+  - Script-Icon (Tampermonkey-Übersicht/Menü) ist jetzt unser eigenes Fux-Logo statt des
+    generischen Google-Favicons für leitstellenspiel.de.
+- **0.9.5**
+  - Fahrzeug-Besatzung: Klick auf ein Fahrzeug in der Problem-Liste führt jetzt direkt zur
+    Fahrzeugseite statt in den Bearbeiten-Modus.
+  - Fahrzeug-Besatzung: die Liste nicht passend besetzter Fahrzeuge (FMS 6) bleibt jetzt über
+    Schließen/Wiederöffnen des Fensters gespeichert - kein erneutes Scannen mehr nötig, nur
+    tatsächlich verkaufte/umgebaute Fahrzeuge fallen automatisch raus.
+  - "Wachen-Baupläne" ist jetzt ein eigener Punkt im Hauptmenü (vorher unter Einstellungen).
+  - Wachen-Baupläne "Anwenden": fehlende Fahrzeuge können jetzt direkt gekauft werden (Kosten
+    vorher bestätigen wie bei Ausbauten) statt nur über einen Link zur Wache. Endpunkt anhand
+    der Community-Scripte "Beschaffungsagent" (BOS-Ernie) und "[LSS] Fahrzeug-Manager"
+    (Caddy21) bestätigt.
 - **0.9.4**
   - Fahrzeug-Besatzung: die roten Knöpfe für nicht passende Fahrzeuge sind wieder eine
     normale Tabelle (wie überall sonst im Script) - und nur noch EINE gemeinsame Liste

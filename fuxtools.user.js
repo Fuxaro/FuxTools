@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.4
+// @version     0.9.13
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
-// @icon        https://www.google.com/s2/favicons?sz=64&domain=leitstellenspiel.de
+// @icon        https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png
 // @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
 // @run-at      document-idle
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.4";
+  const SCRIPT_VERSION = "0.9.13";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -76,6 +76,15 @@
     if (!dialog) return;
     dialog.style.minWidth = `min(${px}px, 95%)`;
     dialog.style.maxWidth = `min(${px}px, 95%)`;
+  }
+
+  // Zeigt im Modal-Header IMMER, in welchem Menue/Untermenue man sich gerade befindet (z.B.
+  // "› Wachen-Baupläne › Anwenden"), statt dass man das nur am Bildschirminhalt selbst
+  // erkennen kann. Wird von jedem render*Screen zu Beginn aufgerufen; leer = nur der reine
+  // Hauptmenue-Titel (siehe renderMainMenu).
+  function setScreenTitle(text) {
+    const el = document.getElementById("vehicle-naming-modal-breadcrumb");
+    if (el) el.textContent = text ? `› ${text}` : "";
   }
 
   const modalId = "vehicle-naming-modal";
@@ -557,6 +566,8 @@
   const HISTORY_MAX_ENTRIES = 300;
   const HISTORY_TYPE_LABELS = {
     extension: "Ausbau",
+    vehicle: "Fahrzeug-Kauf",
+    vehicle_sell: "Fahrzeug verkauft",
     storage: "Lagerraum",
     level: "Ausbaustufe",
     vehicle_rename: "Fahrzeuge umbenennen",
@@ -630,6 +641,33 @@
     return mode === "full" ? "full" : "min";
   }
 
+  // Ob die Fahrzeug-Besatzung auch normale Fahrzeuge OHNE Ausbildungsanforderung mit
+  // einbezieht (siehe getVehicleTypeCrewTarget/loadCrewCheckVehicles) - Standard AUS, damit
+  // sich am bisherigen (nur Spezialfahrzeuge) Verhalten nichts aendert, bis bewusst
+  // aktiviert.
+  const VEHICLE_CREW_INCLUDE_NORMAL_KEY = "vehicleCrewIncludeNormal";
+
+  async function getVehicleCrewIncludeNormal() {
+    return !!(await retrieveData(VEHICLE_CREW_INCLUDE_NORMAL_KEY));
+  }
+
+  // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> Statustext) ueber
+  // Schliessen/Wiederoeffnen des Fahrzeug-Besatzung-Screens hinweg, damit nicht nach jedem
+  // Oeffnen alle Kategorien neu geprueft werden muessen. Beim Oeffnen wird das mit der
+  // frisch geladenen Fahrzeugliste abgeglichen (siehe renderVehicleCrewScreen) - Fahrzeuge,
+  // die es nicht mehr gibt (verkauft/umgebaut), fallen dabei automatisch raus.
+  const VEHICLE_CREW_PROBLEMS_KEY = "vehicleCrewProblems"; // { [vehicleId]: message }
+
+  async function getVehicleCrewProblems() {
+    return (await retrieveData(VEHICLE_CREW_PROBLEMS_KEY)) || {};
+  }
+
+  async function saveVehicleCrewProblems(problemsById) {
+    const plain = {};
+    for (const [id, { message }] of problemsById) plain[id] = message;
+    await storeData(plain, VEHICLE_CREW_PROBLEMS_KEY);
+  }
+
   async function getPersonnelScanData() {
     return (await retrieveData(PERSONNEL_SCAN_KEY)) || {};
   }
@@ -677,6 +715,8 @@
     PERSONNEL_SCHOOLING_MIN_STAFF_KEY,
     STATION_BLUEPRINTS_KEY,
     VEHICLE_CREW_STAFFING_MODE_KEY,
+    VEHICLE_CREW_PROBLEMS_KEY,
+    VEHICLE_CREW_INCLUDE_NORMAL_KEY,
   ];
 
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
@@ -1120,6 +1160,32 @@
         background: var(--vn-modal-bg, #333);
         border-top: 1px solid rgba(255, 255, 255, 0.15);
       }
+      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei
+         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-
+         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher
+         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am
+         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe
+         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf
+         JEDEM Screen gleich.
+       */
+      #vehicle-naming-modal-dialog .modal-content {
+        display: flex;
+        flex-direction: column;
+        max-height: 90vh;
+      }
+      #vehicle-naming-modal-dialog .modal-header,
+      #vehicle-naming-modal-dialog .modal-footer {
+        flex-shrink: 0;
+      }
+      #vehicle-naming-modal-body {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein
+           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die
+           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height
+           hinaus wachsen lassen). */
+        min-height: 0;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -1145,6 +1211,12 @@
     modalTitle.appendChild(logoImg);
     modalTitle.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
 
+    const breadcrumb = document.createElement("span");
+    breadcrumb.id = "vehicle-naming-modal-breadcrumb";
+    breadcrumb.className = "text-muted";
+    breadcrumb.style.cssText = "margin-left:8px; font-size:13px; font-weight:normal;";
+    modalTitle.appendChild(breadcrumb);
+
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
     modalHeader.appendChild(modalTitle);
@@ -1152,10 +1224,10 @@
     const modalBody = document.createElement("div");
     modalBody.className = "modal-body";
     modalBody.id = "vehicle-naming-modal-body";
-    // Feste Hoehe mit eigenem Scrollbereich: Kopf- und Fusszeile bleiben so immer an
-    // Ort und Stelle sichtbar, auch wenn eine Liste (z.B. viele Fahrzeugtypen) laenger
-    // ist als der Bildschirm - dann scrollt nur dieser Bereich, nicht das ganze Fenster.
-    modalBody.style.cssText = "max-height: 72vh; overflow-y: auto;";
+    // Hoehe/Scrollverhalten kommt jetzt komplett aus addCustomStyles() (Flexbox-Layout auf
+    // .modal-content) - Kopf- und Fusszeile bleiben so immer an Ort und Stelle sichtbar,
+    // auch wenn eine Liste (z.B. viele Fahrzeugtypen) laenger ist als der Bildschirm - dann
+    // scrollt nur dieser Bereich, nicht das ganze Fenster/Modal.
     modalBody.innerHTML = `<p><em>Lade Wachen &amp; Fahrzeuge ...</em></p>`;
 
     const modalFooter = document.createElement("div");
@@ -1249,6 +1321,7 @@
   function renderMainMenu() {
     checkForUpdateInBackground(); // gedrosselt, blockiert das Rendern nicht (kein await)
     setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("");
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
@@ -1259,31 +1332,19 @@
       <div style="max-width:420px; margin:0 auto;">
         <p>${greeting}</p>
 
-        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Fahrzeuge</p>
+        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachen &amp; Fahrzeuge</p>
         <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">
-            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
-            Fahrzeuge umbenennen
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">
+            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
+            Wachen-Baupläne
           </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">
-            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-            Fahrzeugnamen zurücksetzen
-          </button>
-        </div>
-
-        <p class="text-muted" style="${sectionLabelStyle}">Wachen &amp; Leitstellen</p>
-        <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">
-            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
-            Wachen umbenennen
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">
-            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
-            Leitstellen umbenennen
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
+            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
+            Fahrzeug-Besatzung
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
             <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-            Wachen-Check
+            Wachenausbau
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">
             <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
@@ -1293,9 +1354,25 @@
             <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
             Schulungen
           </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
-            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
-            Fahrzeug-Besatzung
+        </div>
+
+        <p class="text-muted" style="${sectionLabelStyle}">Umbenennen</p>
+        <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">
+            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
+            Fahrzeuge umbenennen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">
+            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
+            Fahrzeugnamen zurücksetzen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">
+            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
+            Wachen umbenennen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">
+            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
+            Leitstellen umbenennen
           </button>
         </div>
 
@@ -1326,6 +1403,7 @@
     document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
     document.getElementById("vn-menu-schooling").addEventListener("click", () => renderSchoolingScreen());
     document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewScreen());
+    document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
   }
@@ -1436,6 +1514,7 @@
 
   function renderSettingsScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Einstellungen");
     const body = document.getElementById("vehicle-naming-modal-body");
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
 
@@ -1488,9 +1567,9 @@
         </div>
 
         <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachen-Check)</b></p>
+          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachenausbau)</b></p>
           <p class="text-muted" style="font-size:12px;">
-            Legt fest, welche Ausbauten im Wachen-Check je Gebäudetyp orange als "gefordert"
+            Legt fest, welche Ausbauten im Wachenausbau je Gebäudetyp orange als "gefordert"
             markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.
           </p>
           <button id="vn-btn-required-extensions" type="button" class="btn btn-default">
@@ -1507,17 +1586,6 @@
           </p>
           <button id="vn-btn-personnel-requirements" type="button" class="btn btn-default">
             <span class="glyphicon glyphicon-user" aria-hidden="true"></span> Personal-Standard anpassen
-          </button>
-        </div>
-
-        <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Wachen-Baupläne</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet sein soll
-            (Ausbauten, Fahrzeuge, Sollpersonal) - anwendbar auf alle passenden Wachen.
-          </p>
-          <button id="vn-btn-station-blueprints" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Baupläne verwalten
           </button>
         </div>
 
@@ -1561,7 +1629,6 @@
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
     document.getElementById("vn-btn-personnel-requirements").addEventListener("click", () => renderPersonnelRequirementsSettingsScreen());
-    document.getElementById("vn-btn-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
 
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-settings-transfer-status");
@@ -1695,6 +1762,7 @@
   // schreibt die komplette angezeigte Konfiguration, "Zurücksetzen" loescht sie wieder.
   async function renderRequiredExtensionsSettingsScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Einstellungen › Geforderte Ausbauten");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
@@ -1731,7 +1799,7 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Angehakte Ausbauten werden im Wachen-Check orange als "gefordert" markiert.
+        Angehakte Ausbauten werden im Wachenausbau orange als "gefordert" markiert.
         Änderungen gelten erst nach "Speichern".
         ${overrides ? "" : "Aktuell aktiv: die Standard-Empfehlungen."}
       </p>
@@ -1805,6 +1873,7 @@
   // Spielserver). Gleiches Grundprinzip wie der Wachen-Check: Suchfeld + Dropdown-Filter.
   async function renderHistoryScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Verlauf");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Verlauf ...</p>`;
 
@@ -1929,6 +1998,7 @@
 
   async function renderLeitstelleSelection() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle(currentMode === "reset" ? "Fahrzeugnamen zurücksetzen" : "Fahrzeuge umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen, Wachen &amp; Fahrzeuge ...</em></p>`;
 
@@ -2562,6 +2632,7 @@
 
   async function renderStationRenameScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Wachen umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Wachen ...</em></p>`;
 
@@ -2642,6 +2713,7 @@
 
   async function renderLeitstelleRenameScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Leitstellen umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen ...</em></p>`;
 
@@ -2725,6 +2797,44 @@
       },
     });
     if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
+  }
+
+  // Kauft EIN Fahrzeug eines Typs an einer Wache. Endpunkt/URL-Muster (buildingId taucht
+  // bewusst zweimal auf) stammt aus den Community-Scripten "Beschaffungsagent" (BOS-Ernie)
+  // und "[LSS] Fahrzeug-Manager" (Caddy21), die beide unabhaengig denselben Endpunkt nutzen -
+  // hier per POST + X-CSRF-Token analog zu buildExtension()/buildStorage() statt der dortigen
+  // GET-Variante, damit es zu unserem sonstigen Bau-Code passt.
+  async function buyVehicle(buildingId, vehicleTypeId, currency) {
+    const csrfToken = getCsrfTokenOrThrow(buildingId);
+    const res = await fetch(`/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken,
+      },
+    });
+    if (!res.ok) throw new Error(`Kauf fehlgeschlagen (${res.status})`);
+  }
+
+  // Verkauft/zerstoert EIN Fahrzeug unwiderruflich. Endpunkt per Live-Diagnose im Browser
+  // bestaetigt: der echte "Verkaufen"-Link im Spiel ist ein Rails-UJS-Link mit
+  // data-method="delete" - der Browser wandelt das in ein POST-Formular mit den Feldern
+  // _method=delete + authenticity_token um (Rails behandelt das serverseitig dann als
+  // DELETE). Hier nachgebaut per fetch: POST + X-CSRF-Token-Header (wie bei buildExtension())
+  // plus _method=delete im Body, damit Rails' Method-Override das erkennt.
+  async function sellVehicle(vehicleId) {
+    const csrfToken = getCsrfTokenOrThrow(vehicleId);
+    const res = await fetch(`/vehicles/${vehicleId}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: new URLSearchParams({ _method: "delete" }),
+    });
+    if (!res.ok) throw new Error(`Verkaufen fehlgeschlagen (${res.status})`);
   }
 
   async function buildStorage(buildingId, storageId, currency) {
@@ -3000,8 +3110,51 @@
     coinsBtn.addEventListener("click", () => pay("coins"));
   }
 
+  // Eigene Bestaetigung fuer eine zerstoerende Aktion (aktuell: Fahrzeug verkaufen) statt
+  // eines blossen browser confirm() - analog zu renderBuildConfirmScreen, aber ohne
+  // Waehrungswahl (kostet nichts) und mit deutlich rot markierter Warnung.
+  function renderVehicleSellConfirmScreen({ vehicleId, vehicleName, stationName, goBack }) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p class="text-danger"><b>Fahrzeug wirklich verkaufen?</b></p>
+      <p>
+        <b>${escapeHtml(vehicleName)}</b> (${escapeHtml(stationName)}) wird unwiderruflich
+        zerstört/verkauft - das kann NICHT rückgängig gemacht werden.
+      </p>
+      <div id="vn-sell-status" style="margin-top:10px;"></div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+        <button id="vn-btn-sell-confirm" type="button" class="btn btn-danger">
+          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Verkaufen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+
+    const statusEl = document.getElementById("vn-sell-status");
+    const confirmBtn = document.getElementById("vn-btn-sell-confirm");
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      statusEl.innerHTML = `<em>Wird verkauft ...</em>`;
+      try {
+        await sellVehicle(vehicleId);
+        await logHistoryEntry({ type: "vehicle_sell", label: vehicleName, station: stationName });
+        statusEl.innerHTML = `<span class="text-success">Verkauft. Lade neu ...</span>`;
+        setTimeout(goBack, 600);
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+        confirmBtn.disabled = false;
+      }
+    });
+  }
+
   async function renderStationCheckScreen(preservedState) {
     setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Wachenausbau");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
 
@@ -3456,6 +3609,7 @@
 
   async function renderPersonalCheckScreen() {
     setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Personal-Check");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
 
@@ -3601,10 +3755,16 @@
           <tbody id="vn-personnel-results-body"></tbody>
         </table>
       </div>
-      <div class="vn-sticky-footer">
+      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
+        <button type="button" id="vn-personnel-scan-btn" class="btn btn-primary">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan jetzt starten
+        </button>
+        <span class="label label-default" id="vn-personnel-scan-status" style="font-size:12px;">
+          ${escapeHtml(lastScanLabel())}
+        </span>
       </div>
     `;
 
@@ -3730,21 +3890,36 @@
     return [...needs.values()];
   }
 
-  // Laedt den Lehrgang-Tab der Schule und liest die maximale Raumzahl (Anzahl <option> in
-  // #building_rooms_use) aus - "slug" ist optional und liefert zusaetzlich authenticity_token
-  // sowie den Formular-Wert des gewuenschten Lehrgangs (Format "<slug>:<lehrgangsId>", siehe
-  // #education_select), wird also nur gebraucht, wenn tatsaechlich ausgebildet werden soll.
-  async function fetchSchoolPageInfo(schoolId, slug = null) {
+  // Laedt den Lehrgang-Tab der Schule und liest die Anzahl frei WAEHLBARER, komplett
+  // ungenutzter Klassenraeume (Anzahl <option> in #building_rooms_use) aus - "slug" ist
+  // optional und liefert zusaetzlich authenticity_token sowie den Formular-Wert des
+  // gewuenschten Lehrgangs (Format "<slug>:<lehrgangsId>", siehe #education_select), wird
+  // also nur gebraucht, wenn tatsaechlich ausgebildet werden soll.
+  //
+  // WICHTIG (per Live-Diagnose im Browser bestaetigt, zweimal): #building_rooms_use existiert
+  // im HTML NUR, wenn die Schule mindestens einen KOMPLETT freien (noch nie belegten)
+  // Klassenraum hat - laeuft ueberall schon ein Lehrgang (auch wenn der laut API noch
+  // "open_spaces" zeigt - die sind NICHT mehr nutzbar, sobald der Lehrgang laeuft), fehlt der
+  // Raum-Waehler, aber das <form> samt #education_select kann trotzdem noch vorhanden sein
+  // (offenbar fuer den Fall, dass doch noch ein Raum frei wird). "occupied" (Anzahl aktuell
+  // laufender Lehrgaenge laut /api/schoolings, siehe countOccupiedRooms) ist deshalb die
+  // einzige verlaessliche Quelle fuer belegte Raeume - die Gesamtraumzahl ergibt sich als
+  // occupied + frei-waehlbare Raeume (NIE geraten/hart codiert).
+  async function fetchSchoolPageInfo(schoolId, occupied, slug = null) {
     const res = await fetch(`/buildings/${schoolId}`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Schule (Gebäude ${schoolId}) konnte nicht geladen werden (${res.status}).`);
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     const form = doc.querySelector(`form[action="/buildings/${schoolId}/education"]`);
-    if (!form) throw new Error("Ausbildungs-Formular an dieser Schule nicht gefunden.");
+    if (!form) {
+      if (occupied > 0) return { maxRooms: occupied, freeRooms: 0 };
+      throw new Error("Ausbildungs-Formular an dieser Schule nicht gefunden.");
+    }
 
     const roomOptions = [...form.querySelectorAll("#building_rooms_use option")];
-    const maxRooms = roomOptions.length ? Math.max(...roomOptions.map(o => Number(o.value) || 1)) : 1;
+    const freeRooms = roomOptions.length ? Math.max(...roomOptions.map(o => Number(o.value) || 1)) : 0;
+    const maxRooms = occupied + freeRooms;
 
-    const result = { maxRooms };
+    const result = { maxRooms, freeRooms };
     if (slug) {
       const authenticityToken = form.querySelector('input[name="authenticity_token"]')?.value;
       if (!authenticityToken) throw new Error("CSRF-Token im Ausbildungs-Formular nicht gefunden.");
@@ -3783,6 +3958,17 @@
     ).length;
   }
 
+  // Fruehester Fertig-Zeitpunkt unter den GERADE laufenden Lehrgaengen einer Schule (oder
+  // null, falls keiner laeuft) - fuer die Anzeige "belegt bis ..." statt nur "belegt".
+  function earliestSchoolingFinish(schoolingRuns, schoolId) {
+    const now = Date.now();
+    const finishTimes = schoolingRuns
+      .filter(run => String(run.building_id) === String(schoolId) && run.running)
+      .map(run => new Date(run.finish_time).getTime())
+      .filter(t => t > now);
+    return finishTimes.length ? Math.min(...finishTimes) : null;
+  }
+
   // Laedt die Personal-Auswahl EINER Wache fuer den Lehrgang-Tab (eigene AJAX-Anfrage im
   // Spiel selbst, siehe personal-select-heading href) und liefert alle Personen, die diese
   // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
@@ -3806,11 +3992,9 @@
   // Bestaetigungs-Ansicht (siehe renderSchoolingConfirmScreen) statt eines blossen
   // Browser-confirm() - der Spieler soll VOR dem Klick exakt sehen, wer betroffen ist.
   async function planTrainingRun(need, schoolId) {
-    const [{ authenticityToken, maxRooms, educationValue, educationLabel }, schoolingRuns] = await Promise.all([
-      fetchSchoolPageInfo(schoolId, need.slug),
-      fetchSchoolingRuns(),
-    ]);
-    const freeRooms = Math.max(0, maxRooms - countOccupiedRooms(schoolingRuns, schoolId));
+    const schoolingRuns = await fetchSchoolingRuns();
+    const occupied = countOccupiedRooms(schoolingRuns, schoolId);
+    const { authenticityToken, freeRooms, educationValue, educationLabel } = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
     if (freeRooms <= 0) {
       throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
     }
@@ -3954,6 +4138,7 @@
 
   async function renderSchoolingScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Schulungen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Bedarf ...</p>`;
 
@@ -4003,9 +4188,10 @@
         .filter(Boolean)
         .map(async school => {
           try {
-            const { maxRooms } = await fetchSchoolPageInfo(school.id);
             const occupied = countOccupiedRooms(schoolingRuns, school.id);
-            capacityBySchoolId[school.id] = { maxRooms, freeRooms: Math.max(0, maxRooms - occupied) };
+            const { maxRooms, freeRooms } = await fetchSchoolPageInfo(school.id, occupied);
+            const nextFreeAt = earliestSchoolingFinish(schoolingRuns, school.id);
+            capacityBySchoolId[school.id] = { maxRooms, freeRooms, nextFreeAt };
           } catch (e) {
             capacityBySchoolId[school.id] = { error: e.message };
           }
@@ -4026,10 +4212,11 @@
         return `${escapeHtml(school.name)} · <span class="text-danger">Kapazität unbekannt (${escapeHtml(info.error)})</span>`;
       }
       const freeSeats = info.freeRooms * SCHOOLING_SEATS_PER_ROOM;
+      const untilLabel = info.nextFreeAt ? ` (bis ${new Date(info.nextFreeAt).toLocaleString("de-DE")})` : "";
       const statusBadge =
         info.freeRooms > 0
           ? `<span class="label label-success">${info.freeRooms}/${info.maxRooms} Klassenräume frei (${freeSeats} Plätze)</span>`
-          : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt</span>`;
+          : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt${escapeHtml(untilLabel)}</span>`;
       return `${escapeHtml(school.name)} · ${statusBadge}`;
     }
 
@@ -4265,27 +4452,48 @@
   const VEHICLE_FMS_NOT_STAFFED = 6;
   const VEHICLE_FMS_READY = 2;
 
+  // Wie getVehicleTypeRequirement(), aber liefert auch fuer FAHRZEUGE OHNE Ausbildungs-
+  // anforderung (normale Loeschfahrzeuge, RTW, ...) ein Ergebnis (requirements: leeres Array)
+  // statt null - solange sie ueberhaupt eine eigene Besatzung haben (staff.max > 0, schliesst
+  // reine Anhaenger/Geraetefahrzeuge ohne Besatzung aus). Grundlage fuer die "Normale
+  // Fahrzeuge einbeziehen"-Option der Fahrzeug-Besatzung (siehe loadCrewCheckVehicles).
+  function getVehicleTypeCrewTarget(vehicleTypeId) {
+    const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
+    if (!staff?.max) return null;
+    const requirement = getVehicleTypeRequirement(vehicleTypeId);
+    if (requirement) return requirement;
+    return { requirements: [], staffMin: staff.min, staffMax: staff.max };
+  }
+
+  // Laedt ALLE Fahrzeuge mit eigener Besatzung (staff.max > 0) - inklusive normaler
+  // Fahrzeuge ohne Ausbildungsanforderung (Feld "special": false). Ob normale Fahrzeuge in
+  // der Anzeige/beim Zuweisen tatsaechlich beruecksichtigt werden, entscheidet erst die UI
+  // (Checkbox "Normale Fahrzeuge einbeziehen", siehe renderVehicleCrewScreen) - hier wird
+  // bewusst IMMER die volle Liste geladen, damit das Umschalten der Checkbox keinen erneuten
+  // Server-Roundtrip braucht.
   async function loadCrewCheckVehicles() {
     const [vehicles, buildings] = await Promise.all([fetchAllVehiclesV2(), fetchJSON("/api/buildings")]);
     const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
     return vehicles
-      .filter(v => getVehicleTypeRequirement(v.vehicle_type ?? v.type) != null)
       .map(v => {
         const typeId = v.vehicle_type ?? v.type;
+        const info = getVehicleTypeCrewTarget(typeId);
+        if (!info) return null;
         const stationId = String(v.building_id ?? v.building);
         const station = buildingsById.get(stationId);
-        const requirement = getVehicleTypeRequirement(typeId);
         return {
           id: String(v.id),
           caption: v.caption || `Fahrzeug ${v.id}`,
-          requirements: requirement.requirements,
-          staffMin: requirement.staffMin,
-          staffMax: requirement.staffMax,
+          requirements: info.requirements,
+          staffMin: info.staffMin,
+          staffMax: info.staffMax,
+          special: info.requirements.length > 0,
           category: station ? categoryForBuilding(station) : "Unbekannt",
           stationId,
           stationName: station?.caption || `Wache ${stationId}`,
         };
-      });
+      })
+      .filter(Boolean);
   }
 
   // Fragt den aktuellen FMS-Status frisch ab (NICHT aus einer evtl. veralteten Bulk-Liste) -
@@ -4365,6 +4573,41 @@
     return assignedNow;
   }
 
+  // Wie assignQualifiedPersonnelToVehicleForSlug(), aber OHNE Ausbildungs-Filter - fuer
+  // normale Fahrzeuge ohne besondere Anforderung: einfach mit beliebigem verfuegbarem
+  // Personal (kein Unterricht, noch niemand anderem zugewiesen) bis zum Ziel auffuellen.
+  // Verteilt sich automatisch fair auf mehrere Fahrzeuge derselben Kategorie/Wache, WEIL
+  // jedes Fahrzeug im "Alle ... pruefen & zuweisen"-Lauf nur bis zu seinem eigenen Ziel
+  // (staffMin bei "Minimum", nicht staffMax) auffuellt statt sich das gesamte verfuegbare
+  // Personal zu greifen.
+  async function assignAnyPersonnelToVehicle(vehicleId, target, staffMax) {
+    const { people } = await fetchVehicleAssignmentPage(vehicleId);
+    const assignedCount = people.filter(p => p.assignedHere).length;
+    const csrfToken = getCsrfTokenOrThrow(vehicleId);
+    let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - assignedCount));
+    let assignedNow = 0;
+
+    for (const person of people) {
+      if (remaining <= 0) break;
+      if (person.assignedHere || person.inTraining || !person.assignHref) continue;
+
+      const res = await fetch(person.assignHref, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-CSRF-Token": csrfToken,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!res.ok) throw new Error(`Zuweisen fehlgeschlagen (${res.status}).`);
+      assignedNow++;
+      remaining--;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return assignedNow;
+  }
+
   async function setVehicleFms(vehicleId, fmsStatus) {
     const res = await fetch(`/vehicles/${vehicleId}/set_fms/${fmsStatus}`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`FMS-Status konnte nicht auf ${fmsStatus} gesetzt werden (${res.status}).`);
@@ -4389,10 +4632,13 @@
   // Anforderungen wird die Zuweisungs-Seite neu geladen, damit die zweite Anforderung die
   // durch die erste schon belegten Plaetze beruecksichtigt. Bei Teil-Anforderungen (min:N)
   // bestimmt staffingMode das Ziel: "min" (Standard, spart Personal fuer andere Fahrzeuge)
-  // oder "full" (gleich die volle Besatzung mit dieser Ausbildung befuellen). Danach wird
-  // geprueft, ob JETZT alle Anforderungen erfuellt sind (nicht nur die neu zugewiesenen
-  // Personen - sonst wuerde trotz untrainierter Alt-Besatzung faelschlich FMS 2 gesetzt) und
-  // der FMS-Status gesetzt.
+  // oder "full" (gleich die volle Besatzung mit dieser Ausbildung befuellen). Fahrzeuge OHNE
+  // Anforderung (requirements leer, siehe getVehicleTypeCrewTarget) werden stattdessen
+  // einfach mit beliebigem verfuegbarem Personal bis staffMin ("Minimum") bzw. staffMax
+  // ("Volle Besatzung") aufgefuellt - dasselbe staffingMode-Umschalten gilt fuer beide Faelle.
+  // Danach wird geprueft, ob JETZT alle Anforderungen erfuellt sind (nicht nur die neu
+  // zugewiesenen Personen - sonst wuerde trotz untrainierter Alt-Besatzung faelschlich FMS 2
+  // gesetzt) und der FMS-Status gesetzt.
   async function checkAndFixVehicleCrew(vehicle, staffingMode) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
@@ -4401,14 +4647,43 @@
     }
 
     let assignedNow = 0;
-    for (const req of vehicle.requirements) {
-      const target = req.min === null || staffingMode === "full" ? vehicle.staffMax : req.min;
-      assignedNow += await assignQualifiedPersonnelToVehicleForSlug(vehicle.id, req.slug, target, vehicle.staffMax);
+    const targetByRequirement = new Map();
+    if (vehicle.requirements.length) {
+      for (const req of vehicle.requirements) {
+        const target = req.min === null || staffingMode === "full" ? vehicle.staffMax : req.min;
+        targetByRequirement.set(req.slug, target);
+        assignedNow += await assignQualifiedPersonnelToVehicleForSlug(vehicle.id, req.slug, target, vehicle.staffMax);
+      }
+    } else {
+      const target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
+      assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax);
     }
 
     const after = await fetchVehicleAssignmentPage(vehicle.id);
     const fullyStaffed = isVehicleFullyStaffed(after, vehicle);
     const assignedCount = after.people.filter(p => p.assignedHere).length;
+
+    // Fuer eine verstaendliche Anzeige (statt "X/Y passend besetzt", das wie ein Bruchteil
+    // der Gesamtkapazitaet aussieht, obwohl es die belegten Plaetze zaehlt): wie viel vom
+    // TATSAECHLICH GEFORDERTEN Personal (je Anforderung das gleiche Ziel wie beim Zuweisen
+    // oben) schon mit passender Ausbildung zugewiesen ist. Ueberzaehlige Treffer je
+    // Anforderung werden auf ihr Ziel gedeckelt, damit Ueberbesetzung einer Anforderung
+    // nicht die Zahl einer anderen kaschiert. Fahrzeuge ohne Anforderung zeigen stattdessen
+    // Belegung gegen ihr Ziel (staffMin/staffMax je nach Modus).
+    const assignedPeople = after.people.filter(p => p.assignedHere);
+    let requiredPersonnel = 0;
+    let trainedPersonnel = 0;
+    if (vehicle.requirements.length) {
+      for (const req of vehicle.requirements) {
+        const target = targetByRequirement.get(req.slug);
+        const matching = assignedPeople.filter(p => p.slugs.includes(req.slug)).length;
+        requiredPersonnel += target;
+        trainedPersonnel += Math.min(matching, target);
+      }
+    } else {
+      requiredPersonnel = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
+      trainedPersonnel = Math.min(assignedCount, requiredPersonnel);
+    }
 
     if (fullyStaffed) {
       if (fmsBefore === VEHICLE_FMS_NOT_STAFFED) await setVehicleFms(vehicle.id, VEHICLE_FMS_READY);
@@ -4416,7 +4691,7 @@
       await setVehicleFms(vehicle.id, VEHICLE_FMS_NOT_STAFFED);
     }
 
-    return { assignedNow, assignedCount, capacity: vehicle.staffMax, fullyStaffed };
+    return { assignedNow, assignedCount, capacity: vehicle.staffMax, requiredPersonnel, trainedPersonnel, fullyStaffed };
   }
 
   const VEHICLE_CREW_CHECK_CONCURRENCY = 3;
@@ -4426,12 +4701,13 @@
   // Spiel, statt einer langen Tabelle ALLER Fahrzeuge (bei vielen Fahrzeugen unuebersichtlich).
   async function renderVehicleCrewScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Fahrzeug-Besatzung");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Fahrzeuge ...</p>`;
 
-    let vehicles;
+    let allVehicles;
     try {
-      vehicles = await loadCrewCheckVehicles();
+      allVehicles = await loadCrewCheckVehicles();
     } catch (e) {
       body.innerHTML = `
         <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
@@ -4446,17 +4722,39 @@
     }
 
     let staffingMode = await getVehicleCrewStaffingMode();
+    let includeNormal = await getVehicleCrewIncludeNormal();
 
-    const byCategory = new Map();
-    for (const v of vehicles) {
-      if (!byCategory.has(v.category)) byCategory.set(v.category, []);
-      byCategory.get(v.category).push(v);
+    // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von includeNormal ab) -
+    // wird beim Umschalten der Checkbox neu berechnet, ohne die Fahrzeugliste erneut vom
+    // Server zu laden (siehe loadCrewCheckVehicles: laedt bewusst IMMER alle Fahrzeuge).
+    let vehicles;
+    let byCategory;
+    function recomputeVisibleVehicles() {
+      vehicles = allVehicles.filter(v => v.special || includeNormal);
+      byCategory = new Map();
+      for (const v of vehicles) {
+        if (!byCategory.has(v.category)) byCategory.set(v.category, []);
+        byCategory.get(v.category).push(v);
+      }
     }
+    recomputeVisibleVehicles();
 
     // Eine gemeinsame Liste ueber ALLE Kategorien hinweg statt einer eigenen je Kategorie -
     // jeder Kategorie-Lauf aktualisiert nur seine eigenen Fahrzeuge darin (vorherige Laeufe
-    // anderer Kategorien bleiben erhalten, bis sie selbst erneut geprueft werden).
+    // anderer Kategorien bleiben erhalten, bis sie selbst erneut geprueft werden). Beim
+    // Oeffnen mit den zuletzt gespeicherten Problemen befuellt (siehe VEHICLE_CREW_PROBLEMS_KEY),
+    // damit man nicht nach jedem Schliessen neu scannen muss - Fahrzeuge, die es laut der
+    // frisch geladenen Liste nicht mehr gibt, fallen dabei automatisch raus.
+    const vehiclesById = new Map(allVehicles.map(v => [v.id, v]));
+    const persistedProblems = await getVehicleCrewProblems();
     const problemsById = new Map(); // vehicleId -> { vehicle, message }
+    for (const [id, message] of Object.entries(persistedProblems)) {
+      const vehicle = vehiclesById.get(id);
+      if (vehicle) problemsById.set(id, { vehicle, message });
+    }
+    if (Object.keys(persistedProblems).length !== problemsById.size) {
+      await saveVehicleCrewProblems(problemsById);
+    }
 
     function renderProblemsRows() {
       const rows = [...problemsById.values()].sort(
@@ -4474,7 +4772,7 @@
             <tr>
               <td>${escapeHtml(vehicle.category)}</td>
               <td>${escapeHtml(vehicle.stationName)}</td>
-              <td><a href="/vehicles/${escapeHtml(vehicle.id)}/edit" target="_blank">${escapeHtml(vehicle.caption)}</a></td>
+              <td><a href="/vehicles/${escapeHtml(vehicle.id)}" target="_blank">${escapeHtml(vehicle.caption)}</a></td>
               <td class="text-danger">${escapeHtml(message || "")}</td>
             </tr>
           `,
@@ -4484,7 +4782,7 @@
 
     function renderGroups() {
       if (!vehicles.length) {
-        return `<p class="text-muted">Keine Fahrzeuge mit besonderer Ausbildungsanforderung gefunden.</p>`;
+        return `<p class="text-muted">Keine passenden Fahrzeuge gefunden.</p>`;
       }
       return CATEGORY_ORDER.filter(cat => byCategory.has(cat))
         .map(
@@ -4508,13 +4806,14 @@
       <p class="text-muted" style="font-size:12px;">
         Zeigt Fahrzeuge, deren Besatzung eine bestimmte Ausbildung braucht (z.B. ELW 2 - alle
         Plätze, oder GRTW - nur 1 von 6 mit Notarzt-Ausbildung), gruppiert nach Kategorie.
-        "Alle ... prüfen &amp; zuweisen" belegt für jedes Fahrzeug der Kategorie freie Plätze
-        mit verfügbarem, passend ausgebildetem Personal (kein Unterricht, noch niemand anderem
-        zugewiesen) und setzt danach den Fahrzeugstatus: FMS 6 (nicht besetzt), wenn die
-        Besatzung nicht passt, sonst FMS 2 (frei auf Funk). Fahrzeuge im Einsatz werden nie
-        angefasst.
+        Optional auch normale Fahrzeuge ohne Ausbildungsanforderung (z.B. LF) - diese werden
+        einfach mit beliebigem verfügbarem Personal aufgefüllt. "Alle ... prüfen &amp;
+        zuweisen" belegt für jedes Fahrzeug der Kategorie freie Plätze mit verfügbarem,
+        passendem Personal (kein Unterricht, noch niemand anderem zugewiesen) und setzt
+        danach den Fahrzeugstatus: FMS 6 (nicht besetzt), wenn die Besatzung nicht passt,
+        sonst FMS 2 (frei auf Funk). Fahrzeuge im Einsatz werden nie angefasst.
       </p>
-      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+      <div class="form-inline" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
         <label style="font-size:12px; margin:0;">Bei Teil-Anforderungen (z.B. GRTW/NAW) zuweisen:</label>
         <div style="display:flex; gap:6px;">
           <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min">
@@ -4524,6 +4823,12 @@
             Volle Besatzung
           </button>
         </div>
+      </div>
+      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+        <label style="font-size:12px; margin:0; font-weight:normal;">
+          <input type="checkbox" id="vn-crew-include-normal" ${includeNormal ? "checked" : ""}>
+          Normale Fahrzeuge (ohne Ausbildungsanforderung) einbeziehen
+        </label>
       </div>
       <div id="vn-crew-groups">${renderGroups()}</div>
       <p style="margin-top:14px; margin-bottom:4px;"><b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b></p>
@@ -4556,56 +4861,71 @@
       });
     });
 
-    body.querySelectorAll(".vn-crew-check-category").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const category = btn.dataset.category;
-        const categoryVehicles = byCategory.get(category) || [];
-        const categoryStatusEl = body.querySelector(`.vn-crew-category-status[data-category="${btn.dataset.category}"]`);
-        btn.disabled = true;
+    function bindCategoryButtons() {
+      body.querySelectorAll(".vn-crew-check-category").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const category = btn.dataset.category;
+          const categoryVehicles = byCategory.get(category) || [];
+          const categoryStatusEl = body.querySelector(`.vn-crew-category-status[data-category="${btn.dataset.category}"]`);
+          btn.disabled = true;
 
-        let done = 0;
-        let ok = 0;
-        let failed = 0;
-        categoryStatusEl.textContent = `0/${categoryVehicles.length} geprüft ...`;
+          let done = 0;
+          let ok = 0;
+          let failed = 0;
+          categoryStatusEl.textContent = `0/${categoryVehicles.length} geprüft ...`;
 
-        let nextIndex = 0;
-        async function worker() {
-          while (nextIndex < categoryVehicles.length) {
-            const vehicle = categoryVehicles[nextIndex++];
-            try {
-              const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
-              if (result.fullyStaffed) {
-                ok++;
-                problemsById.delete(vehicle.id);
-              } else {
+          let nextIndex = 0;
+          async function worker() {
+            while (nextIndex < categoryVehicles.length) {
+              const vehicle = categoryVehicles[nextIndex++];
+              try {
+                const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
+                if (result.fullyStaffed) {
+                  ok++;
+                  problemsById.delete(vehicle.id);
+                } else {
+                  failed++;
+                  problemsById.set(vehicle.id, {
+                    vehicle,
+                    message: `${result.trainedPersonnel}/${result.requiredPersonnel} erforderliches Personal zugewiesen`,
+                  });
+                }
+              } catch (e) {
                 failed++;
-                problemsById.set(vehicle.id, { vehicle, message: `${result.assignedCount}/${result.capacity} passend besetzt` });
+                problemsById.set(vehicle.id, { vehicle, message: e.message });
               }
-            } catch (e) {
-              failed++;
-              problemsById.set(vehicle.id, { vehicle, message: e.message });
+              done++;
+              categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+              document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
+              await saveVehicleCrewProblems(problemsById);
             }
-            done++;
-            categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
-            document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
           }
-        }
-        const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, categoryVehicles.length);
-        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+          const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, categoryVehicles.length);
+          await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-        btn.disabled = false;
+          btn.disabled = false;
+        });
       });
+    }
+    bindCategoryButtons();
+
+    document.getElementById("vn-crew-include-normal").addEventListener("change", async e => {
+      includeNormal = e.target.checked;
+      await storeData(includeNormal, VEHICLE_CREW_INCLUDE_NORMAL_KEY);
+      recomputeVisibleVehicles();
+      document.getElementById("vn-crew-groups").innerHTML = renderGroups();
+      bindCategoryButtons();
     });
   }
 
   //////////////////////////////////////////////////
   // Wachen-Baupläne: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
   // sein soll (welche Ausbauten, welche Fahrzeuge in welcher Anzahl, wie viel Sollpersonal).
-  // Konzept und Datenmodell (Bauplan-Felder, Regex-Namensfilter fuer z.B. Normalwache vs.
-  // Werkfeuerwehr) vom Community-Script "Wachenbaupläne" (BOS-Ernie) uebernommen - die
-  // Personal-Bedarfsrechnung nutzt aber UNSERE getVehicleTypeRequirement() (siehe Fahrzeug-
-  // Besatzung oben), die echte Teil-Anforderungen korrekt beruecksichtigt (das Original-
-  // Script rechnet das laut eigenem Kommentar bewusst nur naeherungsweise).
+  // Konzept und Datenmodell (Bauplan-Felder, Verfuegbar/Zugewiesen-Doppelliste fuer Ausbauten)
+  // vom Community-Script "Wachenbaupläne" (BOS-Ernie) uebernommen - die Personal-
+  // Bedarfsrechnung nutzt aber UNSERE getVehicleTypeRequirement() (siehe Fahrzeug-Besatzung
+  // oben), die echte Teil-Anforderungen korrekt beruecksichtigt (das Original-Script rechnet
+  // das laut eigenem Kommentar bewusst nur naeherungsweise).
   //////////////////////////////////////////////////
 
   function generateBlueprintId() {
@@ -4627,8 +4947,11 @@
   }
 
   // Summiert den Personalbedarf ueber alle Fahrzeuge eines Bauplans (Anzahl * Bedarf pro
-  // Fahrzeug) je Ausbildungs-Slug - "all"-Anforderungen zaehlen mit der vollen Besatzung
-  // (staffMax) je Fahrzeug, "min"-Anforderungen nur mit ihrer tatsaechlichen Mindestzahl.
+  // Fahrzeug) je Ausbildungs-Slug - geht IMMER von der minimalen Besatzung aus (staffMin), wie
+  // sie auch die Fahrzeug-Besatzung im Minimum-Modus zuweist: bei "all"-Anforderungen muessen
+  // dann alle staffMin Personen die Ausbildung haben, bei "min"-Anforderungen weiterhin deren
+  // tatsaechliche Mindestzahl. So verlangt der Bauplan nicht mehr Personal, als fuer den
+  // Betrieb der Fahrzeuge wirklich noetig ist (vorher: volle Besatzung/staffMax bei "all").
   function computeBlueprintPersonnelRequirements(blueprint) {
     const totals = new Map();
     for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
@@ -4636,7 +4959,7 @@
       const requirement = getVehicleTypeRequirement(Number(vehicleTypeId));
       if (!requirement) continue;
       for (const req of requirement.requirements) {
-        const perVehicle = req.min === null ? requirement.staffMax : req.min;
+        const perVehicle = req.min === null ? requirement.staffMin : req.min;
         totals.set(req.slug, (totals.get(req.slug) || 0) + perVehicle * quantity);
       }
     }
@@ -4653,8 +4976,9 @@
   // Einstellungen > "Wachen-Baupläne verwalten": Liste aller Baupläne mit Bearbeiten/
   // Löschen/Exportieren/Importieren, plus je Bauplan ein direkter Sprung zur Anwenden-
   // Ansicht (siehe renderStationBlueprintApplyScreen).
-  async function renderStationBlueprintsListScreen(goBack = renderSettingsScreen) {
+  async function renderStationBlueprintsListScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Wachen-Baupläne");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
 
@@ -4790,13 +5114,16 @@
     });
   }
 
-  // Erstellen/Bearbeiten eines Bauplans: Gebäudetyp, Name, optionaler Namensfilter (Regex,
-  // z.B. um Normalwache von Werkfeuerwehr zu unterscheiden), Ausbauten (Checkboxen aus dem
-  // bestehenden EXTENSION_CATALOG), Fahrzeuge+Anzahl (aus dem Fahrzeug-Katalog gefiltert nach
-  // Gebäudetyp) - das benötigte Personal wird daraus automatisch berechnet (computeBlueprint-
-  // PersonnelRequirements) und mit dem Sollpersonal verglichen.
+  // Erstellen/Bearbeiten eines Bauplans: Gebäudetyp, Name, Ausbauten (Verfügbar/Zugewiesen-
+  // Doppelliste wie beim Vorbild-Script "Wachenbaupläne" (BOS-Ernie), statt einer Reihe
+  // Checkboxen - uebersichtlicher bei vielen Ausbauten), Fahrzeuge+Anzahl (aus dem Fahrzeug-
+  // Katalog gefiltert nach Gebäudetyp) - das benötigte Personal wird daraus automatisch
+  // berechnet (computeBlueprintPersonnelRequirements) und mit dem Sollpersonal verglichen.
+  // Bewusst OHNE Regex-Namensfilter (gab es im Vorbild-Script) - unnoetige Komplexitaet, ein
+  // Bauplan gilt einfach fuer alle Wachen des gewaehlten Gebäudetyps.
   async function renderStationBlueprintEditScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Wachen-Baupläne › Bearbeiten");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
@@ -4809,23 +5136,58 @@
       (a, b) => a.name.localeCompare(b.name, "de"),
     );
 
-    function extensionCheckboxesHtml(pseudoId) {
-      if (!pseudoId) return `<p class="text-muted">Bitte zuerst Gebäudetyp wählen ...</p>`;
+    function extensionCatalogForPseudoId(pseudoId) {
+      if (!pseudoId) return [];
       const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
       const buildingKey = getBuildingKey({ building_type: pseudo.buildingType, small_building: pseudo.smallBuilding });
-      const catalog = EXTENSION_CATALOG[buildingKey] || [];
-      if (!catalog.length) return `<p class="text-muted">Keine Ausbauten für diesen Gebäudetyp bekannt.</p>`;
+      return EXTENSION_CATALOG[buildingKey] || [];
+    }
+
+    function sortSelectOptions(select) {
+      const opts = [...select.options].sort((a, b) => a.textContent.localeCompare(b.textContent, "de"));
+      opts.forEach(o => select.appendChild(o));
+    }
+
+    // Liefert die <option>-Listen fuer die beiden Auswahl-Boxen (Verfuegbar/Zugewiesen) -
+    // getrennt gerendert statt live per DOM-Move, damit ein Gebaeudetyp-Wechsel die Boxen
+    // sauber neu aufbauen kann.
+    function extensionListsHtml(pseudoId) {
+      const catalog = [...extensionCatalogForPseudoId(pseudoId)].sort((a, b) => a.name.localeCompare(b.name, "de"));
+      if (!pseudoId) return { available: "", assigned: "" };
+      if (!catalog.length) return { available: "", assigned: "" };
       const selectedIds = new Set(existing?.pseudoId === pseudoId ? existing.extensions : []);
-      return catalog
-        .map(
-          ext => `
-            <label class="checkbox-inline" style="margin-right:12px;">
-              <input type="checkbox" class="vn-bp-extension-checkbox" value="${ext.id}" ${selectedIds.has(ext.id) ? "checked" : ""}>
-              ${escapeHtml(ext.name)}
-            </label>
-          `,
-        )
-        .join("");
+      const option = ext => `<option value="${ext.id}">${escapeHtml(ext.name)}</option>`;
+      return {
+        available: catalog
+          .filter(e => !selectedIds.has(e.id))
+          .map(option)
+          .join(""),
+        assigned: catalog
+          .filter(e => selectedIds.has(e.id))
+          .map(option)
+          .join(""),
+      };
+    }
+
+    function bindExtensionLists() {
+      const availableSelect = document.getElementById("vn-bp-ext-available");
+      const assignedSelect = document.getElementById("vn-bp-ext-assigned");
+      const moveSelected = (from, to) => {
+        [...from.selectedOptions].forEach(opt => to.appendChild(opt));
+        sortSelectOptions(to);
+      };
+      document.getElementById("vn-bp-ext-add").addEventListener("click", () => moveSelected(availableSelect, assignedSelect));
+      document.getElementById("vn-bp-ext-remove").addEventListener("click", () => moveSelected(assignedSelect, availableSelect));
+      availableSelect.addEventListener("dblclick", e => {
+        if (e.target.tagName !== "OPTION") return;
+        assignedSelect.appendChild(e.target);
+        sortSelectOptions(assignedSelect);
+      });
+      assignedSelect.addEventListener("dblclick", e => {
+        if (e.target.tagName !== "OPTION") return;
+        availableSelect.appendChild(e.target);
+        sortSelectOptions(availableSelect);
+      });
     }
 
     function vehicleInputsHtml(pseudoId) {
@@ -4907,14 +5269,32 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="col-sm-2 control-label">Namensfilter (Regex)</label>
-          <div class="col-sm-10">
-            <input type="text" id="vn-bp-regex" class="form-control" value="${escapeHtml(existing?.buildingNameRegexPattern || "")}" placeholder="z.B. ^Florian.*NW$ - leer = alle Wachen dieses Typs">
-          </div>
-        </div>
-        <div class="form-group">
           <label class="col-sm-2 control-label">Ausbauten</label>
-          <div class="col-sm-10" id="vn-bp-extensions">${extensionCheckboxesHtml(existing?.pseudoId || "")}</div>
+          <div class="col-sm-10" id="vn-bp-extensions">
+            ${(() => {
+              const lists = extensionListsHtml(existing?.pseudoId || "");
+              return `
+                <div style="display:flex; gap:10px; align-items:flex-start;">
+                  <div style="flex:1;">
+                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Verfügbar (Doppelklick zum Hinzufügen)</label>
+                    <select id="vn-bp-ext-available" multiple size="8" class="form-control">${lists.available}</select>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:6px; margin-top:20px;">
+                    <button type="button" id="vn-bp-ext-add" class="btn btn-default btn-sm" title="Hinzufügen">
+                      <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
+                    </button>
+                    <button type="button" id="vn-bp-ext-remove" class="btn btn-default btn-sm" title="Entfernen">
+                      <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div style="flex:1;">
+                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Zugewiesen (Doppelklick zum Entfernen)</label>
+                    <select id="vn-bp-ext-assigned" multiple size="8" class="form-control">${lists.assigned}</select>
+                  </div>
+                </div>
+              `;
+            })()}
+          </div>
         </div>
         <div class="form-group">
           <label class="col-sm-2 control-label">Fahrzeuge</label>
@@ -4950,11 +5330,14 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindVehicleQuantityInputs();
+    bindExtensionLists();
     updatePersonnelRequirements();
 
     document.getElementById("vn-bp-pseudo-id").addEventListener("change", e => {
       const pseudoId = e.target.value;
-      document.getElementById("vn-bp-extensions").innerHTML = extensionCheckboxesHtml(pseudoId);
+      const lists = extensionListsHtml(pseudoId);
+      document.getElementById("vn-bp-ext-available").innerHTML = lists.available;
+      document.getElementById("vn-bp-ext-assigned").innerHTML = lists.assigned;
       document.getElementById("vn-bp-vehicles").innerHTML = vehicleInputsHtml(pseudoId);
       bindVehicleQuantityInputs();
       updatePersonnelRequirements();
@@ -4969,17 +5352,8 @@
         statusEl.innerHTML = `<span class="text-danger">Bitte Name und Gebäudetyp angeben.</span>`;
         return;
       }
-      const regexValue = document.getElementById("vn-bp-regex").value.trim();
-      if (regexValue) {
-        try {
-          new RegExp(regexValue);
-        } catch (e) {
-          statusEl.innerHTML = `<span class="text-danger">Namensfilter ist kein gültiger regulärer Ausdruck: ${escapeHtml(e.message)}</span>`;
-          return;
-        }
-      }
       const enabled = document.querySelector('input[name="vn-bp-enabled"]:checked')?.value !== "no";
-      const extensions = [...body.querySelectorAll(".vn-bp-extension-checkbox:checked")].map(cb => Number(cb.value));
+      const extensions = [...document.getElementById("vn-bp-ext-assigned").options].map(opt => Number(opt.value));
       const vehicles = [...body.querySelectorAll(".vn-bp-vehicle-qty")]
         .map(input => ({ vehicleTypeId: Number(input.dataset.vehicleTypeId), quantity: parseInt(input.value, 10) || 0 }))
         .filter(v => v.quantity > 0);
@@ -4991,7 +5365,6 @@
         enabled,
         pseudoId,
         name,
-        buildingNameRegexPattern: regexValue || null,
         personnelSetPoint,
         extensions,
         vehicles,
@@ -5001,14 +5374,14 @@
     });
   }
 
-  // Anwenden eines Bauplans: zeigt alle passenden Wachen (gleicher Gebäudetyp, optional durch
-  // den Namensfilter eingeschraenkt) mit Soll/Ist-Vergleich fuer Ausbauten, Fahrzeuge und
-  // Personal. Ausbauten koennen direkt gebaut werden (wiederverwendet buildExtension/
-  // renderBuildConfirmScreen aus dem Wachen-Check) - Fahrzeug-Kauf ist bislang nur ein Link
-  // in die Wache im Spiel (kein bekannter Kauf-Endpunkt), Personal-Luecken verweisen auf
-  // Fahrzeug-Besatzung/Schulungen.
+  // Anwenden eines Bauplans: zeigt alle passenden Wachen (gleicher Gebäudetyp) mit Soll/Ist-
+  // Vergleich fuer Ausbauten, Fahrzeuge und Personal. Ausbauten koennen direkt gebaut werden
+  // (wiederverwendet buildExtension/renderBuildConfirmScreen aus dem Wachen-Check), fehlende
+  // Fahrzeuge direkt gekauft (buyVehicle), Personal-Luecken verweisen auf Fahrzeug-Besatzung/
+  // Schulungen.
   async function renderStationBlueprintApplyScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Wachen-Baupläne › Anwenden");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
@@ -5027,22 +5400,14 @@
       return;
     }
 
-    let regex = null;
-    if (blueprint.buildingNameRegexPattern) {
-      try {
-        regex = new RegExp(blueprint.buildingNameRegexPattern);
-      } catch {
-        regex = null;
-      }
-    }
-
-    let allStations, vehicles, scanData, qualifications;
+    let allStations, vehicles, scanData, qualifications, scanMeta;
     try {
-      [allStations, vehicles, scanData, qualifications] = await Promise.all([
+      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([
         loadBuildingsForCheck(),
         fetchAllVehiclesV2(),
         getPersonnelScanData(),
         getPersonnelQualifications(),
+        getPersonnelScanMeta(),
       ]);
     } catch (e) {
       body.innerHTML = `
@@ -5057,22 +5422,26 @@
       return;
     }
 
-    const matchingStations = allStations.filter(
-      s => s.pseudoId === blueprint.pseudoId && (!regex || regex.test(s.name)),
-    );
+    const matchingStations = allStations.filter(s => s.pseudoId === blueprint.pseudoId);
 
-    const vehicleCountsByStation = new Map();
+    // Je Wache+Typ nicht nur die Anzahl, sondern auch die echten Fahrzeug-ids (fuer den
+    // Direktlink zu einem einzelnen ueberzaehligen Fahrzeug, siehe vehicleCell unten).
+    const vehiclesByStationAndType = new Map();
     for (const v of vehicles) {
       const stationId = String(v.building_id ?? v.building);
       const typeId = String(v.vehicle_type ?? v.type);
-      if (!vehicleCountsByStation.has(stationId)) vehicleCountsByStation.set(stationId, new Map());
-      const counts = vehicleCountsByStation.get(stationId);
-      counts.set(typeId, (counts.get(typeId) || 0) + 1);
+      if (!vehiclesByStationAndType.has(stationId)) vehiclesByStationAndType.set(stationId, new Map());
+      const byType = vehiclesByStationAndType.get(stationId);
+      if (!byType.has(typeId)) byType.set(typeId, []);
+      byType.get(typeId).push(String(v.id));
     }
 
     const requiredPersonnel = computeBlueprintPersonnelRequirements(blueprint);
 
-    function renderStationRow(station) {
+    // Liefert neben dem fertigen HTML auch die Sortier-Kennzahlen einer Zeile (siehe
+    // sortableColumns unten) - einmal pro Wache berechnet, nicht bei jedem Klick auf eine
+    // Spaltenueberschrift neu.
+    function buildStationRow(station) {
       const missingExtensionIds = blueprint.extensions.filter(extId => !station.extensions.some(e => e.type_id === extId));
       const catalog = EXTENSION_CATALOG[station.buildingKey] || [];
       const extensionCell = missingExtensionIds.length
@@ -5091,25 +5460,48 @@
             .join("")
         : `<span class="label label-success">alle gebaut</span>`;
 
-      const stationVehicleCounts = vehicleCountsByStation.get(station.id) || new Map();
-      const vehicleCell =
-        blueprint.vehicles
-          .map(bv => {
-            const have = stationVehicleCounts.get(String(bv.vehicleTypeId)) || 0;
-            const name = vehicleTypeCaptions[bv.vehicleTypeId] || `Typ ${bv.vehicleTypeId}`;
-            const cssClass = have >= bv.quantity ? "label-success" : "label-warning";
-            return `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}</span>`;
-          })
-          .join(" ") +
-        `<br><a href="/buildings/${station.id}" target="_blank" class="btn btn-xs btn-default" style="margin-top:4px;">
-           <span class="glyphicon glyphicon-shopping-cart" aria-hidden="true"></span> Zur Wache (Fahrzeug kaufen)
-         </a>`;
+      const byType = vehiclesByStationAndType.get(station.id) || new Map();
+      let vehicleDeficit = 0;
+      let vehicleSurplus = 0;
+      const vehicleCell = blueprint.vehicles
+        .map(bv => {
+          const ownIds = byType.get(String(bv.vehicleTypeId)) || [];
+          const have = ownIds.length;
+          const missing = Math.max(bv.quantity - have, 0);
+          const surplus = Math.max(have - bv.quantity, 0);
+          vehicleDeficit += missing;
+          vehicleSurplus += surplus;
+          const name = vehicleTypeCaptions[bv.vehicleTypeId] || `Typ ${bv.vehicleTypeId}`;
+          const cssClass = surplus ? "label-danger" : missing ? "label-warning" : "label-success";
+          const label = `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}</span>`;
+          if (surplus) {
+            const excessVehicleId = ownIds[ownIds.length - 1];
+            return `${label}
+              <button type="button" class="btn btn-xs btn-danger vn-bp-sell-vehicle" style="margin:1px;"
+                      data-vehicle-id="${excessVehicleId}" data-name="${escapeHtml(name)}" data-station-id="${station.id}"
+                      title="Verkauft eines der überzähligen Fahrzeuge">
+                <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> ${surplus}x zu viel
+              </button>`;
+          }
+          if (!missing) return label;
+          const catalogEntry = vehicleTypeCatalog[bv.vehicleTypeId];
+          if (!catalogEntry) return label;
+          return `${label}
+            <button type="button" class="btn btn-xs btn-primary vn-bp-buy-vehicle" style="margin:1px;"
+                    data-station-id="${station.id}" data-vehicle-type-id="${bv.vehicleTypeId}" data-name="${escapeHtml(name)}"
+                    data-missing="${missing}" data-cost="${(catalogEntry.credits || 0) * missing}" data-coins="${(catalogEntry.coins || 0) * missing}">
+              <span class="glyphicon glyphicon-shopping-cart" aria-hidden="true"></span> ${missing}x kaufen
+            </button>`;
+        })
+        .join(" ");
 
       const scan = scanData[station.id];
+      let personnelDeficit = scan ? 0 : -1;
       const personnelCell = scan
         ? [...requiredPersonnel.entries()]
             .map(([slug, required]) => {
               const have = scan.counts[slug] || 0;
+              if (have < required) personnelDeficit += required - have;
               const name = qualifications[slug] || slug;
               const cssClass = have >= required ? "label-success" : "label-warning";
               return `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${required}</span>`;
@@ -5117,7 +5509,7 @@
             .join(" ") || '<span class="text-muted">keine Anforderung</span>'
         : '<span class="label label-default">Nicht gescannt</span>';
 
-      return `
+      const html = `
         <tr>
           <td><a href="/buildings/${station.id}" target="_blank">${escapeHtml(station.name)}</a></td>
           <td>${extensionCell}</td>
@@ -5125,49 +5517,167 @@
           <td>${personnelCell}</td>
         </tr>
       `;
+      return {
+        html,
+        sortValues: {
+          station: station.name,
+          extensions: missingExtensionIds.length,
+          vehicles: vehicleDeficit + vehicleSurplus,
+          personnel: personnelDeficit,
+        },
+      };
     }
+
+    const rows = matchingStations.map(buildStationRow);
+
+    const sortableColumns = [
+      { key: "station", label: "Wache" },
+      { key: "extensions", label: "Fehlende Ausbauten" },
+      { key: "vehicles", label: "Fahrzeuge" },
+      { key: "personnel", label: "Personal" },
+    ];
+    let sortState = { key: "station", dir: "asc" };
+
+    function sortedRowsHtml() {
+      const { key, dir } = sortState;
+      const sorted = [...rows].sort((a, b) => {
+        const av = a.sortValues[key];
+        const bv = b.sortValues[key];
+        const cmp = typeof av === "string" ? av.localeCompare(bv, "de") : av - bv;
+        return dir === "asc" ? cmp : -cmp;
+      });
+      return sorted.map(r => r.html).join("") || `<tr><td colspan="4" class="text-muted">Keine passenden Wachen gefunden.</td></tr>`;
+    }
+
+    function theadHtml() {
+      return `
+        <tr>
+          ${sortableColumns
+            .map(col => {
+              const arrow = sortState.key === col.key ? (sortState.dir === "asc" ? " ▲" : " ▼") : "";
+              return `<th class="vn-bp-sort-header" data-key="${col.key}" style="cursor:pointer; user-select:none;">${escapeHtml(col.label)}${arrow}</th>`;
+            })
+            .join("")}
+        </tr>
+      `;
+    }
+
+    function bindSortHeaders() {
+      body.querySelectorAll(".vn-bp-sort-header").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.dataset.key;
+          sortState = { key, dir: sortState.key === key && sortState.dir === "asc" ? "desc" : "asc" };
+          document.getElementById("vn-bp-apply-thead").innerHTML = theadHtml();
+          document.getElementById("vn-bp-apply-tbody").innerHTML = sortedRowsHtml();
+          bindSortHeaders();
+          bindRowActions();
+        });
+      });
+    }
+
+    function bindRowActions() {
+      body.querySelectorAll(".vn-bp-build-ext").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
+          renderBuildConfirmScreen({
+            title: btn.dataset.name,
+            costCredits: Number(btn.dataset.cost),
+            costCoins: Number(btn.dataset.coins),
+            onConfirm: currency => buildExtension(btn.dataset.stationId, Number(btn.dataset.extId), currency),
+            goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
+            historyType: "extension",
+            historyLabel: btn.dataset.name,
+            historyStation: stationName,
+          });
+        });
+      });
+
+      body.querySelectorAll(".vn-bp-buy-vehicle").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
+          const missing = Number(btn.dataset.missing);
+          renderBuildConfirmScreen({
+            title: `${missing}x ${btn.dataset.name}`,
+            costCredits: Number(btn.dataset.cost),
+            costCoins: Number(btn.dataset.coins),
+            onConfirm: async currency => {
+              for (let i = 0; i < missing; i++) {
+                await buyVehicle(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), currency);
+              }
+            },
+            goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
+            historyType: "vehicle",
+            historyLabel: `${missing}x ${btn.dataset.name}`,
+            historyStation: stationName,
+          });
+        });
+      });
+
+      body.querySelectorAll(".vn-bp-sell-vehicle").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
+          renderVehicleSellConfirmScreen({
+            vehicleId: btn.dataset.vehicleId,
+            vehicleName: btn.dataset.name,
+            stationName,
+            goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
+          });
+        });
+      });
+    }
+
+    const lastScanLabel = scanMeta.lastScanAt
+      ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
+      : "Personal noch nie gescannt";
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
         Bauplan "<b>${escapeHtml(blueprint.name)}</b>" (${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}) auf
-        ${matchingStations.length} passende Wache(n) angewendet. Fehlende Ausbauten direkt bauen
-        (Kosten vorher bestätigen), fehlendes Personal über Personal-Check/Schulungen bzw.
-        Fahrzeug-Besatzung nachrüsten. Fahrzeug-Kauf ist bisher nur ein direkter Link in die
-        Wache (noch nicht automatisiert).
+        ${matchingStations.length} passende Wache(n) angewendet. Spaltenüberschriften anklicken zum
+        Sortieren. Fehlende Ausbauten und Fahrzeuge direkt kaufen (Kosten vorher bestätigen), zu
+        viele Fahrzeuge (rot) direkt verkaufen (Bestätigung vorher nötig - kann NICHT rückgängig
+        gemacht werden), fehlendes Personal über Personal-Check/Schulungen bzw. Fahrzeug-
+        Besatzung nachrüsten. Reicht der Stellplatz einer Wache nicht, bricht der Kauf mit einer
+        Fehlermeldung ab - vorher ggf. die Ausbaustufe erhöhen. Wachenname anklicken öffnet die
+        Wache in einem neuen Tab.
       </p>
       <div style="max-height:60vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
-          <thead>
-            <tr><th>Wache</th><th>Fehlende Ausbauten</th><th>Fahrzeuge</th><th>Personal</th></tr>
-          </thead>
-          <tbody>
-            ${matchingStations.map(renderStationRow).join("") || `<tr><td colspan="4" class="text-muted">Keine passenden Wachen gefunden.</td></tr>`}
-          </tbody>
+          <thead id="vn-bp-apply-thead">${theadHtml()}</thead>
+          <tbody id="vn-bp-apply-tbody">${sortedRowsHtml()}</tbody>
         </table>
       </div>
-      <div class="vn-sticky-footer">
+      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
+        <button id="vn-bp-apply-refresh" type="button" class="btn btn-primary">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Aktualisieren
+        </button>
+        <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>
       </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    bindSortHeaders();
+    bindRowActions();
 
-    body.querySelectorAll(".vn-bp-build-ext").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
-        renderBuildConfirmScreen({
-          title: btn.dataset.name,
-          costCredits: Number(btn.dataset.cost),
-          costCoins: Number(btn.dataset.coins),
-          onConfirm: currency => buildExtension(btn.dataset.stationId, Number(btn.dataset.extId), currency),
-          goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
-          historyType: "extension",
-          historyLabel: btn.dataset.name,
-          historyStation: stationName,
+    document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
+      const btn = document.getElementById("vn-bp-apply-refresh");
+      btn.disabled = true;
+      body.insertAdjacentHTML(
+        "beforeend",
+        `<p id="vn-bp-apply-refresh-status"><em>Wachen, Fahrzeuge und Personal werden neu geladen ...</em></p>`,
+      );
+      try {
+        await scanAllPersonnel((done, of) => {
+          const statusEl = document.getElementById("vn-bp-apply-refresh-status");
+          if (statusEl) statusEl.innerHTML = `<em>Personal wird neu gescannt ... (${done}/${of})</em>`;
         });
-      });
+      } catch (e) {
+        console.warn("[FuxTools] Personal-Rescan im Wachenbauplan fehlgeschlagen:", e);
+      }
+      renderStationBlueprintApplyScreen(blueprintId, goBack);
     });
   }
 
@@ -5301,6 +5811,7 @@
   // gesperrter Hinweis sichtbar.
   async function renderPersonnelRequirementsSettingsScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Einstellungen › Personal-Standard");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
