@@ -59,6 +59,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - Neuer "Abbrechen"-Button bei Fahrzeug-Besatzung (Kategorie-Prüfung und "Alle Zuweisungen
   rückgängig machen") für lang laufende Durchläufe mit vielen Fahrzeugen.
 - Erklärungstexte im gesamten Script gekürzt - nur noch das Wichtigste.
+- **Bugfix "Alle Zuweisungen rückgängig machen"**: sprang nach Fertig-/Abbruch-Meldung
+  automatisch nach 1,5s zurück ins Hauptmenü - der Endstatus (wie viele Personen von wie
+  vielen Fahrzeugen abgezogen wurden) war kaum lesbar. Bleibt jetzt stehen, bis man selbst
+  über "Abbrechen" zurückgeht.
 
 ## Stable (v0.5.1)
 
