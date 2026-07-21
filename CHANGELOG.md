@@ -16,6 +16,8 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   FuxTools-Eintrag direkt in der Navigationsleiste.
 - Einstellungen lassen sich als Datei sichern und wiederherstellen (z. B. vor einer
   Neuinstallation).
+- Kritische Fehler (z. B. beim Start) werden jetzt direkt auf der Seite angezeigt statt nur
+  in der Browser-Konsole - hilft uns, Bugs aus der Beta-Phase besser nachzuvollziehen.
 
 ## Stable (v0.5.1)
 
