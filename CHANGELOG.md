@@ -52,6 +52,13 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   die komplett geleerten Fahrzeuge - das löst im Spiel aber eine automatische Nachbesetzung
   aus, genau das Gegenteil von dem, was der Button erreichen soll. Der FMS-Status bleibt
   jetzt unangetastet, nur die Besatzung wird abgezogen.
+- **Bugfix Fahrzeug-Besatzung**: Fahrzeuge mit teilweiser Ausbildungsanforderung (z.B. NAW
+  braucht nur 1 Notarzt bei 3 Plätzen) blieben unter der Mindestbesatzung hängen, weil die
+  restlichen Plätze nie mit normalem Personal aufgefüllt wurden. Wird jetzt bis
+  Minimum/Vollbesatzung ergänzt.
+- Neuer "Abbrechen"-Button bei Fahrzeug-Besatzung (Kategorie-Prüfung und "Alle Zuweisungen
+  rückgängig machen") für lang laufende Durchläufe mit vielen Fahrzeugen.
+- Erklärungstexte im gesamten Script gekürzt - nur noch das Wichtigste.
 
 ## Stable (v0.5.1)
 

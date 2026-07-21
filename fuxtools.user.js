@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.33
+// @version     0.9.34
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.33";
+  const SCRIPT_VERSION = "0.9.34";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1596,43 +1596,26 @@
     const body = document.getElementById("vehicle-naming-modal-body");
 
     body.innerHTML = `
-      <p>Die Module unter <b>"Wachen &amp; Fahrzeuge"</b> hängen zusammen - hier die empfohlene
-      Reihenfolge, wenn du FuxTools zum ersten Mal nutzt:</p>
+      <p>Empfohlene Reihenfolge:</p>
 
       <ol style="padding-left:20px;">
-        <li style="margin-bottom:12px;">
-          <b>Wachen-Bauplaner</b>: Lege pro Gebäudetyp (z.B. Feuerwache, Rettungswache) einen
-          Bauplan an - welche Ausbauten, wie viele Fahrzeuge je Typ. Der benötigte
-          Personal-Sollwert wird daraus automatisch berechnet. Nur EIN Bauplan je Gebäudetyp
-          kann gleichzeitig aktiv sein - der bestimmt dann die Vorgaben für alle Wachen dieses
-          Typs.
+        <li style="margin-bottom:8px;">
+          <b>Wachen-Bauplaner</b>: Bauplan je Gebäudetyp anlegen (Ausbauten, Fahrzeuge) - Personal
+          wird automatisch berechnet. Nur ein Bauplan je Typ aktiv.
         </li>
-        <li style="margin-bottom:12px;">
-          <b>Bauplan "Anwenden"</b>: zeigt für jede passende Wache Soll/Ist - fehlende Ausbauten
-          und Fahrzeuge kannst du direkt aus der Liste bauen bzw. kaufen, überzählige Fahrzeuge
-          verkaufen.
+        <li style="margin-bottom:8px;">
+          <b>Bauplan "Anwenden"</b>: Soll/Ist je Wache, direkt bauen/kaufen/verkaufen.
         </li>
-        <li style="margin-bottom:12px;">
-          <b>Personal-Check &amp; Schulungen</b>: sobald ein Bauplan aktiv ist, siehst du hier
-          automatisch, wo Personal mit bestimmten Ausbildungen fehlt - fehlende Lehrgänge lassen
-          sich direkt starten.
+        <li style="margin-bottom:8px;">
+          <b>Personal-Check &amp; Schulungen</b>: fehlendes Ausbildungspersonal, Lehrgänge starten.
         </li>
-        <li style="margin-bottom:12px;">
-          <b>Fahrzeug-Besatzung</b>: weist vorhandenes, passend ausgebildetes Personal
-          automatisch den richtigen Fahrzeugen zu (und korrigiert danach den Funk-Status).
+        <li style="margin-bottom:8px;">
+          <b>Fahrzeug-Besatzung</b>: weist passendes Personal automatisch zu.
         </li>
         <li>
-          <b>Wachenausbau</b> und <b>Schnellumbenennung</b> funktionieren unabhängig von den
-          anderen Modulen: Wachenausbau für eine reine Übersicht/Einzelbau ohne Bauplan,
-          Schnellumbenennung für Fahrzeuge/Wachen/Leitstellen.
+          <b>Wachenausbau</b> und <b>Schnellumbenennung</b> funktionieren unabhängig davon.
         </li>
       </ol>
-
-      <p class="text-muted" style="font-size:12px;">
-        Tipp: Fehler siehst du seit v0.9.24 direkt auf der Seite (roter Hinweis unten rechts)
-        statt nur in der Browser-Konsole - ein Fehlerprotokoll dafür findest du in den
-        Einstellungen.
-      </p>
 
       <div class="vn-sticky-footer">
         <button type="button" id="vn-btn-back" class="btn btn-default">
@@ -3719,11 +3702,8 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Grün = gebaut und aktiv, Blau = in Bau, Orange = nicht gebaut, aber gefordert, Grau = nicht
-        gebaut. Maus über einen Ausbau halten zeigt Namen und Kosten. Klick auf einen nicht gebauten
-        Ausbau öffnet den Bau-Dialog (Credits oder Coins, du entscheidest) – kostet Spielgeld!
-        ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch mindestens ein
-        geforderter Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
+        Grün = gebaut/aktiv, Blau = in Bau, Orange = gefordert, Grau = nicht gebaut.
+        ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch ein Ausbau.
       </p>
       <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
         <select id="vn-station-check-type-filter" class="form-control" style="max-width:220px;">
@@ -4079,12 +4059,8 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Prüft je Wache, ob genug Personal mit bestimmten Ausbildungen vorhanden ist. Grün =
-        genau passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
-        Scannt automatisch neu, wenn der letzte Scan mehr als 15 Minuten her ist. Die
-        geforderte Anzahl kommt automatisch aus dem je Gebäudetyp <b>aktiven Wachenbauplan</b>
-        (dessen Fahrzeuge bestimmen den Personalbedarf) - Gebäudetypen ohne aktiven Bauplan
-        fordern nichts.
+        Grün = passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
+        Bedarf kommt aus dem aktiven Wachenbauplan je Gebäudetyp.
       </p>
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
         <button type="button" id="vn-personnel-goto-blueprints" class="btn btn-default btn-sm">
@@ -4690,13 +4666,9 @@
     function render() {
       body.innerHTML = `
         <p class="text-muted" style="font-size:12px;">
-          Zeigt, wie viel Personal laut dem je Gebäudetyp <b>aktiven Wachenbauplan</b> (dessen
-          Fahrzeuge bestimmen den Personalbedarf - Gebäudetypen ohne aktiven Bauplan fordern
-          nichts) und dem letzten Personal-Check-Scan noch fehlt, gruppiert nach Schultyp, und
-          schickt es automatisch (bis zu ${SCHOOLING_SEATS_PER_ROOM} Personen pro Klassenraum)
-          in den passenden Lehrgang der eigenen Schule. Startet echte Lehrgänge (mehrere Tage,
-          Personal steht währenddessen nicht für Einsätze zur Verfügung) - bitte die Anzahl vor
-          dem Klick prüfen.
+          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven
+          Wachenbauplan) und startet echte Lehrgänge - Personal steht währenddessen nicht für
+          Einsätze zur Verfügung, Anzahl vorher prüfen.
         </p>
         <div id="vn-schooling-overview">${renderSchoolOverview()}</div>
         <div class="form-inline" style="margin-bottom:10px;">
@@ -5103,6 +5075,18 @@
         targetByRequirement.set(req.slug, target);
         assignedNow += await assignQualifiedPersonnelToVehicleForSlug(vehicle.id, req.slug, target, vehicle.staffMax);
       }
+      // Bei TEIL-Anforderungen (z.B. NAW: nur 1 Notarzt noetig, staffMax aber 3) blieben die
+      // uebrigen Plaetze bisher leer, selbst wenn reichlich unqualifiziertes Personal frei war -
+      // die Schleife oben fuellt ja nur die Ausbildungs-Slugs selbst auf. Deshalb danach mit
+      // BELIEBIGEM verfuegbarem Personal bis staffMin/staffMax auffuellen - aber nur, wenn KEINE
+      // Anforderung "alle muessen das koennen" ist (min:null, z.B. ELW 2). Dort waere ein
+      // zusaetzlicher, unpassend ausgebildeter Platz ein Verstoss gegen genau diese Anforderung,
+      // ein unvollstaendig besetztes ELW 2 ist also weiterhin korrekt und gewollt.
+      const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
+      if (!hasFullRequirement) {
+        const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
+        assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax);
+      }
     } else {
       const target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
       assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax);
@@ -5417,14 +5401,8 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Zeigt Fahrzeuge, deren Besatzung eine bestimmte Ausbildung braucht (z.B. ELW 2 - alle
-        Plätze, oder GRTW - nur 1 von 6 mit Notarzt-Ausbildung), gruppiert nach Kategorie.
-        Optional auch normale Fahrzeuge ohne Ausbildungsanforderung (z.B. LF) - diese werden
-        einfach mit beliebigem verfügbarem Personal aufgefüllt. "Alle ... prüfen &amp;
-        zuweisen" belegt für jedes Fahrzeug der Kategorie freie Plätze mit verfügbarem,
-        passendem Personal (kein Unterricht, noch niemand anderem zugewiesen) und setzt
-        danach den Fahrzeugstatus: FMS 6 (nicht besetzt), wenn die Besatzung nicht passt,
-        sonst FMS 2 (frei auf Funk). Fahrzeuge im Einsatz werden nie angefasst.
+        Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale
+        Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt).
       </p>
       <div class="form-inline" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
         <label style="font-size:12px; margin:0;">Bei Teil-Anforderungen (z.B. GRTW/NAW) zuweisen:</label>
@@ -5510,13 +5488,29 @@
       });
     });
 
+    // category -> laufender Abbrechen-Zustand ({cancelled:false}), solange ein Lauf aktiv ist.
+    // Ein zweiter Klick auf denselben (jetzt rot/"Abbrechen" beschrifteten) Button bricht den
+    // laufenden Durchlauf ab, statt einen zweiten parallel zu starten.
+    const runningCategoryRuns = new Map();
+
     function bindCategoryButtons() {
       body.querySelectorAll(".vn-crew-check-category").forEach(btn => {
+        const category = btn.dataset.category;
+        const originalLabel = btn.innerHTML;
         btn.addEventListener("click", async () => {
-          const category = btn.dataset.category;
+          const running = runningCategoryRuns.get(category);
+          if (running) {
+            running.cancelled = true;
+            return;
+          }
+
+          const state = { cancelled: false };
+          runningCategoryRuns.set(category, state);
           const categoryVehicles = byCategory.get(category) || [];
           const categoryStatusEl = body.querySelector(`.vn-crew-category-status[data-category="${btn.dataset.category}"]`);
-          btn.disabled = true;
+          btn.classList.remove("btn-primary");
+          btn.classList.add("btn-danger");
+          btn.innerHTML = `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`;
 
           let done = 0;
           let ok = 0;
@@ -5542,8 +5536,10 @@
           let nextStationIndex = 0;
           async function worker() {
             while (nextStationIndex < stationQueue.length) {
+              if (state.cancelled) return;
               const stationVehicles = stationQueue[nextStationIndex++];
               for (const vehicle of stationVehicles) {
+                if (state.cancelled) return;
                 try {
                   const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
                   if (result.fullyStaffed) {
@@ -5574,7 +5570,13 @@
           const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
           await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-          btn.disabled = false;
+          if (state.cancelled) {
+            categoryStatusEl.textContent = `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+          }
+          runningCategoryRuns.delete(category);
+          btn.classList.remove("btn-danger");
+          btn.classList.add("btn-primary");
+          btn.innerHTML = originalLabel;
         });
       });
     }
@@ -5601,13 +5603,8 @@
     body.innerHTML = `
       <p class="text-danger"><b>Wirklich bei ${vehicles.length} Fahrzeugen die komplette Besatzung abziehen?</b></p>
       <p>
-        Das betrifft ALLE Fahrzeuge in der aktuell gewählten Leitstellen-Auswahl (auch die,
-        die gerade wegen der Checkbox "Normale Fahrzeuge einbeziehen" nicht angezeigt werden) -
-        danach hat keines davon mehr zugewiesenes Personal. Der FMS-Status selbst bleibt
-        unangetastet (FMS 6 würde im Spiel eine automatische Nachbesetzung auslösen - das
-        Gegenteil von dem, was dieser Button erreichen soll). Fahrzeuge, die gerade im Einsatz
-        sind, werden dabei übersprungen. Das ist eine echte, sofort wirksame Änderung im Spiel
-        und lässt sich nicht per Klick rückgängig machen.
+        Betrifft alle Fahrzeuge der aktuellen Leitstellen-Auswahl. Sofort wirksam im Spiel,
+        nicht per Klick rückgängig zu machen. Fahrzeuge im Einsatz werden übersprungen.
       </p>
       <div id="vn-crew-unassign-confirm-status" style="margin-top:10px;"></div>
       <div class="vn-sticky-footer">
@@ -5625,8 +5622,20 @@
     const confirmBtn = document.getElementById("vn-btn-unassign-confirm");
     const statusEl = document.getElementById("vn-crew-unassign-confirm-status");
 
+    let cancelRun = null;
     confirmBtn.addEventListener("click", async () => {
-      confirmBtn.disabled = true;
+      // Waehrend des Laufs wird aus dem Bestaetigen- ein Abbrechen-Button - bei vielen
+      // Fahrzeugen kann das eine Weile dauern, ohne Abbrechen muesste man sonst warten.
+      if (cancelRun) {
+        cancelRun.cancelled = true;
+        return;
+      }
+      const state = { cancelled: false };
+      cancelRun = state;
+      confirmBtn.classList.remove("btn-danger");
+      confirmBtn.classList.add("btn-default");
+      confirmBtn.innerHTML = `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`;
+      document.getElementById("vn-btn-back").disabled = true;
 
       // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
       // den Personal-Pool), verschiedene Wachen parallel.
@@ -5643,8 +5652,10 @@
       let nextStationIndex = 0;
       async function worker() {
         while (nextStationIndex < stationQueue.length) {
+          if (state.cancelled) return;
           const stationVehicles = stationQueue[nextStationIndex++];
           for (const vehicle of stationVehicles) {
+            if (state.cancelled) return;
             try {
               removedTotal += await clearVehicleCrew(vehicle);
             } catch {
@@ -5658,7 +5669,8 @@
       const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-      statusEl.innerHTML = `<span class="text-success">Fertig: ${removedTotal} Personen von ${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}.</span>`;
+      const cancelSuffix = state.cancelled ? " (abgebrochen)" : "";
+      statusEl.innerHTML = `<span class="text-success">Fertig${cancelSuffix}: ${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}.</span>`;
       setTimeout(goBack, 1500);
     });
   }
@@ -6437,14 +6449,9 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" (${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}) auf
-        ${matchingStations.length} passende Wache(n) angewendet. Spaltenüberschriften anklicken zum
-        Sortieren. Fehlende Ausbauten und Fahrzeuge direkt kaufen (Kosten vorher bestätigen), zu
-        viele Fahrzeuge (rot) direkt verkaufen (Bestätigung vorher nötig - kann NICHT rückgängig
-        gemacht werden), fehlendes Personal über Personal-Check/Schulungen bzw. Fahrzeug-
-        Besatzung nachrüsten. Reicht der Stellplatz einer Wache nicht, bricht der Kauf mit einer
-        Fehlermeldung ab - vorher ggf. die Ausbaustufe erhöhen. Wachenname anklicken öffnet die
-        Wache in einem neuen Tab.
+        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)
+        angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,
+        Personal über Personal-Check/Schulungen/Fahrzeug-Besatzung nachrüsten.
       </p>
       <div style="max-height:60vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
