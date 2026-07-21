@@ -13,6 +13,30 @@ vorbehalten, damit wir nicht ungewollt in Richtung `1.0` rutschen.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.9.23**
+  - Fahrzeug-Katalog hat jetzt einen Notfall-Fallback: falls api.lss-manager.de mal nicht
+    erreichbar ist (Seite down, o.ä.), lädt FuxTools automatisch eine eigene Kopie aus dem
+    FuxTools-Repo (`data/vehicle-types-fallback.json`) nach, statt komplett ohne
+    Fahrzeugdaten dazustehen. Diese Kopie wird nur 1 Stunde gecacht (statt 1 Tag), damit
+    beim nächsten Laden gleich wieder die echte, aktuelle Quelle versucht wird. Bestehende,
+    noch gültige (auch abgelaufene) Cache-Daten werden zusätzlich als letzte Rückfalloption
+    weiterverwendet, falls auch der Fallback mal nicht erreichbar ist.
+- **0.9.22**
+  - Pre-Release-Review vor den ersten Beta-Testern: Code komplett auf Fehler, tote Codeteile
+    und account-spezifische Daten geprüft.
+  - Bugfix: `addMenuEntry()` konnte das Script mit einem uncaught TypeError abbrechen, falls
+    `#menu_profile` auf der Seite mal nicht gefunden wird - jetzt eine klare Fehlermeldung in
+    der Konsole statt eines kompletten Absturzes.
+  - Bugfix: der Start (`main()`) nutzte `Promise.all` für die drei Initialisierungsschritte -
+    schlug der Fahrzeug-Katalog-Abruf von der externen Seite api.lss-manager.de fehl (z.B.
+    durch Adblocker oder kurzzeitige Downtime), wurden dadurch auch der Navbar-Menüpunkt und
+    der Update-Check nie erreicht und FuxTools war komplett unsichtbar. Jetzt mit
+    `Promise.allSettled` - ein einzelner fehlgeschlagener Schritt blockiert die anderen nicht
+    mehr, Fehler werden nur noch in der Konsole geloggt.
+  - Geprüft und bestätigt: keine Account-spezifischen Daten (Passwörter, Tokens, feste
+    Wachen-/User-IDs) im Code - alle Fuxaro-Erwähnungen sind Lizenz-/Autoren-Angaben, alle
+    API-Aufrufe laufen über die Session des jeweiligen Nutzers. `ALL_SETTINGS_KEYS` gegen alle
+    tatsächlich genutzten Storage-Keys gegengeprüft - vollständig und ohne Karteileichen.
 - **0.9.21**
   - "Wachen-Baupläne" heißt jetzt "Wachen-Bauplaner" (Menüpunkt, Titel, Buttons überall
     umbenannt - der Community-Vorbild-Script-Name "Wachenbaupläne" in Code-Kommentaren bleibt

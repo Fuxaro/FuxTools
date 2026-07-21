@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.21
+// @version     0.9.23
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.21";
+  const SCRIPT_VERSION = "0.9.23";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -50,6 +50,16 @@
   // Immer main, unabhaengig vom Kanal - das Logo ist ein reines Bild-Asset ohne
   // Versionsbezug und liegt deshalb nur auf einem Branch (main), nicht auf beta.
   const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
+  // Eigene Kopie des Fahrzeug-Katalogs im FuxTools-Repo (siehe data/vehicle-types-fallback.json)
+  // - wird NUR genutzt, wenn die eigentliche Quelle api.lss-manager.de nicht erreichbar ist
+  // (siehe fetchVehicleTypeCatalog()). Ist zwangslaeufig irgendwann veraltet, verhindert aber,
+  // dass FuxTools komplett ohne Fahrzeugdaten dasteht, falls die fremde Seite mal down geht
+  // oder ganz verschwindet.
+  const VEHICLE_TYPES_FALLBACK_STABLE_URL =
+    "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
+  const VEHICLE_TYPES_FALLBACK_BETA_URL =
+    "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/data/vehicle-types-fallback.json";
+  const VEHICLE_TYPES_FALLBACK_URL = CHANNEL === "beta" ? VEHICLE_TYPES_FALLBACK_BETA_URL : VEHICLE_TYPES_FALLBACK_STABLE_URL;
 
   let modalFooterEl = null;
   let availableUpdateVersion = null;
@@ -746,14 +756,38 @@
     }
   }
 
-  async function fetchAndStoreData(url, key) {
+  async function fetchJson(url) {
     const response = await fetch(url);
     if (!response.ok) throw new Error("Network response was not ok");
-    const data = await response.json();
-    const expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + 1);
-    await storeData({ data, expirationDate }, key);
-    return data;
+    return response.json();
+  }
+
+  async function storeVehicleTypes(data, expiresInMs) {
+    const expirationDate = new Date(Date.now() + expiresInMs);
+    await storeData({ data, expirationDate }, cacheKeyVehicleTypes);
+  }
+
+  // Holt den Fahrzeug-Katalog primaer von api.lss-manager.de. Schlaegt das fehl (Seite down,
+  // Netzwerkfehler, Adblocker), wird als Notfall-Ersatz die eigene, im FuxTools-Repo gepflegte
+  // Kopie (VEHICLE_TYPES_FALLBACK_URL, siehe data/vehicle-types-fallback.json) geladen - die ist
+  // zwangslaeufig irgendwann veraltet, deshalb nur 1 Stunde statt 1 Tag gecacht, damit beim
+  // naechsten Laden gleich wieder die echte, aktuelle Quelle versucht wird.
+  async function fetchVehicleTypeCatalog() {
+    try {
+      const data = await fetchJson("https://api.lss-manager.de/de_DE/vehicles");
+      await storeVehicleTypes(data, 24 * 60 * 60 * 1000);
+      return data;
+    } catch (primaryError) {
+      console.error("[FuxTools] Fahrzeug-Katalog von api.lss-manager.de nicht erreichbar, versuche Fallback:", primaryError);
+      try {
+        const data = await fetchJson(VEHICLE_TYPES_FALLBACK_URL);
+        await storeVehicleTypes(data, 60 * 60 * 1000);
+        return data;
+      } catch (fallbackError) {
+        console.error("[FuxTools] Auch Fallback-Fahrzeug-Katalog nicht erreichbar:", fallbackError);
+        throw fallbackError;
+      }
+    }
   }
 
   async function initVehicleTypeCaptions() {
@@ -762,7 +796,13 @@
     const expirationDate = cached?.expirationDate;
 
     if (!types || !expirationDate || new Date(expirationDate) < new Date()) {
-      types = await fetchAndStoreData("https://api.lss-manager.de/de_DE/vehicles", cacheKeyVehicleTypes);
+      try {
+        types = await fetchVehicleTypeCatalog();
+      } catch (error) {
+        // Beide Quellen down: lieber mit den alten (evtl. abgelaufenen) Cache-Daten
+        // weiterarbeiten als mit gar keinen, falls welche vorhanden sind.
+        if (!types) throw error;
+      }
     }
 
     vehicleTypeCaptions = {};
@@ -1962,8 +2002,16 @@
 
     // Eigener Punkt DIREKT in der Navigationsleiste, links neben dem gruen hervorgehobenen
     // Profil-Menue - nicht mehr versteckt in dessen Dropdown. Klassen des Profil-<li> werden
-    // uebernommen, damit Hoehe/Hover-Optik zu den Nachbar-Eintraegen passt.
+    // uebernommen, damit Hoehe/Hover-Optik zu den Nachbar-Eintraegen passt. Kein stiller
+    // Rueckfall auf die alte Position mehr (bewusst) - aber ein fehlendes #menu_profile darf
+    // trotzdem nicht den kompletten Start abbrechen (main() wuerde sonst auch
+    // checkForUpdateInBackground() nie erreichen) - deshalb hier nur ein klarer Konsolen-
+    // Fehler statt eines uncaught TypeError.
     const profileLi = document.querySelector("#menu_profile")?.closest("li");
+    if (!profileLi) {
+      console.error("[FuxTools] #menu_profile nicht gefunden - FuxTools-Menüpunkt konnte nicht eingefügt werden.");
+      return;
+    }
     li.className = profileLi.className;
     profileLi.parentNode.insertBefore(li, profileLi);
   }
@@ -5828,7 +5876,17 @@
       "color:#337ab7; font-weight:bold;",
       "color:inherit; font-weight:normal;"
     );
-    await Promise.all([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
+    // allSettled statt all: initVehicleTypeCaptions() haengt von einer FREMDEN Seite ab
+    // (api.lss-manager.de) und wirft bei jedem Netzwerk-Hakler (Adblocker, CORS, Seite kurz
+    // down) - mit Promise.all wuerde DAS allein addMenuEntry()/checkForUpdateInBackground()
+    // nie erreichen lassen, FuxTools waere dann komplett unsichtbar/unbedienbar. So bleiben
+    // Menuepunkt und Update-Check auch bei fehlgeschlagenem Fahrzeug-Katalog nutzbar
+    // (betroffene Funktionen wie Umbenennen/Wachen-Bauplaner zeigen dann nur leere Daten,
+    // statt das ganze Script lahmzulegen).
+    const results = await Promise.allSettled([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
+    results.forEach(r => {
+      if (r.status === "rejected") console.error("[FuxTools] Initialisierung fehlgeschlagen:", r.reason);
+    });
     addMenuEntry();
     checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
   }
