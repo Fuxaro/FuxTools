@@ -30,6 +30,11 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   kann, dass anderen Fahrzeugen Personal fehlt.
 - Wachenausbau ans Ende der Modul-Liste verschoben (funktioniert unabhängig von den anderen),
   Suchfeld verkleinert und direkter Link zu "Geforderte Ausbauten anpassen" ergänzt.
+- **Bugfix Fahrzeug-Besatzung**: manche Fahrzeuge blieben trotz genug freiem Personal
+  unbesetzt (half oft erst beim erneuten Klick) - Ursache war eine Race Condition, wenn
+  mehrere Fahrzeuge DERSELBEN Wache gleichzeitig geprüft wurden (teilen sich denselben
+  Personal-Pool). Fahrzeuge einer Wache laufen jetzt immer strikt nacheinander, verschiedene
+  Wachen weiterhin parallel.
 
 ## Stable (v0.5.1)
 
