@@ -63,6 +63,12 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   automatisch nach 1,5s zurück ins Hauptmenü - der Endstatus (wie viele Personen von wie
   vielen Fahrzeugen abgezogen wurden) war kaum lesbar. Bleibt jetzt stehen, bis man selbst
   über "Abbrechen" zurückgeht.
+- **Bugfix Fahrzeug-Besatzung**: nach Wechsel von "Volle Besatzung" zurück auf "Minimum" blieb
+  überzähliges Personal auf bereits voll besetzten Fahrzeugen stehen. Wird beim nächsten
+  Prüfen/Zuweisen jetzt wieder bis auf die Mindestbesatzung abgezogen (Teil-Anforderungen
+  bleiben dabei eingehalten), damit es für andere Fahrzeuge frei wird.
+- Hauptmenü: Fahrzeug-Besatzung und Wachenausbau in eine eigene Sektion "Helfer" verschoben -
+  Wachen-Bauplaner, Personal-Check und Schulungen (die zusammenhängen) bleiben für sich.
 
 ## Stable (v0.5.1)
 

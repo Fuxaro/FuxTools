@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.35
+// @version     0.9.36
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.35";
+  const SCRIPT_VERSION = "0.9.36";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1511,10 +1511,6 @@
             <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
             Wachen-Bauplaner
           </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
-            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
-            Fahrzeug-Besatzung
-          </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">
             <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
             Personal-Check
@@ -1522,6 +1518,14 @@
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">
             <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
             Schulungen
+          </button>
+        </div>
+
+        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>
+        <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
+            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
+            Fahrzeug-Besatzung
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
             <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
@@ -1586,10 +1590,11 @@
     document.getElementById("vn-menu-how-it-works").addEventListener("click", () => renderHowItWorksScreen(renderMainMenu));
   }
 
-  // Kurze Einstiegs-Anleitung fuer neue (Beta-)Nutzer: die Module unter "Wachen & Fahrzeuge"
-  // haengen inzwischen zusammen (Bauplan -> Personalbedarf -> Schulungen/Besatzung), das ist
-  // ohne Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf
-  // noetig (anders als renderChangelogScreen).
+  // Kurze Einstiegs-Anleitung fuer neue (Beta-)Nutzer: Wachen-Bauplaner, Personal-Check und
+  // Schulungen haengen zusammen (Bauplan -> Personalbedarf -> Schulungen), Fahrzeug-Besatzung
+  // und Wachenausbau (Sektion "Helfer") funktionieren dagegen unabhaengig davon - das ist ohne
+  // Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf noetig
+  // (anders als renderChangelogScreen).
   function renderHowItWorksScreen(goBack) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("So funktioniert's");
@@ -5060,6 +5065,58 @@
   // Danach wird geprueft, ob JETZT alle Anforderungen erfuellt sind (nicht nur die neu
   // zugewiesenen Personen - sonst wuerde trotz untrainierter Alt-Besatzung faelschlich FMS 2
   // gesetzt) und der FMS-Status gesetzt.
+  // Zieht bei "Minimum" ueberzaehliges Personal wieder ab (z.B. Reste eines frueheren "Volle
+  // Besatzung"-Laufs), bis staffMin erreicht ist - haelt dabei je Teil-Anforderung mindestens
+  // req.min ein. Wird NIE fuer Anforderungen "alle muessen das koennen" (min:null) aufgerufen,
+  // die zielen bewusst immer auf staffMax. Bevorzugt Personal OHNE Sonderausbildung zum
+  // Abziehen (spezialisiertes Personal bleibt moeglichst zugewiesen, wird woanders gebraucht).
+  async function trimVehicleCrewToStaffMin(vehicle) {
+    const { people } = await fetchVehicleAssignmentPage(vehicle.id);
+    const assigned = people.filter(p => p.assignedHere);
+    let excess = assigned.length - (Number(vehicle.staffMin) || 0);
+    if (excess <= 0) return 0;
+
+    const slugCounts = new Map();
+    for (const req of vehicle.requirements) {
+      slugCounts.set(req.slug, assigned.filter(p => p.slugs.includes(req.slug)).length);
+    }
+    const specialSlugs = getSpecialTrainingSlugs();
+    const candidates = [...assigned].sort((a, b) => {
+      const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
+      const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
+      return aSpecial - bSpecial;
+    });
+
+    const csrfToken = getCsrfTokenOrThrow(vehicle.id);
+    let removed = 0;
+    for (const person of candidates) {
+      if (excess <= 0) break;
+      if (!person.unassignHref) continue;
+      const wouldViolate = vehicle.requirements.some(
+        req => person.slugs.includes(req.slug) && slugCounts.get(req.slug) - 1 < req.min
+      );
+      if (wouldViolate) continue;
+
+      const res = await fetch(person.unassignHref, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-CSRF-Token": csrfToken,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!res.ok) throw new Error(`Abziehen fehlgeschlagen (${res.status}).`);
+      for (const req of vehicle.requirements) {
+        if (person.slugs.includes(req.slug)) slugCounts.set(req.slug, slugCounts.get(req.slug) - 1);
+      }
+      excess--;
+      removed++;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return removed;
+  }
+
   async function checkAndFixVehicleCrew(vehicle, staffingMode) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
@@ -5069,6 +5126,7 @@
 
     let assignedNow = 0;
     const targetByRequirement = new Map();
+    const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
     if (vehicle.requirements.length) {
       for (const req of vehicle.requirements) {
         const target = req.min === null || staffingMode === "full" ? vehicle.staffMax : req.min;
@@ -5082,7 +5140,6 @@
       // Anforderung "alle muessen das koennen" ist (min:null, z.B. ELW 2). Dort waere ein
       // zusaetzlicher, unpassend ausgebildeter Platz ein Verstoss gegen genau diese Anforderung,
       // ein unvollstaendig besetztes ELW 2 ist also weiterhin korrekt und gewollt.
-      const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
       if (!hasFullRequirement) {
         const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
         assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax);
@@ -5090,6 +5147,14 @@
     } else {
       const target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
       assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax);
+    }
+
+    // Wechsel von "Volle Besatzung" zurueck auf "Minimum": ueberzaehliges Personal (aus einem
+    // frueheren Voll-Lauf) wird jetzt wieder abgezogen statt nur stehen zu bleiben - so wird
+    // es fuer andere Fahrzeuge wieder frei. Nicht bei Anforderungen, die immer auf staffMax
+    // zielen (min:null).
+    if (staffingMode !== "full" && !hasFullRequirement) {
+      await trimVehicleCrewToStaffMin(vehicle);
     }
 
     const after = await fetchVehicleAssignmentPage(vehicle.id);
