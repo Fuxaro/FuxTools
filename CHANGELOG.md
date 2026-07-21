@@ -105,6 +105,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Geforderte Ausbauten zurücksetzen, Fahrzeug-Besatzung "Liste leeren") durch eigene, ins
   Design passende Bestätigungs-Screens ersetzt - sahen bisher wie ein Fremdkörper aus und
   waren für Browser-Automatisierung/KI-Testsessions nicht bedienbar.
+- **Bugfix Wachen-Bauplaner**: "Insgesamt benötigt" zeigte 0, sobald ein Bauplan nur Fahrzeuge
+  OHNE besondere Ausbildungsanforderung enthielt (z.B. normaler RTW) - die Tabelle zeigt zwar
+  weiterhin nur echte Ausbildungs-Anforderungen (wie Personal-Check/Schulungen), die
+  Gesamtzahl zählt jetzt aber auch die normale Mindestbesatzung (staffMin) mit.
 
 ## Stable (v0.5.1)
 

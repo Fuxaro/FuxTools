@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.44
+// @version     0.9.45
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.44";
+  const SCRIPT_VERSION = "0.9.45";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -6162,6 +6162,37 @@
     return totals;
   }
 
+  // Wie computeBlueprintPersonnelRequirements(), aber als EIN Gesamtwert (nicht pro Ausbildungs-
+  // Slug) - zaehlt zusaetzlich generisches, nicht speziell ausgebildetes Fuellpersonal bis
+  // staffMin mit. computeBlueprintPersonnelRequirements() zeigt bewusst NUR echte Ausbildungs-
+  // Anforderungen (Grundlage fuer Personal-Check/Schulungen, die nur Ausbildungen kennen -
+  // eine Ausbildungs-Zeile fuer "gar keine Ausbildung" wuerde dort faelschlich einen Mangel
+  // an einer nicht existierenden Ausbildung anzeigen). Ein Fahrzeug OHNE jede Ausbildungs-
+  // anforderung (z.B. normaler RTW/LF) trug dort deshalb bisher NULL zum Gesamtbedarf bei,
+  // obwohl es trotzdem eine Mindestbesatzung (staffMin) braucht - genau das hat im Bauplan-
+  // Editor zu einem irrefuehrenden "Insgesamt benoetigt: 0 Person(en)" gefuehrt. Nur fuer
+  // diese Gesamt-Anzeige gedacht, NICHT fuer Personal-Check/Schulungen.
+  function computeBlueprintTotalPersonnelCount(blueprint) {
+    let total = 0;
+    for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
+      if (!(quantity > 0)) continue;
+      const target = getVehicleTypeCrewTarget(Number(vehicleTypeId));
+      if (!target) continue;
+      if (!target.requirements.length) {
+        total += target.staffMin * quantity;
+        continue;
+      }
+      const hasFullRequirement = target.requirements.some(req => req.min === null);
+      if (hasFullRequirement) {
+        total += target.staffMin * quantity;
+        continue;
+      }
+      const trainedSum = target.requirements.reduce((sum, req) => sum + req.min, 0);
+      total += Math.max(trainedSum, target.staffMin) * quantity;
+    }
+    return total;
+  }
+
   // Personal-Anforderung fuer Personal-Check/Schulungen: statt einer separaten, manuell
   // gepflegten Konfiguration kommt sie jetzt direkt aus dem je Gebaeudetyp AKTIVEN
   // Wachenbauplan (pro Typ kann nur einer aktiv sein, siehe renderStationBlueprintEditScreen -
@@ -6510,15 +6541,15 @@
         quantity: parseInt(input.value, 10) || 0,
       }));
       const totals = computeBlueprintPersonnelRequirements({ vehicles });
-      const totalSum = [...totals.values()].reduce((a, b) => a + b, 0);
       const rows = [...totals.entries()]
         .sort((a, b) => (qualifications[a[0]] || a[0]).localeCompare(qualifications[b[0]] || b[0], "de"))
         .map(([slug, count]) => `<tr><td>${count}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`)
         .join("");
       document.getElementById("vn-bp-personnel-body").innerHTML =
-        rows || `<tr><td colspan="2" class="text-muted">Keine Ausbildung erforderlich.</td></tr>`;
+        rows || `<tr><td colspan="2" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`;
 
-      document.getElementById("vn-bp-personnel-total").textContent = `Insgesamt benötigt: ${totalSum} Person(en).`;
+      const totalCount = computeBlueprintTotalPersonnelCount({ vehicles });
+      document.getElementById("vn-bp-personnel-total").textContent = `Insgesamt benötigt: ${totalCount} Person(en).`;
     }
 
     body.innerHTML = `
