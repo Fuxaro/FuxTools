@@ -68,7 +68,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Prüfen/Zuweisen jetzt wieder bis auf die Mindestbesatzung abgezogen (Teil-Anforderungen
   bleiben dabei eingehalten), damit es für andere Fahrzeuge frei wird.
 - Hauptmenü: Fahrzeug-Besatzung und Wachenausbau in eine eigene Sektion "Helfer" verschoben -
-  Wachen-Bauplaner, Personal-Check und Schulungen (die zusammenhängen) bleiben für sich.
+  Wachen-Bauplaner, Personal-Check und Schulungen (die zusammenhängen) bleiben für sich unter
+  der Sektion "Wachenplanung" (vorher "Wachen & Fahrzeuge", passte nach der Aufteilung nicht
+  mehr).
 
 ## Stable (v0.5.1)
 
