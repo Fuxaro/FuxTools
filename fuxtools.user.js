@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.28
+// @version     0.9.29
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.28";
+  const SCRIPT_VERSION = "0.9.29";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -5425,37 +5425,55 @@
           let failed = 0;
           categoryStatusEl.textContent = `0/${categoryVehicles.length} geprüft ...`;
 
-          let nextIndex = 0;
+          // WICHTIG: Faehrzeuge DERSELBEN Wache duerfen nie parallel von zwei Workern
+          // bearbeitet werden - fetchVehicleAssignmentPage() zeigt den STATIONS-weiten
+          // Personal-Pool, und zwei gleichzeitig geladene Schnappschuesse koennen dieselbe
+          // freie Person beide als verfuegbar sehen (klassische Read-Then-Write-Race). Ergebnis
+          // war genau das gemeldete Symptom: manche Fahrzeuge bleiben trotz genug freiem
+          // Personal unbesetzt, ein erneuter Klick (wenn nichts mehr parallel laeuft) behebt es
+          // dann zufaellig. Deshalb: Warteschlange aus ganzen WACHEN statt einzelner Fahrzeuge -
+          // Fahrzeuge derselben Wache laufen dadurch immer strikt nacheinander, verschiedene
+          // Wachen weiterhin parallel (die teilen sich ja kein Personal).
+          const stationGroups = new Map();
+          for (const v of categoryVehicles) {
+            if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
+            stationGroups.get(v.stationId).push(v);
+          }
+          const stationQueue = [...stationGroups.values()];
+
+          let nextStationIndex = 0;
           async function worker() {
-            while (nextIndex < categoryVehicles.length) {
-              const vehicle = categoryVehicles[nextIndex++];
-              try {
-                const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
-                if (result.fullyStaffed) {
-                  ok++;
-                  problemsById.delete(vehicle.id);
-                } else {
+            while (nextStationIndex < stationQueue.length) {
+              const stationVehicles = stationQueue[nextStationIndex++];
+              for (const vehicle of stationVehicles) {
+                try {
+                  const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
+                  if (result.fullyStaffed) {
+                    ok++;
+                    problemsById.delete(vehicle.id);
+                  } else {
+                    failed++;
+                    const existing = problemsById.get(vehicle.id);
+                    problemsById.set(vehicle.id, {
+                      vehicle,
+                      message: `${result.trainedPersonnel}/${result.requiredPersonnel} erforderliches Personal zugewiesen`,
+                      since: existing?.since || Date.now(),
+                    });
+                  }
+                } catch (e) {
                   failed++;
                   const existing = problemsById.get(vehicle.id);
-                  problemsById.set(vehicle.id, {
-                    vehicle,
-                    message: `${result.trainedPersonnel}/${result.requiredPersonnel} erforderliches Personal zugewiesen`,
-                    since: existing?.since || Date.now(),
-                  });
+                  problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
                 }
-              } catch (e) {
-                failed++;
-                const existing = problemsById.get(vehicle.id);
-                problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
+                done++;
+                categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+                document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
+                bindProblemsRowButtons();
+                await persistProblems();
               }
-              done++;
-              categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
-              document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
-              bindProblemsRowButtons();
-              await persistProblems();
             }
           }
-          const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, categoryVehicles.length);
+          const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
           await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
           btn.disabled = false;
