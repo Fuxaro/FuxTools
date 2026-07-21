@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.25
+// @version     0.9.26
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.25";
+  const SCRIPT_VERSION = "0.9.26";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1534,6 +1534,10 @@
 
         <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
         <div class="list-group">
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">
+            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>
+            So funktioniert's
+          </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">
             <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
             Verlauf
@@ -1562,6 +1566,64 @@
     document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
+    document.getElementById("vn-menu-how-it-works").addEventListener("click", () => renderHowItWorksScreen(renderMainMenu));
+  }
+
+  // Kurze Einstiegs-Anleitung fuer neue (Beta-)Nutzer: die Module unter "Wachen & Fahrzeuge"
+  // haengen inzwischen zusammen (Bauplan -> Personalbedarf -> Schulungen/Besatzung), das ist
+  // ohne Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf
+  // noetig (anders als renderChangelogScreen).
+  function renderHowItWorksScreen(goBack) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("So funktioniert's");
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    body.innerHTML = `
+      <p>Die Module unter <b>"Wachen &amp; Fahrzeuge"</b> hängen zusammen - hier die empfohlene
+      Reihenfolge, wenn du FuxTools zum ersten Mal nutzt:</p>
+
+      <ol style="padding-left:20px;">
+        <li style="margin-bottom:12px;">
+          <b>Wachen-Bauplaner</b>: Lege pro Gebäudetyp (z.B. Feuerwache, Rettungswache) einen
+          Bauplan an - welche Ausbauten, wie viele Fahrzeuge je Typ. Der benötigte
+          Personal-Sollwert wird daraus automatisch berechnet. Nur EIN Bauplan je Gebäudetyp
+          kann gleichzeitig aktiv sein - der bestimmt dann die Vorgaben für alle Wachen dieses
+          Typs.
+        </li>
+        <li style="margin-bottom:12px;">
+          <b>Bauplan "Anwenden"</b>: zeigt für jede passende Wache Soll/Ist - fehlende Ausbauten
+          und Fahrzeuge kannst du direkt aus der Liste bauen bzw. kaufen, überzählige Fahrzeuge
+          verkaufen.
+        </li>
+        <li style="margin-bottom:12px;">
+          <b>Personal-Check &amp; Schulungen</b>: sobald ein Bauplan aktiv ist, siehst du hier
+          automatisch, wo Personal mit bestimmten Ausbildungen fehlt - fehlende Lehrgänge lassen
+          sich direkt starten.
+        </li>
+        <li style="margin-bottom:12px;">
+          <b>Fahrzeug-Besatzung</b>: weist vorhandenes, passend ausgebildetes Personal
+          automatisch den richtigen Fahrzeugen zu (und korrigiert danach den Funk-Status).
+        </li>
+        <li>
+          <b>Wachenausbau</b> und <b>Schnellumbenennung</b> funktionieren unabhängig von den
+          anderen Modulen: Wachenausbau für eine reine Übersicht/Einzelbau ohne Bauplan,
+          Schnellumbenennung für Fahrzeuge/Wachen/Leitstellen.
+        </li>
+      </ol>
+
+      <p class="text-muted" style="font-size:12px;">
+        Tipp: Fehler siehst du seit v0.9.24 direkt auf der Seite (roter Hinweis unten rechts)
+        statt nur in der Browser-Konsole - ein Fehlerprotokoll dafür findest du in den
+        Einstellungen.
+      </p>
+
+      <div class="vn-sticky-footer">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
 
   //////////////////////////////////////////////////
