@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.26
+// @version     0.9.27
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.26";
+  const SCRIPT_VERSION = "0.9.27";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -78,6 +78,18 @@
   // in Ruhe bestaetigen koennen soll.
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
+
+  // Steuert, ob beim naechsten Oeffnen des Modals automatisch "So funktioniert's" statt des
+  // Hauptmenues gezeigt wird (siehe show.bs.modal weiter unten). Wird beim Start aus dem
+  // GM-Speicher geladen (initHowItWorksFlag()) - der In-Memory-Default false ist bewusst so
+  // gewaehlt, dass eine brandneue Installation die Anleitung sieht, auch falls das Laden
+  // ausnahmsweise noch nicht durch ist, wenn der Nutzer klickt.
+  const HOW_IT_WORKS_SEEN_KEY = "howItWorksSeen";
+  let howItWorksSeen = false;
+
+  async function initHowItWorksFlag() {
+    howItWorksSeen = !!(await retrieveData(HOW_IT_WORKS_SEEN_KEY));
+  }
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
   // breit fuer den Wachen-Check mit seiner Tabelle - vermeidet leere Flaechen links/
@@ -788,6 +800,7 @@
     VEHICLE_CREW_STAFFING_MODE_KEY,
     VEHICLE_CREW_PROBLEMS_KEY,
     VEHICLE_CREW_INCLUDE_NORMAL_KEY,
+    HOW_IT_WORKS_SEEN_KEY,
   ];
 
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
@@ -1439,6 +1452,10 @@
         renderUpdateRequiredScreen();
         return;
       }
+      if (!howItWorksSeen) {
+        renderHowItWorksScreen(renderMainMenu, { firstOpen: true });
+        return;
+      }
       renderMainMenu();
     });
 
@@ -1573,12 +1590,20 @@
   // haengen inzwischen zusammen (Bauplan -> Personalbedarf -> Schulungen/Besatzung), das ist
   // ohne Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf
   // noetig (anders als renderChangelogScreen).
-  function renderHowItWorksScreen(goBack) {
+  function renderHowItWorksScreen(goBack, { firstOpen = false } = {}) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("So funktioniert's");
     const body = document.getElementById("vehicle-naming-modal-body");
 
     body.innerHTML = `
+      ${
+        firstOpen
+          ? `<p class="text-muted" style="font-size:12px; margin-top:0;">
+               Willkommen bei FuxTools! Diese Anleitung erscheint nur dieses eine Mal - danach
+               findest du sie jederzeit über "So funktioniert's" im Hauptmenü wieder.
+             </p>`
+          : ""
+      }
       <p>Die Module unter <b>"Wachen &amp; Fahrzeuge"</b> hängen zusammen - hier die empfohlene
       Reihenfolge, wenn du FuxTools zum ersten Mal nutzt:</p>
 
@@ -1618,12 +1643,19 @@
       </p>
 
       <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        <button type="button" id="vn-btn-back" class="btn ${firstOpen ? "btn-primary" : "btn-default"}">
+          <span class="glyphicon ${firstOpen ? "glyphicon-ok" : "glyphicon-arrow-left"}" aria-hidden="true"></span>
+          ${firstOpen ? "Bestätigen" : "Zurück"}
         </button>
       </div>
     `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-back").addEventListener("click", async () => {
+      if (firstOpen && !howItWorksSeen) {
+        howItWorksSeen = true;
+        await storeData(true, HOW_IT_WORKS_SEEN_KEY);
+      }
+      goBack();
+    });
   }
 
   //////////////////////////////////////////////////
@@ -6135,8 +6167,13 @@
     // Menuepunkt und Update-Check auch bei fehlgeschlagenem Fahrzeug-Katalog nutzbar
     // (betroffene Funktionen wie Umbenennen/Wachen-Bauplaner zeigen dann nur leere Daten,
     // statt das ganze Script lahmzulegen).
-    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher"];
-    const results = await Promise.allSettled([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
+    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher", "Einstiegs-Anleitung-Status"];
+    const results = await Promise.allSettled([
+      initModal(),
+      initVehicleTypeCaptions(),
+      initNamesStore(),
+      initHowItWorksFlag(),
+    ]);
     results.forEach((r, i) => {
       if (r.status === "rejected") reportError(`Initialisierung fehlgeschlagen (${initSteps[i]})`, r.reason);
     });
