@@ -1,0 +1,69 @@
+name: Main-Release vorbereiten
+
+# Nur manuell auslösbar (Button "Run workflow" im Actions-Tab) - kein automatischer Trigger
+# bei jedem Push auf beta, damit main weiterhin nur dann aktualisiert wird, wenn das
+# tatsächlich gewollt ist. Nimmt den aktuellen beta-Stand, entfernt alle internen
+# Entwickler-Kommentare (scripts/strip-comments.js) und schaltet den Kanal auf "stable" um
+# (scripts/set-stable-channel.js) - das Ergebnis landet als Pull Request gegen main, damit der
+# Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: beta auschecken
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Kommentare entfernen und Kanal auf stable umstellen
+        run: |
+          node scripts/strip-comments.js /tmp/fuxtools.stripped.js
+          node scripts/set-stable-channel.js /tmp/fuxtools.stripped.js fuxtools.user.js
+          node -c fuxtools.user.js
+
+      - name: Version auslesen
+        id: version
+        run: |
+          VERSION=$(grep -m1 -oP '@version\s+\K[0-9.]+' fuxtools.user.js)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "branch=release/v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Release-Branch committen und pushen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ steps.version.outputs.branch }}"
+          git add fuxtools.user.js
+          git commit -m "Main-Release v${{ steps.version.outputs.version }}: Kommentare entfernt, Kanal auf stable"
+          git push --force origin "${{ steps.version.outputs.branch }}"
+
+      - name: Pull Request gegen main erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --base main \
+            --head "${{ steps.version.outputs.branch }}" \
+            --title "Main-Release v${{ steps.version.outputs.version }}" \
+            --body "Automatisch erzeugter Release-PR aus \`beta\` (v${{ steps.version.outputs.version }}).
+
+          - Interne Entwickler-Kommentare entfernt (\`scripts/strip-comments.js\`)
+          - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
+
+          Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." \
+            || echo "Hinweis: PR existiert für diesen Branch evtl. schon, wurde nicht neu angelegt."
