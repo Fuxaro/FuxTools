@@ -96,6 +96,11 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   als welchen Gebäudetyp FuxTools die eigenen Wachen tatsächlich erkennt - hilft z.B. bei einem
   Bauplan für "Feuerwache (Kleinwache)", wenn die eigenen Wachen laut FuxTools eigentlich
   normale Feuerwachen sind (oder umgekehrt), ohne das erst mühsam manuell nachschauen zu müssen.
+- **Wachen-Bauplaner**: neue Mini-Übersicht "Deine Wachen" in der Bauplan-Liste zeigt, wie viele
+  Wachen von jedem Gebäudetyp im Account vorhanden sind - hilft bei der Auswahl, für welchen
+  Typ überhaupt ein Bauplan sinnvoll ist, bevor man ihn anlegt.
+- **Neu: Statistik** (Hauptmenü &gt; Wachenplanung): Wachen je Gebäudetyp, gruppiert nach
+  Leitstelle, dazu Fahrzeug- und Personalzahlen je Gruppe und insgesamt.
 
 ## Stable (v0.5.1)
 

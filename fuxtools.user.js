@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.41
+// @version     0.9.43
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.41";
+  const SCRIPT_VERSION = "0.9.43";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1585,6 +1585,10 @@
             <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
             Schulungen
           </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">
+            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>
+            Statistik
+          </button>
         </div>
 
         <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>
@@ -1649,6 +1653,7 @@
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
     document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
     document.getElementById("vn-menu-schooling").addEventListener("click", () => renderSchoolingScreen());
+    document.getElementById("vn-menu-statistics").addEventListener("click", () => renderStationStatisticsScreen());
     document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewLeitstelleSelection());
     document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
@@ -4981,6 +4986,143 @@
   }
 
   //////////////////////////////////////////////////
+  // Statistik: reiner Ueberblick, wie viele Wachen je Gebaeudetyp und Leitstelle vorhanden
+  // sind, dazu Fahrzeug- und Personalzahlen - hilft z.B. VOR dem Anlegen eines Wachen-
+  // Bauplans zu sehen, ob man den gewaehlten Gebaeudetyp (z.B. "Feuerwache (Kleinwache)")
+  // ueberhaupt besitzt. Nutzt bewusst dieselben Datenquellen wie Wachenausbau/Personal-Check
+  // (loadBuildingsForCheck/fetchAllVehiclesV2/Personal-Scan), keine eigene Logik noetig.
+  // Personalzahlen gibt es nur fuer Gebaeudetypen mit trainierbarem Personal (Feuerwehr/
+  // Rettungsdienst/Polizei/THW & Co.) - Krankenhaeuser, Schulen, Leitstellen & Sonstiges
+  // zeigen dafuer "-", da es dort keinen Personal-Scan gibt (siehe loadPersonnelCheckStations).
+  //////////////////////////////////////////////////
+
+  async function renderStationStatisticsScreen() {
+    setModalWidth(MODAL_WIDTH_WIDE);
+    setScreenTitle("Statistik");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
+
+    let allStations, vehicles;
+    try {
+      [allStations, vehicles] = await Promise.all([loadBuildingsForCheck(), fetchAllVehiclesV2()]);
+    } catch (e) {
+      body.innerHTML = `
+        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
+        <div class="vn-sticky-footer">
+          <button id="vn-btn-back" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+          </button>
+        </div>
+      `;
+      document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+      return;
+    }
+
+    body.innerHTML = `<p>Prüfe letzten Personal-Scan ...</p>`;
+    await ensureFreshPersonnelScan((done, of) => {
+      body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
+    });
+    const scanData = await getPersonnelScanData();
+    const scanMeta = await getPersonnelScanMeta();
+
+    const vehicleCountByStation = new Map();
+    for (const v of vehicles) {
+      const stationId = String(v.building_id ?? v.building);
+      vehicleCountByStation.set(stationId, (vehicleCountByStation.get(stationId) || 0) + 1);
+    }
+
+    // Verschachtelt: Leitstelle -> Gebaeudetyp -> {stations, vehicles, personnel, hasScan}
+    const byLeitstelle = new Map();
+    for (const s of allStations) {
+      const leitstelleKey = s.leitstelleName || "Ohne Leitstelle";
+      if (!byLeitstelle.has(leitstelleKey)) byLeitstelle.set(leitstelleKey, new Map());
+      const byType = byLeitstelle.get(leitstelleKey);
+      const typeKey = s.typeName || "Unbekannter Gebäudetyp";
+      if (!byType.has(typeKey)) byType.set(typeKey, { stations: 0, vehicles: 0, personnel: 0, hasScan: false });
+      const entry = byType.get(typeKey);
+      entry.stations++;
+      entry.vehicles += vehicleCountByStation.get(s.id) || 0;
+      const scan = scanData[s.id];
+      if (scan) {
+        entry.personnel += scan.total;
+        entry.hasScan = true;
+      }
+    }
+
+    let grandStations = 0;
+    let grandVehicles = 0;
+    let grandPersonnel = 0;
+
+    const sections = [...byLeitstelle.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], "de"))
+      .map(([leitstelleName, byType]) => {
+        let sectionStations = 0;
+        let sectionVehicles = 0;
+        let sectionPersonnel = 0;
+        const rows = [...byType.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0], "de"))
+          .map(([typeName, entry]) => {
+            sectionStations += entry.stations;
+            sectionVehicles += entry.vehicles;
+            sectionPersonnel += entry.personnel;
+            return `
+              <tr>
+                <td>${escapeHtml(typeName)}</td>
+                <td>${entry.stations}</td>
+                <td>${entry.vehicles}</td>
+                <td>${entry.hasScan ? entry.personnel : "-"}</td>
+              </tr>
+            `;
+          })
+          .join("");
+        grandStations += sectionStations;
+        grandVehicles += sectionVehicles;
+        grandPersonnel += sectionPersonnel;
+        return `
+          <div class="panel panel-default" style="margin-bottom:8px;">
+            <div class="panel-heading" style="padding:8px 12px;">
+              <b>${escapeHtml(leitstelleName)}</b>
+              <span class="text-muted">(${sectionStations} Wachen, ${sectionVehicles} Fahrzeuge, ${sectionPersonnel} Personal)</span>
+            </div>
+            <div class="panel-body" style="padding:0;">
+              <table class="table table-condensed table-striped" style="font-size:12px; margin-bottom:0;">
+                <thead><tr><th>Gebäudetyp</th><th>Wachen</th><th>Fahrzeuge</th><th>Personal</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const lastScanLabel = scanMeta.lastScanAt
+      ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
+      : "Personal noch nie gescannt";
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Wachen je Gebäudetyp, gruppiert nach Leitstelle. Personal nur für Gebäudetypen mit
+        Ausbildungs-Personal (Feuerwehr, Rettungsdienst, Polizei, THW &amp; Co.) - "-" bedeutet
+        kein Personal-Scan möglich/vorhanden.
+      </p>
+      <p class="text-muted" style="font-size:12px;">
+        <b>Gesamt:</b> ${grandStations} Wachen, ${grandVehicles} Fahrzeuge, ${grandPersonnel} Personal
+      </p>
+      <div style="max-height:55vh; overflow:auto;">
+        ${sections || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
+      </div>
+      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <span class="text-muted" style="font-size:11px;">${escapeHtml(lastScanLabel)}</span>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+  }
+
+  //////////////////////////////////////////////////
   // Fahrzeug-Besatzung: manche Fahrzeugtypen brauchen eine KOMPLETT mit einer bestimmten
   // Ausbildung besetzte Besatzung (z.B. ELW 2 - jeder an Bord braucht den ELW-2-Lehrgang,
   // nicht nur der "Fahrer"). Weist dafuer verfuegbares, passend ausgebildetes Personal ueber
@@ -6040,6 +6182,27 @@
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
 
     const blueprints = await getStationBlueprints();
+    let allStations = [];
+    try {
+      allStations = await loadBuildingsForCheck();
+    } catch {
+      // Mini-Uebersicht ist nur ein Zusatz - schlaegt das Laden der Wachen fehl, wird sie
+      // einfach leer gelassen, statt deswegen den ganzen Bauplan-Bildschirm zu blockieren.
+    }
+
+    // Mini-Uebersicht, wie viele Wachen von jedem Gebaeudetyp es im Account gibt - hilft bei
+    // der Auswahl, fuer welchen Typ ueberhaupt ein Bauplan sinnvoll ist (z.B. sieht man hier
+    // sofort, ob man wirklich eine "Feuerwache (Kleinwache)" besitzt, bevor man dafuer einen
+    // Bauplan anlegt, der sonst 0 Treffer haette).
+    const stationCounts = new Map();
+    for (const s of allStations) {
+      const label = s.typeName || "Unbekannter Gebäudetyp";
+      stationCounts.set(label, (stationCounts.get(label) || 0) + 1);
+    }
+    const stationCountsSummary = [...stationCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, count]) => `${count}x ${escapeHtml(label)}`)
+      .join(", ");
 
     function renderRows() {
       const entries = Object.values(blueprints);
@@ -6083,6 +6246,9 @@
         haben soll - das benötigte Personal wird automatisch aus den Fahrzeugen berechnet.
         Anwendbar über den Haken-Button je Bauplan, um zu sehen, welche passenden Wachen wovon
         noch wie viel brauchen.
+      </p>
+      <p class="text-muted" style="font-size:12px;">
+        <b>Deine Wachen:</b> ${stationCountsSummary || "konnte nicht geladen werden"}
       </p>
       <div style="margin-bottom:12px;">
         <button type="button" id="vn-bp-new" class="btn btn-primary btn-sm">
