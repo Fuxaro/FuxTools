@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.30
+// @version     0.9.31
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.30";
+  const SCRIPT_VERSION = "0.9.31";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -4923,10 +4923,17 @@
   // Liest die Zuweisungs-Seite eines Fahrzeugs aus: je Person die Ausbildungs-Slugs
   // (data-filterable-by, wie auch auf der Personal-Seite einer Wache), ob sie "Im Unterricht"
   // (also nicht verfuegbar) ist, ob sie SCHON diesem Fahrzeug zugewiesen ist (Button mit
-  // Klasse "btn-assigned") und - falls verfuegbar - den Zuweisen-Link (Button mit Klasse
-  // "btn-success"). Kapazitaet kommt bewusst NICHT von hier (die #count_personal-Anzeige ist
-  // ein rein client-seitiger Zaehler, der auf einer frisch geladenen Seite nicht den echten
-  // Stand zeigt), sondern aus dem Fahrzeug-Katalog (vehicle.staffMax, siehe checkAndFixVehicleCrew).
+  // Klasse "btn-assigned", Link-Text "Fahrzeugbindung entfernen") und der Zuweisen-Link, falls
+  // verfuegbar. Per Live-Diagnose im Browser bestaetigt: Personal, das bereits einem ANDEREN
+  // Fahrzeug zugewiesen ist, bekommt KEINEN deaktivierten Button, sondern denselben
+  // Zuweisen-Link wie freies Personal - nur mit Klasse "btn-warning" statt "btn-success". Ein
+  // Klick auf diesen Link (POST auf denselben "/vehicles/{id}/zuweisungDo/{personal_id}"-
+  // Endpunkt wie beim normalen Zuweisen) zieht die Person server-seitig automatisch vom alten
+  // Fahrzeug ab und weist sie in EINEM Request diesem hier zu - kein separater Abzieh-Schritt
+  // noetig, derselbe Endpunkt ist ein Toggle (siehe assignedElsewhere unten). Kapazitaet kommt
+  // bewusst NICHT von hier (die #count_personal-Anzeige ist ein rein client-seitiger Zaehler,
+  // der auf einer frisch geladenen Seite nicht den echten Stand zeigt), sondern aus dem
+  // Fahrzeug-Katalog (vehicle.staffMax, siehe checkAndFixVehicleCrew).
   async function fetchVehicleAssignmentPage(vehicleId) {
     const res = await fetch(`/vehicles/${vehicleId}/zuweisung`, { credentials: "same-origin" });
     if (!res.ok) {
@@ -4941,11 +4948,14 @@
       } catch {
         slugs = [];
       }
+      const assignBtn = row.querySelector("a.btn-success[personal_id], a.btn-warning[personal_id]");
       return {
         slugs: Array.isArray(slugs) ? slugs : [],
         inTraining: row.textContent.includes("Im Unterricht"),
         assignedHere: !!row.querySelector("a.btn-assigned"),
-        assignHref: row.querySelector("a.btn-success[personal_id]")?.getAttribute("href") || null,
+        assignedElsewhere: !!row.querySelector("a.btn-warning[personal_id]"),
+        assignHref: assignBtn?.getAttribute("href") || null,
+        unassignHref: row.querySelector("a.btn-assigned[personal_id]")?.getAttribute("href") || null,
       };
     });
 
@@ -4954,8 +4964,11 @@
 
   // Weist so viele verfuegbare (nicht im Unterricht, noch nicht diesem Fahrzeug zugewiesene)
   // Personen mit dem gesuchten Slug zu, wie fuer diese EINE Anforderung noch fehlen (target,
-  // begrenzt durch staffMax) - Ersetzt KEINE bereits zugewiesenen, unpassenden Personen (dafuer
-  // muesste man sie erst manuell im Spiel abziehen) - fuellt nur freie Plaetze auf.
+  // begrenzt durch staffMax). Zieht bei Bedarf auch Personal von einem ANDEREN Fahrzeug ab
+  // (Klasse "btn-warning", siehe fetchVehicleAssignmentPage) - der Server macht das Umziehen in
+  // einem einzigen POST, kein separater Abzieh-Schritt noetig (per Live-Diagnose bestaetigt).
+  // Echte freie Personen werden aber IMMER zuerst verwendet, ein Umzug nur, wenn sonst niemand
+  // mit dieser Ausbildung frei ist - unnoetiges Hin-und-her-Schieben wird so vermieden.
   async function assignQualifiedPersonnelToVehicleForSlug(vehicleId, slug, target, staffMax) {
     const { people } = await fetchVehicleAssignmentPage(vehicleId);
     const assignedCount = people.filter(p => p.assignedHere).length;
@@ -4964,10 +4977,12 @@
     let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - alreadyQualified));
     let assignedNow = 0;
 
-    for (const person of people) {
+    const eligible = people
+      .filter(p => !p.assignedHere && !p.inTraining && p.assignHref && p.slugs.includes(slug))
+      .sort((a, b) => Number(a.assignedElsewhere) - Number(b.assignedElsewhere));
+
+    for (const person of eligible) {
       if (remaining <= 0) break;
-      if (person.assignedHere || person.inTraining || !person.assignHref) continue;
-      if (!person.slugs.includes(slug)) continue;
 
       const res = await fetch(person.assignHref, {
         method: "POST",
@@ -5000,14 +5015,21 @@
     let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - assignedCount));
     let assignedNow = 0;
 
-    // Personal OHNE jede Sonderausbildung zuerst - sonst "verbraucht" ein normales Fahrzeug
-    // (z.B. LF20) wertvolles Personal wie Notarzt, das eigentlich fuer NAW/RTW gebraucht wird.
-    // Nur wenn nicht genug ungelerntes Personal da ist, wird auch speziell ausgebildetes
-    // Personal herangezogen (besser besetzt mit Sonderausbildung als gar nicht besetzt).
+    // Prioritaet beim Zuweisen: 1) Personal OHNE jede Sonderausbildung zuerst - sonst
+    // "verbraucht" ein normales Fahrzeug (z.B. LF20) wertvolles Personal wie Notarzt, das
+    // eigentlich fuer NAW/RTW gebraucht wird. 2) unter gleichrangigen Kandidaten echte freie
+    // Personen vor solchen, die von einem ANDEREN Fahrzeug abgezogen werden muessten (Klasse
+    // "btn-warning", siehe fetchVehicleAssignmentPage) - vermeidet unnoetiges Hin-und-Her-
+    // Schieben, wenn ohnehin schon genug frei verfuegbares Personal existiert.
     const specialSlugs = getSpecialTrainingSlugs();
     const eligible = people
       .filter(p => !p.assignedHere && !p.inTraining && p.assignHref)
-      .sort((a, b) => Number(a.slugs.some(s => specialSlugs.has(s))) - Number(b.slugs.some(s => specialSlugs.has(s))));
+      .sort((a, b) => {
+        const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
+        const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
+        if (aSpecial !== bSpecial) return aSpecial - bSpecial;
+        return Number(a.assignedElsewhere) - Number(b.assignedElsewhere);
+      });
 
     for (const person of eligible) {
       if (remaining <= 0) break;
@@ -5113,6 +5135,46 @@
     }
 
     return { assignedNow, assignedCount, capacity: vehicle.staffMax, requiredPersonnel, trainedPersonnel, fullyStaffed };
+  }
+
+  // Zieht ALLE aktuell zugewiesenen Personen von einem Fahrzeug ab - nutzt denselben
+  // "/vehicles/{id}/zuweisungDo/{personal_id}"-Endpunkt wie das Zuweisen (Button "btn-assigned",
+  // Link-Text "Fahrzeugbindung entfernen"), per Live-Diagnose im Browser als Toggle bestaetigt.
+  async function unassignAllPersonnelFromVehicle(vehicleId) {
+    const { people } = await fetchVehicleAssignmentPage(vehicleId);
+    const csrfToken = getCsrfTokenOrThrow(vehicleId);
+    let removed = 0;
+    for (const person of people) {
+      if (!person.assignedHere || !person.unassignHref) continue;
+      const res = await fetch(person.unassignHref, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "X-CSRF-Token": csrfToken,
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      });
+      if (!res.ok) throw new Error(`Abziehen fehlgeschlagen (${res.status}).`);
+      removed++;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return removed;
+  }
+
+  // Kompletter Ablauf fuer EIN Fahrzeug bei "Alle Zuweisungen rueckgaengig machen": wie
+  // checkAndFixVehicleCrew() bei Fahrzeugen im Einsatz vorsichtig (nie anfassen), zieht danach
+  // die komplette Besatzung ab und setzt FMS 6 (nicht besetzt) - konsistent mit dem Rest des
+  // Tools, das FMS 6 immer als "keine passende Besatzung" verwendet.
+  async function clearVehicleCrew(vehicle) {
+    const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
+    if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber übersprungen.");
+    if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
+      throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
+    }
+    const removed = await unassignAllPersonnelFromVehicle(vehicle.id);
+    if (fmsBefore !== VEHICLE_FMS_NOT_STAFFED) await setVehicleFms(vehicle.id, VEHICLE_FMS_NOT_STAFFED);
+    return removed;
   }
 
   const VEHICLE_CREW_CHECK_CONCURRENCY = 3;
@@ -5389,14 +5451,20 @@
           <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>
         </table>
       </div>
-      <div class="vn-sticky-footer">
+      <div class="vn-sticky-footer" style="display:flex; justify-content:space-between;">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-unassign-all" type="button" class="btn btn-danger">
+          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Alle Zuweisungen rückgängig machen
         </button>
       </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-unassign-all").addEventListener("click", () => {
+      renderVehicleCrewUnassignAllConfirmScreen(scopeVehicles, () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds));
+    });
     bindProblemsRowButtons();
 
     function updateModeStatus() {
@@ -5510,6 +5578,94 @@
       recomputeVisibleVehicles();
       document.getElementById("vn-crew-groups").innerHTML = renderGroups();
       bindCategoryButtons();
+    });
+  }
+
+  const VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD = "zurücksetzen";
+
+  // Eigenes Bestaetigungsfenster (getippte Bestaetigung wie bei "Speicher loeschen") statt
+  // eines einfachen confirm() - zieht bei ALLEN Fahrzeugen im aktuellen Leitstellen-Scope
+  // (unabhaengig von der "Normale Fahrzeuge einbeziehen"-Anzeige-Checkbox) die komplette
+  // Besatzung ab. Das ist eine ECHTE, sofort wirksame Aenderung im Spiel, deshalb bewusst
+  // keine leichtfertig anklickbare Aktion.
+  function renderVehicleCrewUnassignAllConfirmScreen(vehicles, goBack) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p class="text-danger"><b>Wirklich bei ${vehicles.length} Fahrzeugen die komplette Besatzung abziehen?</b></p>
+      <p>
+        Das betrifft ALLE Fahrzeuge in der aktuell gewählten Leitstellen-Auswahl (auch die,
+        die gerade wegen der Checkbox "Normale Fahrzeuge einbeziehen" nicht angezeigt werden) -
+        danach hat keines davon mehr zugewiesenes Personal, der Fahrzeugstatus wird auf FMS 6
+        (nicht besetzt) gesetzt. Fahrzeuge, die gerade im Einsatz sind, werden dabei
+        übersprungen. Das ist eine echte, sofort wirksame Änderung im Spiel und lässt sich
+        nicht per Klick rückgängig machen.
+      </p>
+      <div class="form-group">
+        <label for="vn-crew-unassign-confirm-input">
+          Tippe zum Bestätigen <code>${escapeHtml(VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD)}</code> ein:
+        </label>
+        <input type="text" id="vn-crew-unassign-confirm-input" class="form-control" autocomplete="off">
+      </div>
+      <div id="vn-crew-unassign-confirm-status" style="margin-top:10px;"></div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+        <button id="vn-btn-unassign-confirm" type="button" class="btn btn-danger" disabled>
+          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Besatzung endgültig abziehen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+
+    const input = document.getElementById("vn-crew-unassign-confirm-input");
+    const confirmBtn = document.getElementById("vn-btn-unassign-confirm");
+    const statusEl = document.getElementById("vn-crew-unassign-confirm-status");
+
+    input.addEventListener("input", () => {
+      confirmBtn.disabled = input.value.trim().toLowerCase() !== VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD;
+    });
+    input.focus();
+
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      input.disabled = true;
+
+      // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
+      // den Personal-Pool), verschiedene Wachen parallel.
+      const stationGroups = new Map();
+      for (const v of vehicles) {
+        if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
+        stationGroups.get(v.stationId).push(v);
+      }
+      const stationQueue = [...stationGroups.values()];
+
+      let done = 0;
+      let removedTotal = 0;
+      let failed = 0;
+      let nextStationIndex = 0;
+      async function worker() {
+        while (nextStationIndex < stationQueue.length) {
+          const stationVehicles = stationQueue[nextStationIndex++];
+          for (const vehicle of stationVehicles) {
+            try {
+              removedTotal += await clearVehicleCrew(vehicle);
+            } catch {
+              failed++;
+            }
+            done++;
+            statusEl.innerHTML = `<em>${done}/${vehicles.length} Fahrzeuge bearbeitet (${removedTotal} Personen abgezogen${failed ? `, ${failed} übersprungen/Fehler` : ""}) ...</em>`;
+          }
+        }
+      }
+      const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      statusEl.innerHTML = `<span class="text-success">Fertig: ${removedTotal} Personen von ${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}.</span>`;
+      setTimeout(goBack, 1500);
     });
   }
 

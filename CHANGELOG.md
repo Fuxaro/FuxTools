@@ -39,6 +39,14 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   wertvoller Sonderausbildung (z.B. Notarzt) bekommen, das eigentlich für NAW/RTW gebraucht
   wird. Personal ohne Sonderausbildung wird jetzt bevorzugt zugewiesen, speziell
   ausgebildetes Personal nur noch als letzte Reserve.
+- **Bugfix Fahrzeug-Besatzung**: der eigentliche Grund für "trotz genug Personal bleibt das
+  Fahrzeug leer" - Personal, das bereits einem ANDEREN Fahrzeug zugewiesen war, wurde
+  komplett übersehen (nur wirklich freies Personal wurde erkannt). FuxTools zieht jetzt bei
+  Bedarf Personal von einem anderen Fahrzeug ab und weist es dem gerade geprüften zu (echte
+  freie Personen werden aber immer bevorzugt).
+- Neuer Button "Alle Zuweisungen rückgängig machen" bei Fahrzeug-Besatzung: zieht mit
+  getippter Bestätigung die komplette Besatzung aller Fahrzeuge im gewählten
+  Leitstellen-Bereich ab.
 
 ## Stable (v0.5.1)
 
