@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.38
+// @version     0.9.39
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.38";
+  const SCRIPT_VERSION = "0.9.39";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -835,8 +835,36 @@
     }
   }
 
+  // Ersetzt ueberall im Script das native fetch() - kein einziger Aufruf hatte bisher ein
+  // Zeitlimit. Haengt eine Verbindung (Anfrage raus, aber nie eine Antwort, kein Fehler),
+  // wuerde das den gesamten Ablauf unbegrenzt blockieren, UND "Abbrechen" wuerde nicht mehr
+  // greifen, weil die Abbruch-Pruefung in den Warteschlangen (siehe Fahrzeug-Besatzung) nur
+  // VOR einer neuen Anfrage steht, nicht waehrend einer bereits haengenden. Bricht daher nach
+  // FETCH_TIMEOUT_MS selbst ab (AbortController) - wird danach wie ein normaler Netzwerkfehler
+  // an der jeweiligen Stelle abgefangen (z.B. ein Fahrzeug als "Fehler" markiert, der Rest
+  // laeuft weiter) und zusaetzlich ins Fehlerprotokoll geloggt, damit haeufige Timeouts bei
+  // einem grossen Durchlauf im Nachhinein nachvollziehbar bleiben (ohne bei JEDEM einzelnen
+  // Timeout ein Banner zu zeigen wie reportError() es sonst tut).
+  const FETCH_TIMEOUT_MS = 20000;
+  async function fetchWithTimeout(url, options = {}) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (e) {
+      if (e.name === "AbortError") {
+        const message = `Zeitüberschreitung nach ${FETCH_TIMEOUT_MS / 1000}s: ${url}`;
+        logErrorToStorage("Netzwerk-Timeout", message).catch(() => {});
+        throw new Error(message);
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   async function fetchJson(url) {
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error("Network response was not ok");
     return response.json();
   }
@@ -904,7 +932,7 @@
   //////////////////////////////////////////////////
 
   async function fetchJSON(path) {
-    const res = await fetch(path, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(path, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Fehler beim Laden von ${path}: ${res.status}`);
     const data = await res.json();
     const result = data.result || data;
@@ -920,7 +948,7 @@
     let vehicles = [];
     let nextPage = "/api/v2/vehicles?limit=2000";
     while (nextPage) {
-      const res = await fetch(nextPage, { credentials: "same-origin" });
+      const res = await fetchWithTimeout(nextPage, { credentials: "same-origin" });
       if (!res.ok) throw new Error(`Fehler beim Laden der Fahrzeuge: ${res.status}`);
       const data = await res.json();
       vehicles = vehicles.concat(data.result || []);
@@ -949,7 +977,7 @@
   async function renameVehicle(vehicleId, newName) {
     // Schritt 1: das interne Formular-Fragment holen (enthaelt authenticity_token,
     // _method-Feld fuer PATCH/PUT, Formular-Action etc.)
-    const res = await fetch(`/vehicles/${vehicleId}/editName`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/editName`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Formular für Fahrzeug ${vehicleId} nicht ladbar (${res.status})`);
     const html = await res.text();
 
@@ -975,7 +1003,7 @@
     const action = form.getAttribute("action") || form.action;
     const formData = new FormData(form);
 
-    const res2 = await fetch(action, {
+    const res2 = await fetchWithTimeout(action, {
       method: "POST", // die tatsaechliche Methode (PATCH/PUT) steckt im _method-Feld von FormData
       body: formData,
       credentials: "same-origin",
@@ -992,7 +1020,7 @@
   // Feldnamen zu raten. Das Namensfeld heisst bei Gebaeuden "building[name]" (Input-ID
   // "building_name"), nicht "caption" - "caption" ist nur der Name in der /api-Antwort.
   async function renameBuilding(buildingId, newName) {
-    const res = await fetch(`/buildings/${buildingId}/edit`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/edit`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
     const html = await res.text();
 
@@ -1012,7 +1040,7 @@
     const action = form.getAttribute("action") || form.action;
     const formData = new FormData(form);
 
-    const res2 = await fetch(action, {
+    const res2 = await fetchWithTimeout(action, {
       method: "POST",
       body: formData,
       credentials: "same-origin",
@@ -1703,7 +1731,7 @@
   }
 
   async function fetchRemoteVersion() {
-    const res = await fetch(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
+    const res = await fetchWithTimeout(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const match = text.match(/@version\s+([\d.]+)/);
@@ -1865,6 +1893,9 @@
             und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird
             nirgendwo automatisch hochgeladen.
           </p>
+          <button id="vn-btn-show-errorlog" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Anzeigen
+          </button>
           <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">
             <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren
           </button>
@@ -1914,6 +1945,7 @@
       }
     });
 
+    document.getElementById("vn-btn-show-errorlog").addEventListener("click", () => renderErrorLogScreen(renderSettingsScreen));
     document.getElementById("vn-btn-export-errorlog").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-errorlog-status");
       const log = await getErrorLog();
@@ -2015,7 +2047,7 @@
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
 
     try {
-      const res = await fetch(`${CHANGELOG_URL}?_=${Date.now()}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`${CHANGELOG_URL}?_=${Date.now()}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const markdown = await res.text();
       body.querySelector(".vn-changelog").innerHTML = renderMarkdownLite(markdown);
@@ -2264,6 +2296,66 @@
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-history-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-history-type-filter").addEventListener("change", applyRowVisibility);
+  }
+
+  // Fehlerprotokoll direkt im Script anzeigen, statt es nur als Datei herunterladen zu
+  // koennen - fuer einen schnellen Blick reicht das meistens, ohne extra eine JSON-Datei
+  // oeffnen zu muessen. Export bleibt zusaetzlich bestehen (z.B. fuer Bug-Reports an uns).
+  async function renderErrorLogScreen(goBack = renderSettingsScreen) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Fehlerprotokoll");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p>Lade Fehlerprotokoll ...</p>`;
+
+    const log = await getErrorLog();
+
+    const rows = log
+      .map(entry => {
+        const date = new Date(entry.timestamp);
+        return `
+          <tr>
+            <td>${escapeHtml(date.toLocaleDateString("de-DE"))} ${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
+            <td>${escapeHtml(entry.context || "-")}</td>
+            <td>${escapeHtml(entry.message || "-")}</td>
+            <td>v${escapeHtml(entry.version || "?")}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler - nur auf diesem Gerät gespeichert.
+      </p>
+      <div style="max-height:55vh; overflow:auto;">
+        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
+          <colgroup>
+            <col style="width:18%;">
+            <col style="width:22%;">
+            <col style="width:50%;">
+            <col style="width:10%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Zeitpunkt</th>
+              <th>Kontext</th>
+              <th>Meldung</th>
+              <th>Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="4" class="text-muted">Keine protokollierten Fehler vorhanden.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
 
   function addMenuEntry() {
@@ -3189,7 +3281,7 @@
 
   async function buildExtension(buildingId, extensionId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
-    const res = await fetch(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -3207,7 +3299,7 @@
   // GET-Variante, damit es zu unserem sonstigen Bau-Code passt.
   async function buyVehicle(buildingId, vehicleTypeId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
-    const res = await fetch(`/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`, {
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -3226,7 +3318,7 @@
   // plus _method=delete im Body, damit Rails' Method-Override das erkennt.
   async function sellVehicle(vehicleId) {
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
-    const res = await fetch(`/vehicles/${vehicleId}`, {
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -3240,7 +3332,7 @@
 
   async function buildStorage(buildingId, storageId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `/buildings/${buildingId}/storage_upgrade/${currency}/${storageId}?redirect_building_id=${buildingId}`,
       {
         method: "POST",
@@ -3261,7 +3353,7 @@
     // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken und
     // damit den Ausbau doppelt abbuchen. Mit "manual" senden wir garantiert nur eine
     // Anfrage.
-    const res = await fetch(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
       method: "GET",
       credentials: "same-origin",
       redirect: "manual",
@@ -3940,7 +4032,7 @@
   }
 
   async function fetchPersonalPage(buildingId) {
-    const res = await fetch(`/buildings/${buildingId}/personals`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/personals`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Fehler beim Laden von Personal (Gebäude ${buildingId}): ${res.status}`);
     return await res.text();
   }
@@ -4386,7 +4478,7 @@
   // einzige verlaessliche Quelle fuer belegte Raeume - die Gesamtraumzahl ergibt sich als
   // occupied + frei-waehlbare Raeume (NIE geraten/hart codiert).
   async function fetchSchoolPageInfo(schoolId, occupied, slug = null) {
-    const res = await fetch(`/buildings/${schoolId}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${schoolId}`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Schule (Gebäude ${schoolId}) konnte nicht geladen werden (${res.status}).`);
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     const form = doc.querySelector(`form[action="/buildings/${schoolId}/education"]`);
@@ -4459,7 +4551,7 @@
   // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
   // haben (echte Vor-Ort-Daten statt der ggf. veralteten Scan-Zahlen).
   async function fetchAvailablePersonnelForEducation(stationId, slug) {
-    const res = await fetch(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${res.status}).`);
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
@@ -4539,7 +4631,7 @@
     params.append("alliance[cost]", "0");
     plan.selected.forEach(p => params.append("personal_ids[]", p.id));
 
-    const res = await fetch(`/buildings/${plan.schoolId}/education`, {
+    const res = await fetchWithTimeout(`/buildings/${plan.schoolId}/education`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -5011,7 +5103,7 @@
   // unmittelbar vor jedem Eingriff, als letztes Sicherheitsnetz gegen einen mittlerweile
   // ausgerueckten Wagen.
   async function fetchVehicleFmsReal(vehicleId) {
-    const res = await fetch(`/api/v2/vehicles/${vehicleId}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/api/v2/vehicles/${vehicleId}`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`Fahrzeug ${vehicleId} konnte nicht geladen werden (${res.status}).`);
     const data = await res.json();
     const vehicle = data.result || data;
@@ -5033,7 +5125,7 @@
   // der auf einer frisch geladenen Seite nicht den echten Stand zeigt), sondern aus dem
   // Fahrzeug-Katalog (vehicle.staffMax, siehe checkAndFixVehicleCrew).
   async function fetchVehicleAssignmentPage(vehicleId) {
-    const res = await fetch(`/vehicles/${vehicleId}/zuweisung`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/zuweisung`, { credentials: "same-origin" });
     if (!res.ok) {
       throw new Error(`Zuweisungs-Seite von Fahrzeug ${vehicleId} konnte nicht geladen werden (${res.status}).`);
     }
@@ -5082,7 +5174,7 @@
     for (const person of eligible) {
       if (remaining <= 0) break;
 
-      const res = await fetch(person.assignHref, {
+      const res = await fetchWithTimeout(person.assignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -5132,7 +5224,7 @@
     for (const person of eligible) {
       if (remaining <= 0) break;
 
-      const res = await fetch(person.assignHref, {
+      const res = await fetchWithTimeout(person.assignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -5150,7 +5242,7 @@
   }
 
   async function setVehicleFms(vehicleId, fmsStatus) {
-    const res = await fetch(`/vehicles/${vehicleId}/set_fms/${fmsStatus}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/set_fms/${fmsStatus}`, { credentials: "same-origin" });
     if (!res.ok) throw new Error(`FMS-Status konnte nicht auf ${fmsStatus} gesetzt werden (${res.status}).`);
   }
 
@@ -5212,7 +5304,7 @@
       );
       if (wouldViolate) continue;
 
-      const res = await fetch(person.unassignHref, {
+      const res = await fetchWithTimeout(person.unassignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -5316,7 +5408,7 @@
     let removed = 0;
     for (const person of people) {
       if (!person.assignedHere || !person.unassignHref) continue;
-      const res = await fetch(person.unassignHref, {
+      const res = await fetchWithTimeout(person.unassignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -5349,7 +5441,11 @@
     return await unassignAllPersonnelFromVehicle(vehicle.id);
   }
 
-  const VEHICLE_CREW_CHECK_CONCURRENCY = 3;
+  // Wachen laufen bereits strikt SEQUENZIELL (siehe stationQueue-Gruppierung), nur
+  // verschiedene Wachen parallel - diese Zahl war daher nie eine Frage der Personal-Race-
+  // Sicherheit, nur der Geschwindigkeit. Bei Accounts mit mehreren tausend Fahrzeugen wuerde
+  // ein zu niedriger Wert einen kompletten Durchlauf unnoetig in die Laenge ziehen.
+  const VEHICLE_CREW_CHECK_CONCURRENCY = 8;
 
   // Schritt 1 von Fahrzeug-Besatzung: Leitstelle(n) auswaehlen, damit Pruefen/Zuweisen sich
   // gezielt auf einen Teil des Accounts beschraenken laesst statt immer auf alles. Laedt die
