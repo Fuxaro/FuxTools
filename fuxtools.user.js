@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.32
+// @version     0.9.33
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.32";
+  const SCRIPT_VERSION = "0.9.33";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -5178,9 +5178,11 @@
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
       throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
     }
-    const removed = await unassignAllPersonnelFromVehicle(vehicle.id);
-    if (fmsBefore !== VEHICLE_FMS_NOT_STAFFED) await setVehicleFms(vehicle.id, VEHICLE_FMS_NOT_STAFFED);
-    return removed;
+    // Bewusst KEIN setVehicleFms(..., VEHICLE_FMS_NOT_STAFFED) hier (anders als
+    // checkAndFixVehicleCrew): laut Rueckmeldung loest FMS 6 im Spiel eine automatische
+    // Nachbesetzung aus - genau das Gegenteil von dem, was "Alle Zuweisungen rueckgaengig
+    // machen" erreichen soll. Nur die Besatzung abziehen, FMS-Status unangetastet lassen.
+    return await unassignAllPersonnelFromVehicle(vehicle.id);
   }
 
   const VEHICLE_CREW_CHECK_CONCURRENCY = 3;
@@ -5601,10 +5603,11 @@
       <p>
         Das betrifft ALLE Fahrzeuge in der aktuell gewählten Leitstellen-Auswahl (auch die,
         die gerade wegen der Checkbox "Normale Fahrzeuge einbeziehen" nicht angezeigt werden) -
-        danach hat keines davon mehr zugewiesenes Personal, der Fahrzeugstatus wird auf FMS 6
-        (nicht besetzt) gesetzt. Fahrzeuge, die gerade im Einsatz sind, werden dabei
-        übersprungen. Das ist eine echte, sofort wirksame Änderung im Spiel und lässt sich
-        nicht per Klick rückgängig machen.
+        danach hat keines davon mehr zugewiesenes Personal. Der FMS-Status selbst bleibt
+        unangetastet (FMS 6 würde im Spiel eine automatische Nachbesetzung auslösen - das
+        Gegenteil von dem, was dieser Button erreichen soll). Fahrzeuge, die gerade im Einsatz
+        sind, werden dabei übersprungen. Das ist eine echte, sofort wirksame Änderung im Spiel
+        und lässt sich nicht per Klick rückgängig machen.
       </p>
       <div id="vn-crew-unassign-confirm-status" style="margin-top:10px;"></div>
       <div class="vn-sticky-footer">
