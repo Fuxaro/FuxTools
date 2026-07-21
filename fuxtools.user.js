@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.27
+// @version     0.9.28
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.27";
+  const SCRIPT_VERSION = "0.9.28";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -78,18 +78,6 @@
   // in Ruhe bestaetigen koennen soll.
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
-
-  // Steuert, ob beim naechsten Oeffnen des Modals automatisch "So funktioniert's" statt des
-  // Hauptmenues gezeigt wird (siehe show.bs.modal weiter unten). Wird beim Start aus dem
-  // GM-Speicher geladen (initHowItWorksFlag()) - der In-Memory-Default false ist bewusst so
-  // gewaehlt, dass eine brandneue Installation die Anleitung sieht, auch falls das Laden
-  // ausnahmsweise noch nicht durch ist, wenn der Nutzer klickt.
-  const HOW_IT_WORKS_SEEN_KEY = "howItWorksSeen";
-  let howItWorksSeen = false;
-
-  async function initHowItWorksFlag() {
-    howItWorksSeen = !!(await retrieveData(HOW_IT_WORKS_SEEN_KEY));
-  }
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
   // breit fuer den Wachen-Check mit seiner Tabelle - vermeidet leere Flaechen links/
@@ -739,20 +727,31 @@
     return !!(await retrieveData(VEHICLE_CREW_INCLUDE_NORMAL_KEY));
   }
 
-  // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> Statustext) ueber
+  // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> {message, since}) ueber
   // Schliessen/Wiederoeffnen des Fahrzeug-Besatzung-Screens hinweg, damit nicht nach jedem
   // Oeffnen alle Kategorien neu geprueft werden muessen. Beim Oeffnen wird das mit der
   // frisch geladenen Fahrzeugliste abgeglichen (siehe renderVehicleCrewScreen) - Fahrzeuge,
-  // die es nicht mehr gibt (verkauft/umgebaut), fallen dabei automatisch raus.
-  const VEHICLE_CREW_PROBLEMS_KEY = "vehicleCrewProblems"; // { [vehicleId]: message }
+  // die es nicht mehr gibt (verkauft/umgebaut), fallen dabei automatisch raus. "since" ist der
+  // Zeitpunkt, seit dem dieses Fahrzeug OHNE UNTERBRECHUNG als Problem gefuehrt wird (bleibt
+  // beim erneuten Pruefen erhalten, nur "message" wird aktualisiert) - hilft beim Aufraeumen,
+  // alte von frischen Eintraegen zu unterscheiden.
+  const VEHICLE_CREW_PROBLEMS_KEY = "vehicleCrewProblems"; // { [vehicleId]: { message, since } }
 
+  // Alte Versionen speicherten hier nur einen reinen String statt {message, since} - beim
+  // Lesen auf das neue Format hochziehen (since: null = Zeitpunkt unbekannt), statt eine
+  // Migration zu erzwingen.
   async function getVehicleCrewProblems() {
-    return (await retrieveData(VEHICLE_CREW_PROBLEMS_KEY)) || {};
+    const raw = (await retrieveData(VEHICLE_CREW_PROBLEMS_KEY)) || {};
+    const result = {};
+    for (const [id, value] of Object.entries(raw)) {
+      result[id] = typeof value === "string" ? { message: value, since: null } : value;
+    }
+    return result;
   }
 
   async function saveVehicleCrewProblems(problemsById) {
     const plain = {};
-    for (const [id, { message }] of problemsById) plain[id] = message;
+    for (const [id, { message, since }] of problemsById) plain[id] = { message, since };
     await storeData(plain, VEHICLE_CREW_PROBLEMS_KEY);
   }
 
@@ -800,7 +799,6 @@
     VEHICLE_CREW_STAFFING_MODE_KEY,
     VEHICLE_CREW_PROBLEMS_KEY,
     VEHICLE_CREW_INCLUDE_NORMAL_KEY,
-    HOW_IT_WORKS_SEEN_KEY,
   ];
 
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
@@ -1452,10 +1450,6 @@
         renderUpdateRequiredScreen();
         return;
       }
-      if (!howItWorksSeen) {
-        renderHowItWorksScreen(renderMainMenu, { firstOpen: true });
-        return;
-      }
       renderMainMenu();
     });
 
@@ -1515,10 +1509,6 @@
             <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
             Fahrzeug-Besatzung
           </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
-            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-            Wachenausbau
-          </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">
             <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
             Personal-Check
@@ -1526,6 +1516,10 @@
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">
             <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
             Schulungen
+          </button>
+          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
+            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
+            Wachenausbau
           </button>
         </div>
 
@@ -1579,7 +1573,7 @@
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
     document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
     document.getElementById("vn-menu-schooling").addEventListener("click", () => renderSchoolingScreen());
-    document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewScreen());
+    document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewLeitstelleSelection());
     document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
@@ -1590,20 +1584,12 @@
   // haengen inzwischen zusammen (Bauplan -> Personalbedarf -> Schulungen/Besatzung), das ist
   // ohne Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf
   // noetig (anders als renderChangelogScreen).
-  function renderHowItWorksScreen(goBack, { firstOpen = false } = {}) {
+  function renderHowItWorksScreen(goBack) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("So funktioniert's");
     const body = document.getElementById("vehicle-naming-modal-body");
 
     body.innerHTML = `
-      ${
-        firstOpen
-          ? `<p class="text-muted" style="font-size:12px; margin-top:0;">
-               Willkommen bei FuxTools! Diese Anleitung erscheint nur dieses eine Mal - danach
-               findest du sie jederzeit über "So funktioniert's" im Hauptmenü wieder.
-             </p>`
-          : ""
-      }
       <p>Die Module unter <b>"Wachen &amp; Fahrzeuge"</b> hängen zusammen - hier die empfohlene
       Reihenfolge, wenn du FuxTools zum ersten Mal nutzt:</p>
 
@@ -1643,19 +1629,12 @@
       </p>
 
       <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn ${firstOpen ? "btn-primary" : "btn-default"}">
-          <span class="glyphicon ${firstOpen ? "glyphicon-ok" : "glyphicon-arrow-left"}" aria-hidden="true"></span>
-          ${firstOpen ? "Bestätigen" : "Zurück"}
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
       </div>
     `;
-    document.getElementById("vn-btn-back").addEventListener("click", async () => {
-      if (firstOpen && !howItWorksSeen) {
-        howItWorksSeen = true;
-        await storeData(true, HOW_IT_WORKS_SEEN_KEY);
-      }
-      goBack();
-    });
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
 
   //////////////////////////////////////////////////
@@ -1880,7 +1859,7 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
-    document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
+    document.getElementById("vn-btn-required-extensions").addEventListener("click", () => renderRequiredExtensionsSettingsScreen());
     document.getElementById("vn-btn-show-changelog").addEventListener("click", () => renderChangelogScreen(renderSettingsScreen));
 
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
@@ -2048,7 +2027,7 @@
   // aller bekannten Ausbauten. Ohne eigene Speicherung (kein Klick auf "Speichern") gilt
   // weiterhin die feste Standard-Liste (RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID) - "Speichern"
   // schreibt die komplette angezeigte Konfiguration, "Zurücksetzen" loescht sie wieder.
-  async function renderRequiredExtensionsSettingsScreen() {
+  async function renderRequiredExtensionsSettingsScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Einstellungen › Geforderte Ausbauten");
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2108,7 +2087,7 @@
       </div>
     `;
 
-    document.getElementById("vn-btn-back").addEventListener("click", renderSettingsScreen);
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
 
     document.getElementById("vn-btn-save-required").addEventListener("click", async () => {
       const newOverrides = {};
@@ -2151,7 +2130,7 @@
           label: "Zurückgesetzt auf Standard-Empfehlungen",
         });
       }
-      renderRequiredExtensionsSettingsScreen();
+      renderRequiredExtensionsSettingsScreen(goBack);
     });
   }
 
@@ -3740,13 +3719,16 @@
         ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch mindestens ein
         geforderter Ausbau. Spaltenüberschriften sind klickbar zum Sortieren.
       </p>
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <select id="vn-station-check-type-filter" class="form-control" style="max-width:260px;">
+      <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+        <select id="vn-station-check-type-filter" class="form-control" style="max-width:220px;">
           <option value="">Alle Gebäudetypen</option>
           ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
         </select>
         <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
-               value="${escapeHtml(preservedState?.searchQuery || "")}" style="flex:1;">
+               value="${escapeHtml(preservedState?.searchQuery || "")}" style="max-width:200px;">
+        <button id="vn-btn-required-extensions-from-check" type="button" class="btn btn-default" style="margin-left:auto; white-space:nowrap;">
+          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
+        </button>
       </div>
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
@@ -3775,6 +3757,10 @@
     }
     document.getElementById("vn-station-check-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-station-check-type-filter").addEventListener("change", applyRowVisibility);
+    document.getElementById("vn-btn-required-extensions-from-check").addEventListener("click", () => {
+      const savedState = currentState();
+      renderRequiredExtensionsSettingsScreen(() => renderStationCheckScreen(savedState));
+    });
 
     renderTable();
   }
@@ -4890,6 +4876,8 @@
         if (!info) return null;
         const stationId = String(v.building_id ?? v.building);
         const station = buildingsById.get(stationId);
+        const leitstelleId = station?.leitstelle_building_id != null ? String(station.leitstelle_building_id) : "none";
+        const leitstelleBuilding = leitstelleId !== "none" ? buildingsById.get(leitstelleId) : null;
         return {
           id: String(v.id),
           caption: v.caption || `Fahrzeug ${v.id}`,
@@ -4900,6 +4888,8 @@
           category: station ? categoryForBuilding(station) : "Unbekannt",
           stationId,
           stationName: station?.caption || `Wache ${stationId}`,
+          leitstelleId,
+          leitstelleName: leitstelleId !== "none" ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
         };
       })
       .filter(Boolean);
@@ -5105,14 +5095,15 @@
 
   const VEHICLE_CREW_CHECK_CONCURRENCY = 3;
 
-  // Zeigt einem Fahrzeug/einer Wache-Kombination nach dem Pruefen als anklickbaren Link,
-  // wenn es NICHT vollstaendig besetzt ist bzw. ein Fehler auftrat - direkt ins Fahrzeug im
-  // Spiel, statt einer langen Tabelle ALLER Fahrzeuge (bei vielen Fahrzeugen unuebersichtlich).
-  async function renderVehicleCrewScreen(goBack = renderMainMenu) {
-    setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle("Fahrzeug-Besatzung");
+  // Schritt 1 von Fahrzeug-Besatzung: Leitstelle(n) auswaehlen, damit Pruefen/Zuweisen sich
+  // gezielt auf einen Teil des Accounts beschraenken laesst statt immer auf alles. Laedt die
+  // volle Fahrzeugliste einmal hier und reicht sie an renderVehicleCrewScreen weiter, damit
+  // beim "Weiter"-Klick kein zweiter Server-Roundtrip noetig ist.
+  async function renderVehicleCrewLeitstelleSelection(goBack = renderMainMenu) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("Fahrzeug-Besatzung › Leitstelle wählen");
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Fahrzeuge ...</p>`;
+    body.innerHTML = `<p><em>Lade Fahrzeuge ...</em></p>`;
 
     let allVehicles;
     try {
@@ -5130,16 +5121,103 @@
       return;
     }
 
+    const byLeitstelle = new Map();
+    for (const v of allVehicles) {
+      if (!byLeitstelle.has(v.leitstelleId)) byLeitstelle.set(v.leitstelleId, { name: v.leitstelleName, vehicles: [] });
+      byLeitstelle.get(v.leitstelleId).vehicles.push(v);
+    }
+
+    const rows = [...byLeitstelle.entries()]
+      .sort((a, b) => a[1].name.localeCompare(b[1].name, "de"))
+      .map(([id, info]) => {
+        const stationCount = new Set(info.vehicles.map(v => v.stationId)).size;
+        return `
+        <div class="checkbox" style="margin: 2px 0;">
+          <label>
+            <input type="checkbox" class="vn-crew-leitstelle-check" value="${escapeHtml(id)}" checked>
+            ${escapeHtml(info.name)} <span class="text-muted">(${stationCount} Wachen, ${info.vehicles.length} Fahrzeuge)</span>
+          </label>
+        </div>`;
+      })
+      .join("");
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">
+        Fahrzeug-Besatzung nur für ausgewählte Leitstelle(n) prüfen und zuweisen - praktisch,
+        um gezielt einen Teil des Accounts zu bearbeiten statt immer alle Fahrzeuge.
+      </p>
+      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px;">
+        ${rows || '<p class="text-muted"><em>Keine passenden Fahrzeuge gefunden.</em></p>'}
+      </div>
+      <div class="vn-sticky-footer">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-next-crew-leitstelle" type="button" class="btn btn-primary">
+          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-next-crew-leitstelle").addEventListener("click", () => {
+      const ids = [...body.querySelectorAll(".vn-crew-leitstelle-check:checked")].map(el => el.value);
+      if (!ids.length) {
+        alert("Bitte mindestens eine Leitstelle auswählen.");
+        return;
+      }
+      renderVehicleCrewScreen(() => renderVehicleCrewLeitstelleSelection(goBack), allVehicles, ids);
+    });
+  }
+
+  // Zeigt einem Fahrzeug/einer Wache-Kombination nach dem Pruefen als anklickbaren Link,
+  // wenn es NICHT vollstaendig besetzt ist bzw. ein Fehler auftrat - direkt ins Fahrzeug im
+  // Spiel, statt einer langen Tabelle ALLER Fahrzeuge (bei vielen Fahrzeugen unuebersichtlich).
+  // "allVehiclesFull"/"selectedLeitstelleIds" kommen von renderVehicleCrewLeitstelleSelection
+  // (bereits geladene Fahrzeugliste + gewaehlte Leitstellen) - ohne die beiden Parameter wird
+  // wie bisher die komplette Liste geladen und ungefiltert gezeigt.
+  async function renderVehicleCrewScreen(goBack = renderMainMenu, allVehiclesFull = null, selectedLeitstelleIds = null) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Fahrzeug-Besatzung");
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    let allVehicles = allVehiclesFull;
+    if (!allVehicles) {
+      body.innerHTML = `<p>Lade Fahrzeuge ...</p>`;
+      try {
+        allVehicles = await loadCrewCheckVehicles();
+      } catch (e) {
+        body.innerHTML = `
+          <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
+          <div class="vn-sticky-footer">
+            <button id="vn-btn-back" type="button" class="btn btn-default">
+              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+            </button>
+          </div>
+        `;
+        document.getElementById("vn-btn-back").addEventListener("click", goBack);
+        return;
+      }
+    }
+
+    // "scopeVehicles" ist die durch die Leitstellen-Auswahl eingegrenzte Teilmenge von
+    // allVehicles (= ALLE Fahrzeuge account-weit, fuer den Existenz-Abgleich der Problem-Liste
+    // unten noetig) - ohne Leitstellen-Filter identisch zu allVehicles.
+    const scopeVehicles = selectedLeitstelleIds
+      ? allVehicles.filter(v => selectedLeitstelleIds.includes(v.leitstelleId))
+      : allVehicles;
+
     let staffingMode = await getVehicleCrewStaffingMode();
     let includeNormal = await getVehicleCrewIncludeNormal();
 
-    // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von includeNormal ab) -
-    // wird beim Umschalten der Checkbox neu berechnet, ohne die Fahrzeugliste erneut vom
-    // Server zu laden (siehe loadCrewCheckVehicles: laedt bewusst IMMER alle Fahrzeuge).
+    // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von Leitstellen-Auswahl UND
+    // includeNormal ab) - wird beim Umschalten der Checkbox neu berechnet, ohne die
+    // Fahrzeugliste erneut vom Server zu laden (siehe loadCrewCheckVehicles: laedt bewusst
+    // IMMER alle Fahrzeuge).
     let vehicles;
     let byCategory;
     function recomputeVisibleVehicles() {
-      vehicles = allVehicles.filter(v => v.special || includeNormal);
+      vehicles = scopeVehicles.filter(v => v.special || includeNormal);
       byCategory = new Map();
       for (const v of vehicles) {
         if (!byCategory.has(v.category)) byCategory.set(v.category, []);
@@ -5148,45 +5226,79 @@
     }
     recomputeVisibleVehicles();
 
-    // Eine gemeinsame Liste ueber ALLE Kategorien hinweg statt einer eigenen je Kategorie -
-    // jeder Kategorie-Lauf aktualisiert nur seine eigenen Fahrzeuge darin (vorherige Laeufe
-    // anderer Kategorien bleiben erhalten, bis sie selbst erneut geprueft werden). Beim
-    // Oeffnen mit den zuletzt gespeicherten Problemen befuellt (siehe VEHICLE_CREW_PROBLEMS_KEY),
-    // damit man nicht nach jedem Schliessen neu scannen muss - Fahrzeuge, die es laut der
-    // frisch geladenen Liste nicht mehr gibt, fallen dabei automatisch raus.
+    // Problem-Liste: "allProblemsById" haelt ALLE gespeicherten Eintraege (auch fuer Fahrzeuge
+    // ausserhalb der aktuellen Leitstellen-Auswahl), "problemsById" nur die im aktuellen Scope
+    // sichtbaren/bearbeitbaren. Wichtig: Speichern MUSS immer ueber persistProblems() laufen,
+    // das problemsById wieder in allProblemsById zurueckmischt - sonst wuerden beim Speichern
+    // waehrend eines Leitstellen-Filters die Eintraege ausserhalb des Scopes geloescht, obwohl
+    // die zugehoerigen Fahrzeuge ja weiterhin existieren (siehe Kommentar bei VEHICLE_CREW_PROBLEMS_KEY).
     const vehiclesById = new Map(allVehicles.map(v => [v.id, v]));
+    const scopedIds = new Set(scopeVehicles.map(v => v.id));
     const persistedProblems = await getVehicleCrewProblems();
-    const problemsById = new Map(); // vehicleId -> { vehicle, message }
-    for (const [id, message] of Object.entries(persistedProblems)) {
+    const allProblemsById = new Map(); // vehicleId -> { vehicle, message, since }
+    for (const [id, { message, since }] of Object.entries(persistedProblems)) {
       const vehicle = vehiclesById.get(id);
-      if (vehicle) problemsById.set(id, { vehicle, message });
+      if (vehicle) allProblemsById.set(id, { vehicle, message, since });
     }
-    if (Object.keys(persistedProblems).length !== problemsById.size) {
-      await saveVehicleCrewProblems(problemsById);
+    if (Object.keys(persistedProblems).length !== allProblemsById.size) {
+      await saveVehicleCrewProblems(allProblemsById); // nur echte Karteileichen (verkauft/umgebaut) raus
+    }
+    const problemsById = new Map([...allProblemsById].filter(([id]) => scopedIds.has(id)));
+
+    async function persistProblems() {
+      for (const id of [...allProblemsById.keys()]) {
+        if (scopedIds.has(id) && !problemsById.has(id)) allProblemsById.delete(id);
+      }
+      for (const [id, entry] of problemsById) allProblemsById.set(id, entry);
+      await saveVehicleCrewProblems(allProblemsById);
+    }
+
+    function formatSince(since) {
+      if (!since) return "unbekannt";
+      const d = new Date(since);
+      return `${d.toLocaleDateString("de-DE")}, ${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
     }
 
     function renderProblemsRows() {
-      const rows = [...problemsById.values()].sort(
-        (a, b) =>
+      const rows = [...problemsById.entries()].sort(
+        ([, a], [, b]) =>
           a.vehicle.category.localeCompare(b.vehicle.category, "de") ||
           a.vehicle.stationName.localeCompare(b.vehicle.stationName, "de") ||
           a.vehicle.caption.localeCompare(b.vehicle.caption, "de"),
       );
       if (!rows.length) {
-        return `<tr><td colspan="4" class="text-muted">Noch keine Probleme gefunden (oder noch nicht geprüft).</td></tr>`;
+        return `<tr><td colspan="6" class="text-muted">Noch keine Probleme gefunden (oder noch nicht geprüft).</td></tr>`;
       }
       return rows
         .map(
-          ({ vehicle, message }) => `
+          ([id, { vehicle, message, since }]) => `
             <tr>
               <td>${escapeHtml(vehicle.category)}</td>
               <td>${escapeHtml(vehicle.stationName)}</td>
               <td><a href="/vehicles/${escapeHtml(vehicle.id)}" target="_blank">${escapeHtml(vehicle.caption)}</a></td>
               <td class="text-danger">${escapeHtml(message || "")}</td>
+              <td class="text-muted" style="white-space:nowrap;">${escapeHtml(formatSince(since))}</td>
+              <td>
+                <button type="button" class="btn btn-default btn-xs vn-crew-problem-remove" data-id="${escapeHtml(id)}"
+                        title="Aus der Liste entfernen (macht keine Zuweisung rückgängig)">
+                  <span class="glyphicon glyphicon-remove" aria-hidden="true"></span>
+                </button>
+              </td>
             </tr>
           `,
         )
         .join("");
+    }
+
+    function bindProblemsRowButtons() {
+      body.querySelectorAll(".vn-crew-problem-remove").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          problemsById.delete(btn.dataset.id);
+          document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
+          bindProblemsRowButtons();
+          await persistProblems();
+        });
+      });
     }
 
     function renderGroups() {
@@ -5222,17 +5334,18 @@
         danach den Fahrzeugstatus: FMS 6 (nicht besetzt), wenn die Besatzung nicht passt,
         sonst FMS 2 (frei auf Funk). Fahrzeuge im Einsatz werden nie angefasst.
       </p>
-      <div class="form-inline" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+      <div class="form-inline" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
         <label style="font-size:12px; margin:0;">Bei Teil-Anforderungen (z.B. GRTW/NAW) zuweisen:</label>
         <div style="display:flex; gap:6px;">
           <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min">
             Nur Minimum (spart Personal)
           </button>
-          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="full">
+          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full">
             Volle Besatzung
           </button>
         </div>
       </div>
+      <p id="vn-crew-mode-status" class="text-muted" style="font-size:11px; margin-bottom:10px;"></p>
       <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
         <label style="font-size:12px; margin:0; font-weight:normal;">
           <input type="checkbox" id="vn-crew-include-normal" ${includeNormal ? "checked" : ""}>
@@ -5240,11 +5353,16 @@
         </label>
       </div>
       <div id="vn-crew-groups">${renderGroups()}</div>
-      <p style="margin-top:14px; margin-bottom:4px;"><b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b></p>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">
+        <b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b>
+        <button type="button" id="vn-btn-clear-problems" class="btn btn-default btn-xs">
+          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Liste leeren
+        </button>
+      </div>
       <div style="max-height:35vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
           <thead>
-            <tr><th>Kategorie</th><th>Wache</th><th>Fahrzeug</th><th>Status</th></tr>
+            <tr><th>Kategorie</th><th>Wache</th><th>Fahrzeug</th><th>Status</th><th>Seit</th><th></th></tr>
           </thead>
           <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>
         </table>
@@ -5257,6 +5375,28 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    bindProblemsRowButtons();
+
+    function updateModeStatus() {
+      const statusEl = document.getElementById("vn-crew-mode-status");
+      statusEl.innerHTML =
+        staffingMode === "full"
+          ? `<span class="text-danger"><b>Aktiv: Volle Besatzung</b> - belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.</span>`
+          : `<b>Aktiv: Nur Minimum</b> - spart Personal für andere Fahrzeuge, belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.`;
+    }
+    updateModeStatus();
+
+    document.getElementById("vn-btn-clear-problems").addEventListener("click", async () => {
+      if (!problemsById.size) return;
+      const confirmed = confirm(
+        `${problemsById.size} Einträge aus der Liste entfernen? Macht keine Zuweisung im Spiel rückgängig, nur unsere Anzeige.`,
+      );
+      if (!confirmed) return;
+      problemsById.clear();
+      document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
+      bindProblemsRowButtons();
+      await persistProblems();
+    });
 
     body.querySelectorAll(".vn-crew-mode").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -5264,9 +5404,11 @@
         await storeData(staffingMode, VEHICLE_CREW_STAFFING_MODE_KEY);
         body.querySelectorAll(".vn-crew-mode").forEach(b => {
           const active = b.dataset.mode === staffingMode;
-          b.classList.toggle("btn-primary", active);
+          b.classList.toggle("btn-primary", active && staffingMode === "min");
+          b.classList.toggle("btn-danger", active && staffingMode === "full");
           b.classList.toggle("btn-default", !active);
         });
+        updateModeStatus();
       });
     });
 
@@ -5294,19 +5436,23 @@
                   problemsById.delete(vehicle.id);
                 } else {
                   failed++;
+                  const existing = problemsById.get(vehicle.id);
                   problemsById.set(vehicle.id, {
                     vehicle,
                     message: `${result.trainedPersonnel}/${result.requiredPersonnel} erforderliches Personal zugewiesen`,
+                    since: existing?.since || Date.now(),
                   });
                 }
               } catch (e) {
                 failed++;
-                problemsById.set(vehicle.id, { vehicle, message: e.message });
+                const existing = problemsById.get(vehicle.id);
+                problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
               }
               done++;
               categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
               document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
-              await saveVehicleCrewProblems(problemsById);
+              bindProblemsRowButtons();
+              await persistProblems();
             }
           }
           const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, categoryVehicles.length);
@@ -6167,13 +6313,8 @@
     // Menuepunkt und Update-Check auch bei fehlgeschlagenem Fahrzeug-Katalog nutzbar
     // (betroffene Funktionen wie Umbenennen/Wachen-Bauplaner zeigen dann nur leere Daten,
     // statt das ganze Script lahmzulegen).
-    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher", "Einstiegs-Anleitung-Status"];
-    const results = await Promise.allSettled([
-      initModal(),
-      initVehicleTypeCaptions(),
-      initNamesStore(),
-      initHowItWorksFlag(),
-    ]);
+    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher"];
+    const results = await Promise.allSettled([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
     results.forEach((r, i) => {
       if (r.status === "rejected") reportError(`Initialisierung fehlgeschlagen (${initSteps[i]})`, r.reason);
     });
