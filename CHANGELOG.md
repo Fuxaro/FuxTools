@@ -48,6 +48,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Bestätigung die komplette Besatzung aller Fahrzeuge im gewählten Leitstellen-Bereich ab.
 - Rote Warn-/Fehlertexte im Script waren auf dem dunklen Seiten-Theme kaum lesbar (zu
   dunkles Rot) - jetzt durchgängig auf einen helleren, kontrastreicheren Rotton angehoben.
+- **Bugfix "Alle Zuweisungen rückgängig machen"**: setzte bisher FMS 6 (nicht besetzt) auf
+  die komplett geleerten Fahrzeuge - das löst im Spiel aber eine automatische Nachbesetzung
+  aus, genau das Gegenteil von dem, was der Button erreichen soll. Der FMS-Status bleibt
+  jetzt unangetastet, nur die Besatzung wird abgezogen.
 
 ## Stable (v0.5.1)
 
