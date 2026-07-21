@@ -21,6 +21,8 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - Diese Fehler landen zusätzlich in einem Fehlerprotokoll, das sich in den Einstellungen als
   Datei exportieren lässt - praktisch für Bug-Reports.
 - Neuer Button "Changelog anzeigen" in den Einstellungen zeigt diese Liste direkt im Script.
+- Neuer Menüpunkt "So funktioniert's" erklärt kurz die empfohlene Reihenfolge (Wachen-Bauplaner
+  → Personal-Check/Schulungen → Fahrzeug-Besatzung).
 
 ## Stable (v0.5.1)
 

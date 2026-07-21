@@ -70,6 +70,24 @@ keine separate Installation nötig.
 
 Siehe [CHANGELOG.md](./CHANGELOG.md).
 
+## Datenschutz
+
+FuxTools läuft komplett lokal in deinem Browser und sendet keine Daten an Server von Fuxaro
+oder sonstige Dritte:
+
+- **leitstellenspiel.de**: alle Aktionen (Umbenennen, Bauen, Fahrzeuge kaufen/verkaufen, Personal
+  zuweisen, ...) laufen über deine bestehende, eingeloggte Spiel-Session – kein separates
+  Passwort, kein API-Key nötig.
+- **api.lss-manager.de**: liefert nur den öffentlichen Fahrzeug-Katalog (Namen,
+  Ausbildungsanforderungen) – es werden keine Daten an diese Seite gesendet, nur abgerufen.
+- **raw.githubusercontent.com** (dieses Repo): für den automatischen Update-Check, den
+  Changelog-Button in den Einstellungen und als Notfall-Fallback für den Fahrzeug-Katalog –
+  ebenfalls nur Abruf, kein Versand.
+
+Alle Einstellungen, Namen und der Verlauf werden ausschließlich lokal über den
+Tampermonkey-eigenen Speicher (`GM.setValue`/`GM.getValue`) gespeichert – kein Tracking, keine
+Analytics, keine Weitergabe an Dritte.
+
 ## Copyright
 
 **© Fuxaro.** Lizenziert unter [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)
