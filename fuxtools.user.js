@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.39
+// @version     0.9.40
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.39";
+  const SCRIPT_VERSION = "0.9.40";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -772,7 +772,7 @@
   }
 
   // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
-  // sein soll (Ausbauten, Fahrzeuge+Anzahl, Sollpersonal) - siehe renderStationBlueprints*.
+  // sein soll (Ausbauten, Fahrzeuge+Anzahl) - siehe renderStationBlueprints*.
   const STATION_BLUEPRINTS_KEY = "stationBlueprints"; // { [id]: Blueprint }
 
   async function getStationBlueprints() {
@@ -5956,7 +5956,8 @@
 
   //////////////////////////////////////////////////
   // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
-  // sein soll (welche Ausbauten, welche Fahrzeuge in welcher Anzahl, wie viel Sollpersonal).
+  // sein soll (welche Ausbauten, welche Fahrzeuge in welcher Anzahl - Personalbedarf wird
+  // daraus automatisch berechnet, nicht separat gepflegt).
   // Konzept und Datenmodell (Bauplan-Felder, Verfuegbar/Zugewiesen-Doppelliste fuer Ausbauten)
   // vom Community-Script "Wachenbaupläne" (BOS-Ernie) uebernommen - die Personal-
   // Bedarfsrechnung nutzt aber UNSERE getVehicleTypeRequirement() (siehe Fahrzeug-Besatzung
@@ -6078,9 +6079,10 @@
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
-        Legt fest, welche Ausbauten, Fahrzeuge (mit Anzahl) und wie viel Sollpersonal eine
-        Wache eines bestimmten Typs haben soll - anwendbar über den Haken-Button je Bauplan,
-        um zu sehen, welche passenden Wachen wovon noch wie viel brauchen.
+        Legt fest, welche Ausbauten und Fahrzeuge (mit Anzahl) eine Wache eines bestimmten Typs
+        haben soll - das benötigte Personal wird automatisch aus den Fahrzeugen berechnet.
+        Anwendbar über den Haken-Button je Bauplan, um zu sehen, welche passenden Wachen wovon
+        noch wie viel brauchen.
       </p>
       <div style="margin-bottom:12px;">
         <button type="button" id="vn-bp-new" class="btn btn-primary btn-sm">
@@ -6174,9 +6176,11 @@
   // Doppelliste wie beim Vorbild-Script "Wachenbaupläne" (BOS-Ernie), statt einer Reihe
   // Checkboxen - uebersichtlicher bei vielen Ausbauten), Fahrzeuge+Anzahl (aus dem Fahrzeug-
   // Katalog gefiltert nach Gebäudetyp) - das benötigte Personal wird daraus automatisch
-  // berechnet (computeBlueprintPersonnelRequirements) und mit dem Sollpersonal verglichen.
-  // Bewusst OHNE Regex-Namensfilter (gab es im Vorbild-Script) - unnoetige Komplexitaet, ein
-  // Bauplan gilt einfach fuer alle Wachen des gewaehlten Gebäudetyps.
+  // berechnet und nur ANGEZEIGT (computeBlueprintPersonnelRequirements), nicht mehr manuell
+  // einstellbar (frueher "Sollpersonal"-Eingabefeld - war rein informativ, floss nirgendwo
+  // in echte Berechnungen ein, nur verwirrend neben der ohnehin schon automatisch berechneten
+  // Anforderung). Bewusst OHNE Regex-Namensfilter (gab es im Vorbild-Script) - unnoetige
+  // Komplexitaet, ein Bauplan gilt einfach fuer alle Wachen des gewaehlten Gebäudetyps.
   async function renderStationBlueprintEditScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachen-Bauplaner › Bearbeiten");
@@ -6290,10 +6294,7 @@
       document.getElementById("vn-bp-personnel-body").innerHTML =
         rows || `<tr><td colspan="2" class="text-muted">Keine Ausbildung erforderlich.</td></tr>`;
 
-      const setPoint = parseInt(document.getElementById("vn-bp-personnel-set-point").value, 10) || 0;
-      const hintEl = document.getElementById("vn-bp-personnel-hint");
-      hintEl.textContent = `Benötigt insgesamt: ${totalSum} Person(en).`;
-      hintEl.className = setPoint < totalSum ? "text-danger" : "text-muted";
+      document.getElementById("vn-bp-personnel-total").textContent = `Insgesamt benötigt: ${totalSum} Person(en).`;
     }
 
     body.innerHTML = `
@@ -6363,13 +6364,7 @@
               <thead><tr><th>Anzahl</th><th>Ausbildung</th></tr></thead>
               <tbody id="vn-bp-personnel-body"></tbody>
             </table>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Sollpersonal</label>
-          <div class="col-sm-10">
-            <input type="number" min="0" id="vn-bp-personnel-set-point" class="form-control" style="max-width:120px;" value="${existing?.personnelSetPoint ?? 0}">
-            <div id="vn-bp-personnel-hint" class="text-muted" style="font-size:11px; margin-top:4px;"></div>
+            <div id="vn-bp-personnel-total" class="text-muted" style="font-size:11px;"></div>
           </div>
         </div>
       </div>
@@ -6398,8 +6393,6 @@
       bindVehicleQuantityInputs();
       updatePersonnelRequirements();
     });
-    document.getElementById("vn-bp-personnel-set-point").addEventListener("change", updatePersonnelRequirements);
-
     document.getElementById("vn-bp-save").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-bp-edit-status");
       const pseudoId = document.getElementById("vn-bp-pseudo-id").value;
@@ -6417,7 +6410,6 @@
       const vehicles = [...body.querySelectorAll(".vn-bp-vehicle-qty")]
         .map(input => ({ vehicleTypeId: Number(input.dataset.vehicleTypeId), quantity: parseInt(input.value, 10) || 0 }))
         .filter(v => v.quantity > 0);
-      const personnelSetPoint = parseInt(document.getElementById("vn-bp-personnel-set-point").value, 10) || 0;
 
       const current = await getStationBlueprints();
 
@@ -6441,7 +6433,6 @@
         enabled,
         pseudoId,
         name,
-        personnelSetPoint,
         extensions,
         vehicles,
       };

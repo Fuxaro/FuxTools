@@ -89,6 +89,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Durchlauf bei sehr vielen Fahrzeugen (mehrere Tausend) nicht unnötig lange dauert.
 - **Fehlerprotokoll**: neuer Button "Anzeigen" in den Einstellungen zeigt die letzten Fehler
   direkt im Script an, statt nur als Datei herunterladbar zu sein.
+- **Wachen-Bauplaner**: "Sollpersonal"-Eingabefeld entfernt - war rein manuell, floss nirgendwo
+  in echte Berechnungen ein und stand verwirrend neben dem ohnehin schon automatisch aus den
+  Fahrzeugen berechneten Personalbedarf. Zeigt jetzt nur noch die berechnete Gesamtzahl an.
 
 ## Stable (v0.5.1)
 
