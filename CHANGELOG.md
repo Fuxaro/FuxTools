@@ -92,6 +92,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Wachen-Bauplaner**: "Sollpersonal"-Eingabefeld entfernt - war rein manuell, floss nirgendwo
   in echte Berechnungen ein und stand verwirrend neben dem ohnehin schon automatisch aus den
   Fahrzeugen berechneten Personalbedarf. Zeigt jetzt nur noch die berechnete Gesamtzahl an.
+- **Wachen-Bauplaner "Anwenden"**: zeigt bei "Keine passenden Wachen gefunden" jetzt zusätzlich,
+  als welchen Gebäudetyp FuxTools die eigenen Wachen tatsächlich erkennt - hilft z.B. bei einem
+  Bauplan für "Feuerwache (Kleinwache)", wenn die eigenen Wachen laut FuxTools eigentlich
+  normale Feuerwachen sind (oder umgekehrt), ohne das erst mühsam manuell nachschauen zu müssen.
 
 ## Stable (v0.5.1)
 
