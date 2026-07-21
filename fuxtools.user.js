@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.24
+// @version     0.9.25
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.24";
+  const SCRIPT_VERSION = "0.9.25";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -60,6 +60,11 @@
   const VEHICLE_TYPES_FALLBACK_BETA_URL =
     "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/data/vehicle-types-fallback.json";
   const VEHICLE_TYPES_FALLBACK_URL = CHANNEL === "beta" ? VEHICLE_TYPES_FALLBACK_BETA_URL : VEHICLE_TYPES_FALLBACK_STABLE_URL;
+  // Fuer den "Changelog anzeigen"-Button in den Einstellungen - zeigt immer den Stand des
+  // eigenen Kanals (Beta liest von beta, Stable von main), analog zu STABLE_URL/BETA_URL.
+  const CHANGELOG_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/CHANGELOG.md";
+  const CHANGELOG_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/CHANGELOG.md";
+  const CHANGELOG_URL = CHANNEL === "beta" ? CHANGELOG_BETA_URL : CHANGELOG_STABLE_URL;
 
   let modalFooterEl = null;
   let availableUpdateVersion = null;
@@ -133,8 +138,12 @@
   }
 
   function reportError(context, error) {
+    const message = error?.message || String(error);
     console.error(`[FuxTools] ${context}:`, error);
-    showErrorBanner(`${context} - ${error?.message || error}`);
+    showErrorBanner(`${context} - ${message}`);
+    logErrorToStorage(context, message).catch(e =>
+      console.error("[FuxTools] Fehlerprotokoll konnte nicht gespeichert werden:", e)
+    );
   }
 
   const modalId = "vehicle-naming-modal";
@@ -614,6 +623,24 @@
   // zu koennen, mit welcher Version eine Aktion ausgefuehrt wurde.
   const HISTORY_STORAGE_KEY = "actionHistory";
   const HISTORY_MAX_ENTRIES = 300;
+
+  // Fehlerprotokoll: die letzten kritischen Fehler (siehe reportError()) werden zusaetzlich
+  // hier gespeichert, nicht nur als Toast angezeigt - ein Beta-Tester kann den Toast leicht
+  // wegklicken oder verpassen, bevor er einen Screenshot macht. Rein diagnostisch (Export in
+  // den Einstellungen), hat keinen Einfluss auf die eigentliche Funktion von FuxTools.
+  const ERROR_LOG_KEY = "errorLog";
+  const ERROR_LOG_MAX_ENTRIES = 20;
+
+  async function getErrorLog() {
+    return (await retrieveData(ERROR_LOG_KEY)) || [];
+  }
+
+  async function logErrorToStorage(context, message) {
+    const log = await getErrorLog();
+    log.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, context, message });
+    if (log.length > ERROR_LOG_MAX_ENTRIES) log.length = ERROR_LOG_MAX_ENTRIES;
+    await storeData(log, ERROR_LOG_KEY);
+  }
   const HISTORY_TYPE_LABELS = {
     extension: "Ausbau",
     vehicle: "Fahrzeug-Kauf",
@@ -769,6 +796,7 @@
   // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
   async function clearAllStoredData() {
     await GM.deleteValue(cacheKeyVehicleTypes);
+    await GM.deleteValue(ERROR_LOG_KEY);
     for (const key of ALL_SETTINGS_KEYS) await GM.deleteValue(key);
   }
 
@@ -1163,6 +1191,48 @@
     }[c]));
   }
 
+  // Sehr einfacher Markdown->HTML-Renderer NUR fuer den "Changelog anzeigen"-Bildschirm - kein
+  // Anspruch auf vollstaendiges Markdown, deckt bewusst nur ab, was CHANGELOG.md tatsaechlich
+  // nutzt: #/##-Ueberschriften, "- "-Listen (inkl. eingerueckter Folgezeilen als Fortsetzung
+  // desselben Punkts) und **fett**. Alles wird escaped, bevor **fett** angewendet wird - kein
+  // XSS-Risiko, auch wenn der Inhalt von einer fremden Quelle (GitHub) kommt.
+  function inlineMarkdown(text) {
+    return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  }
+
+  function renderMarkdownLite(markdown) {
+    let html = "";
+    let inList = false;
+    const closeList = () => {
+      if (inList) { html += "</ul>"; inList = false; }
+    };
+    for (const rawLine of markdown.split("\n")) {
+      const line = rawLine.trimEnd();
+      if (!line.trim()) {
+        closeList();
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        closeList();
+        html += `<h4>${inlineMarkdown(line.slice(3))}</h4>`;
+      } else if (line.startsWith("# ")) {
+        closeList();
+        html += `<h3>${inlineMarkdown(line.slice(2))}</h3>`;
+      } else if (/^-\s+/.test(line)) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += `<li>${inlineMarkdown(line.replace(/^-\s+/, ""))}</li>`;
+      } else if (/^\s+\S/.test(rawLine) && inList) {
+        // Eingerueckte Fortsetzungszeile eines Listenpunkts (Zeilenumbruch in CHANGELOG.md).
+        html = html.replace(/<\/li>$/, ` ${inlineMarkdown(line.trim())}</li>`);
+      } else {
+        closeList();
+        html += `<p>${inlineMarkdown(line)}</p>`;
+      }
+    }
+    closeList();
+    return html;
+  }
+
   // Gemeinsame Such-/Typ-Filter-Logik fuer die Tabellen-Bildschirme (Verlauf, Wachen-
   // Check, Personal-Check): blendet Zeilen anhand von Sucheingabe und Typ-Dropdown ein/
   // aus, ohne die Tabelle neu aufzubauen. rowSelector matcht die Zeilen, deren
@@ -1222,6 +1292,18 @@
         background-color: #8f2626;
         border-color: #7a2020;
         color: #fff;
+      }
+      #vehicle-naming-modal-body .vn-changelog h3 {
+        margin-top: 0;
+      }
+      #vehicle-naming-modal-body .vn-changelog h4 {
+        margin: 18px 0 8px;
+      }
+      #vehicle-naming-modal-body .vn-changelog ul {
+        padding-left: 20px;
+      }
+      #vehicle-naming-modal-body .vn-changelog li {
+        margin-bottom: 6px;
       }
       /* Haelt Aktions-/Zurueck-Buttons am unteren Rand des Modal-Scrollbereichs fest,
          statt dass man bei langen Screens erst dorthin scrollen muss. */
@@ -1613,6 +1695,9 @@
             <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">
               <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen
             </button>
+            <button id="vn-btn-show-changelog" type="button" class="btn btn-default">
+              <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Changelog anzeigen
+            </button>
           </div>
           <p class="text-muted" style="font-size:11px;">
             Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
@@ -1668,6 +1753,19 @@
           <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>
         </div>
 
+        <div class="vn-settings-card">
+          <p style="margin-top:0;"><b>Fehlerprotokoll</b></p>
+          <p class="text-muted" style="font-size:12px;">
+            Speichert die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler (mit Zeitstempel
+            und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird
+            nirgendwo automatisch hochgeladen.
+          </p>
+          <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren
+          </button>
+          <div id="vn-errorlog-status" style="margin-top:10px;"></div>
+        </div>
+
         <div class="vn-settings-card" style="border-color:#a94442;">
           <p style="margin-top:0;"><b>Speicher löschen</b></p>
           <p class="text-muted" style="font-size:12px;">
@@ -1689,6 +1787,7 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
+    document.getElementById("vn-btn-show-changelog").addEventListener("click", () => renderChangelogScreen(renderSettingsScreen));
 
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-settings-transfer-status");
@@ -1708,6 +1807,26 @@
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
       }
+    });
+
+    document.getElementById("vn-btn-export-errorlog").addEventListener("click", async () => {
+      const statusEl = document.getElementById("vn-errorlog-status");
+      const log = await getErrorLog();
+      if (!log.length) {
+        statusEl.innerHTML = `<span class="text-muted">Keine protokollierten Fehler vorhanden.</span>`;
+        return;
+      }
+      const bundle = { fuxtools: true, version: SCRIPT_VERSION, exportedAt: Date.now(), errors: log };
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fuxtools-fehlerprotokoll-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      statusEl.innerHTML = `<span class="text-success">Herunterladen gestartet (${log.length} Einträge).</span>`;
     });
 
     document.getElementById("vn-btn-import-settings").addEventListener("click", () => {
@@ -1768,6 +1887,36 @@
     // man muss dann nicht erst nochmal manuell auf "Nach Updates suchen" klicken.
     if (availableUpdateVersion) {
       renderUpdateAvailableStatus(document.getElementById("vn-update-status"), availableUpdateVersion);
+    }
+  }
+
+  // Laedt CHANGELOG.md live vom aktuellen Kanal-Branch (siehe CHANGELOG_URL) und zeigt es im
+  // FuxTools-eigenen Design an, statt dass Tester dafuer extra auf GitHub nachschauen muessen.
+  // cache:"no-store" + Cachebuster-Query wie bei fetchRemoteVersion(), damit nicht versehentlich
+  // eine alte, vom Browser gecachte Version angezeigt wird.
+  async function renderChangelogScreen(goBack) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Einstellungen › Changelog");
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    body.innerHTML = `
+      <div class="vn-changelog"><p><em>Changelog wird geladen ...</em></p></div>
+      <div class="vn-sticky-footer">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+
+    try {
+      const res = await fetch(`${CHANGELOG_URL}?_=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const markdown = await res.text();
+      body.querySelector(".vn-changelog").innerHTML = renderMarkdownLite(markdown);
+    } catch (e) {
+      body.querySelector(".vn-changelog").innerHTML =
+        `<p class="text-danger">Changelog konnte nicht geladen werden: ${escapeHtml(e.message)}</p>`;
     }
   }
 
