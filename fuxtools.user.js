@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.29
+// @version     0.9.30
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.29";
+  const SCRIPT_VERSION = "0.9.30";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -4860,6 +4860,20 @@
     return { requirements: [], staffMin: staff.min, staffMax: staff.max };
   }
 
+  // Alle Ausbildungs-Slugs, die IRGENDEIN Fahrzeugtyp als Besatzungs-Anforderung braucht (z.B.
+  // Notarzt fuer NAW/RTW-Sonderfahrzeuge) - Grundlage dafuer, bei normalen Fahrzeugen (siehe
+  // assignAnyPersonnelToVehicle) genau DIESES Personal zu schonen. Wird nicht gecacht, da
+  // vehicleTypeCatalog sich innerhalb einer Sitzung praktisch nie aendert und die Liste mit
+  // ~180 Eintraegen trivial billig zu berechnen ist.
+  function getSpecialTrainingSlugs() {
+    const slugs = new Set();
+    for (const typeId of Object.keys(vehicleTypeCatalog)) {
+      const requirement = getVehicleTypeRequirement(Number(typeId));
+      if (requirement) for (const req of requirement.requirements) slugs.add(req.slug);
+    }
+    return slugs;
+  }
+
   // Laedt ALLE Fahrzeuge mit eigener Besatzung (staff.max > 0) - inklusive normaler
   // Fahrzeuge ohne Ausbildungsanforderung (Feld "special": false). Ob normale Fahrzeuge in
   // der Anzeige/beim Zuweisen tatsaechlich beruecksichtigt werden, entscheidet erst die UI
@@ -4986,9 +5000,17 @@
     let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - assignedCount));
     let assignedNow = 0;
 
-    for (const person of people) {
+    // Personal OHNE jede Sonderausbildung zuerst - sonst "verbraucht" ein normales Fahrzeug
+    // (z.B. LF20) wertvolles Personal wie Notarzt, das eigentlich fuer NAW/RTW gebraucht wird.
+    // Nur wenn nicht genug ungelerntes Personal da ist, wird auch speziell ausgebildetes
+    // Personal herangezogen (besser besetzt mit Sonderausbildung als gar nicht besetzt).
+    const specialSlugs = getSpecialTrainingSlugs();
+    const eligible = people
+      .filter(p => !p.assignedHere && !p.inTraining && p.assignHref)
+      .sort((a, b) => Number(a.slugs.some(s => specialSlugs.has(s))) - Number(b.slugs.some(s => specialSlugs.has(s))));
+
+    for (const person of eligible) {
       if (remaining <= 0) break;
-      if (person.assignedHere || person.inTraining || !person.assignHref) continue;
 
       const res = await fetch(person.assignHref, {
         method: "POST",

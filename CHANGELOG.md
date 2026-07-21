@@ -35,6 +35,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   mehrere Fahrzeuge DERSELBEN Wache gleichzeitig geprüft wurden (teilen sich denselben
   Personal-Pool). Fahrzeuge einer Wache laufen jetzt immer strikt nacheinander, verschiedene
   Wachen weiterhin parallel.
+- **Bugfix Fahrzeug-Besatzung**: normale Fahrzeuge (z.B. LF) konnten dabei Personal mit
+  wertvoller Sonderausbildung (z.B. Notarzt) bekommen, das eigentlich für NAW/RTW gebraucht
+  wird. Personal ohne Sonderausbildung wird jetzt bevorzugt zugewiesen, speziell
+  ausgebildetes Personal nur noch als letzte Reserve.
 
 ## Stable (v0.5.1)
 
