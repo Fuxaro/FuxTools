@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.47
+// @version     0.9.48
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.47";
+  const SCRIPT_VERSION = "0.9.48";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -3327,12 +3327,13 @@
     if (!res.ok) throw new Error(`Kauf fehlgeschlagen (${res.status})`);
   }
 
-  // Verkauft/zerstoert EIN Fahrzeug unwiderruflich. Endpunkt per Live-Diagnose im Browser
-  // bestaetigt: der echte "Verkaufen"-Link im Spiel ist ein Rails-UJS-Link mit
-  // data-method="delete" - der Browser wandelt das in ein POST-Formular mit den Feldern
-  // _method=delete + authenticity_token um (Rails behandelt das serverseitig dann als
-  // DELETE). Hier nachgebaut per fetch: POST + X-CSRF-Token-Header (wie bei buildExtension())
-  // plus _method=delete im Body, damit Rails' Method-Override das erkennt.
+  // Verkauft/zerstoert EIN Fahrzeug unwiderruflich. Der echte "Verkaufen"-Link im Spiel ist
+  // ein Rails-UJS-Link mit data-method="delete" - der Browser wandelt das in ein POST-
+  // Formular mit den Feldern _method=delete + authenticity_token um (Rails behandelt das
+  // serverseitig dann als DELETE). Per echter Netzwerk-Aufzeichnung eines manuellen Verkaufs
+  // (curl-Export) korrigiert: der Token gehoert bei einem normalen Formular-Submit (Sec-Fetch-
+  // Mode: navigate) ALS authenticity_token IN DEN BODY, nicht als X-CSRF-Token-Header (der ist
+  // fuer AJAX/XHR-Anfragen gedacht) - vorher stand der Token faelschlich nur im Header.
   async function sellVehicle(vehicleId) {
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
     const res = await fetchWithTimeout(`/vehicles/${vehicleId}`, {
@@ -3340,9 +3341,8 @@
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "X-CSRF-Token": csrfToken,
       },
-      body: new URLSearchParams({ _method: "delete" }),
+      body: new URLSearchParams({ _method: "delete", authenticity_token: csrfToken }),
     });
     if (!res.ok) throw new Error(`Verkaufen fehlgeschlagen (${res.status})`);
   }

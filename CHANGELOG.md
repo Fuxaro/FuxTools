@@ -125,6 +125,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Bugfix Fahrzeug kaufen**: schlug mit "404" fehl. Per echter Netzwerk-Aufzeichnung eines
   manuellen Kaufs bestätigt: der Kaufen-Button im Spiel ist ein normaler GET-Link, keine
   POST-Anfrage mit CSRF-Token wie bisher angenommen - entsprechend umgestellt.
+- **Bugfix Fahrzeug verkaufen**: schlug ebenfalls fehl - der CSRF-Token gehört bei einem
+  normalen Formular-Submit als `authenticity_token` in den Anfrage-Body, nicht als
+  `X-CSRF-Token`-Header (der ist nur für AJAX-Anfragen gedacht). Per echter Netzwerk-
+  Aufzeichnung eines manuellen Verkaufs bestätigt und entsprechend korrigiert.
 
 ## Stable (v0.5.1)
 
