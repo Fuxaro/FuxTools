@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.45
+// @version     0.9.46
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.45";
+  const SCRIPT_VERSION = "0.9.46";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -194,7 +194,11 @@
 
   // "Pseudo-Gebaeudetypen": Kleinwachen teilen sich die building_type-ID mit ihrem
   // normalen Pendant (z.B. Feuerwache/Feuerwache Kleinwache sind beide 0), haben aber
-  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier.
+  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier. Bewusst OHNE 16 (Verbandszellen)
+  // und 22/23 (Großer/Kleiner Komplex) - laut Nutzer-Rückmeldung keine tatsächlich baubaren
+  // Gebäudetypen im Spiel, wuerden im Wachen-Bauplaner-Dropdown nur verwirren. Bleiben in
+  // BUILDING_CATEGORIES ("Sonstiges") erhalten, falls ein Account doch noch so ein
+  // (vermutlich sehr altes) Gebaeude besitzt - nur hier fuer die Bauplan-Auswahl entfernt.
   const PSEUDO_BUILDING_TYPES = [
     { id: "0", buildingType: 0, smallBuilding: false },
     { id: "1", buildingType: 1, smallBuilding: false },
@@ -212,14 +216,11 @@
     { id: "13", buildingType: 13, smallBuilding: false },
     { id: "14", buildingType: 14, smallBuilding: false },
     { id: "15", buildingType: 15, smallBuilding: false },
-    { id: "16", buildingType: 16, smallBuilding: false },
     { id: "17", buildingType: 17, smallBuilding: false },
     { id: "18", buildingType: 0, smallBuilding: true },
     { id: "19", buildingType: 6, smallBuilding: true },
     { id: "20", buildingType: 2, smallBuilding: true },
     { id: "21", buildingType: 21, smallBuilding: false },
-    { id: "22", buildingType: 22, smallBuilding: false },
-    { id: "23", buildingType: 23, smallBuilding: false },
     { id: "24", buildingType: 24, smallBuilding: false },
     { id: "25", buildingType: 25, smallBuilding: false },
     { id: "26", buildingType: 26, smallBuilding: false },
@@ -3612,6 +3613,10 @@
         setTimeout(back, 600);
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+        // Nur ins Protokoll, KEIN reportError()-Banner - der Fehler ist hier schon direkt
+        // sichtbar, ein zusaetzliches Banner waere nur doppelt. Ohne diesen Log-Eintrag stand
+        // im Fehlerprotokoll bisher nichts, obwohl der Fehler auf dem Bildschirm sichtbar war.
+        logErrorToStorage(`Bauen fehlgeschlagen: ${title}`, e.message).catch(() => {});
         creditsBtn.disabled = false;
         coinsBtn.disabled = false;
       }
@@ -3658,6 +3663,7 @@
         setTimeout(goBack, 600);
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+        logErrorToStorage(`Verkaufen fehlgeschlagen: ${vehicleName}`, e.message).catch(() => {});
         confirmBtn.disabled = false;
       }
     });
@@ -3740,6 +3746,12 @@
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
+    // Kein automatisches Neuladen waehrend der Bildschirm offen ist (anders als der Personal-
+    // Scan gibt es hier keine Server-Anfrage im Hintergrund) - Wachen-/Ausbaustand kann daher
+    // veralten, wenn man das Fenster laenger offen laesst oder parallel im Spiel etwas
+    // aendert. Zeitstempel + manueller "Aktualisieren"-Button (wie beim Wachenbauplan
+    // "Anwenden") machen sichtbar, wie aktuell die Anzeige gerade ist.
+    const lastLoadedAt = Date.now();
 
     const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
 
@@ -3960,10 +3972,14 @@
           <tbody></tbody>
         </table>
       </div>
-      <div class="vn-sticky-footer">
+      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
+        <button id="vn-station-check-refresh" type="button" class="btn btn-primary">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Aktualisieren
+        </button>
+        <span class="label label-default" style="font-size:12px;">Stand: ${escapeHtml(new Date(lastLoadedAt).toLocaleString("de-DE"))}</span>
       </div>
     `;
 
@@ -3976,6 +3992,9 @@
     document.getElementById("vn-btn-required-extensions-from-check").addEventListener("click", () => {
       const savedState = currentState();
       renderRequiredExtensionsSettingsScreen(() => renderStationCheckScreen(savedState));
+    });
+    document.getElementById("vn-station-check-refresh").addEventListener("click", () => {
+      renderStationCheckScreen(currentState());
     });
 
     renderTable();

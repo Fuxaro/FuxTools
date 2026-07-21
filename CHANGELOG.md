@@ -109,6 +109,19 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   OHNE besondere Ausbildungsanforderung enthielt (z.B. normaler RTW) - die Tabelle zeigt zwar
   weiterhin nur echte Ausbildungs-Anforderungen (wie Personal-Check/Schulungen), die
   Gesamtzahl zählt jetzt aber auch die normale Mindestbesatzung (staffMin) mit.
+- **Wachen-Bauplaner**: Gebäudetyp-Dropdown zeigte drei Typen (Verbandszellen, Großer Komplex,
+  Kleiner Komplex), die im Spiel gar nicht baubar sind - aus der Auswahl entfernt.
+- **Wachen-Bauplaner**: Fahrzeugliste für Feuerwehr (mit Abstand die meisten Fahrzeugtypen) ist
+  jetzt nach denselben Kategorien wie die "Fahrzeug kaufen"-Seite im Spiel gruppiert
+  (Löschfahrzeuge, Tanklöschfahrzeuge, Abrollbehälter, ...) statt einer langen, unsortierten
+  Liste. Andere Gebäudetypen haben deutlich weniger Fahrzeugtypen und bleiben unverändert.
+- **Wachenausbau**: aktualisierte sich nach dem Öffnen nicht mehr von selbst. Neuer
+  "Aktualisieren"-Button mit Zeitstempel ("Stand: ..."), wie beim Wachenbauplan "Anwenden".
+- Fehlgeschlagene Käufe/Verkäufe (z.B. "Kauf fehlgeschlagen (404)") landen jetzt zusätzlich im
+  Fehlerprotokoll, nicht nur als Meldung auf dem Bildschirm - vorher stand dort nichts, obwohl
+  der Fehler sichtbar war.
+- GitHub-Actions-Workflows (Syntax-Check, Main-Release) auf actions/checkout@v5 und
+  actions/setup-node@v5 aktualisiert - behebt eine Node.js-20-Deprecation-Warnung.
 
 ## Stable (v0.5.1)
 
