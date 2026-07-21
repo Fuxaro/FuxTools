@@ -122,6 +122,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   der Fehler sichtbar war.
 - GitHub-Actions-Workflows (Syntax-Check, Main-Release) auf actions/checkout@v5 und
   actions/setup-node@v5 aktualisiert - behebt eine Node.js-20-Deprecation-Warnung.
+- **Bugfix Fahrzeug kaufen**: schlug mit "404" fehl. Per echter Netzwerk-Aufzeichnung eines
+  manuellen Kaufs bestätigt: der Kaufen-Button im Spiel ist ein normaler GET-Link, keine
+  POST-Anfrage mit CSRF-Token wie bisher angenommen - entsprechend umgestellt.
 
 ## Stable (v0.5.1)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.46
+// @version     0.9.47
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.46";
+  const SCRIPT_VERSION = "0.9.47";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -3311,21 +3311,19 @@
     if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
   }
 
-  // Kauft EIN Fahrzeug eines Typs an einer Wache. Endpunkt/URL-Muster (buildingId taucht
-  // bewusst zweimal auf) stammt aus den Community-Scripten "Beschaffungsagent" (BOS-Ernie)
-  // und "[LSS] Fahrzeug-Manager" (Caddy21), die beide unabhaengig denselben Endpunkt nutzen -
-  // hier per POST + X-CSRF-Token analog zu buildExtension()/buildStorage() statt der dortigen
-  // GET-Variante, damit es zu unserem sonstigen Bau-Code passt.
+  // Kauft EIN Fahrzeug eines Typs an einer Wache. Frueher per POST + X-CSRF-Token (analog zu
+  // buildExtension()/buildStorage()) - das schlug live mit 404 fehl. Per echter Netzwerk-
+  // Aufzeichnung eines manuellen Kaufs bestaetigt: der Kaufen-Button im Spiel ist ein GANZ
+  // NORMALER GET-Link (Sec-Fetch-Mode: navigate, Sec-Fetch-User: ?1, KEIN X-CSRF-Token-Header,
+  // kein Body), keine POST-Anfrage - vermutlich existiert serverseitig gar keine POST-Route
+  // auf diesem Pfad mehr, daher das 404 bei jedem Versuch. Response ist ein 302-Redirect
+  // zurueck auf die Kauf-Seite; fetch() folgt dem per Default, res.ok prueft daher das
+  // Ergebnis nach dem Redirect.
   async function buyVehicle(buildingId, vehicleTypeId, currency) {
-    const csrfToken = getCsrfTokenOrThrow(buildingId);
-    const res = await fetchWithTimeout(`/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "X-CSRF-Token": csrfToken,
-      },
-    });
+    const res = await fetchWithTimeout(
+      `/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`,
+      { credentials: "same-origin" },
+    );
     if (!res.ok) throw new Error(`Kauf fehlgeschlagen (${res.status})`);
   }
 
