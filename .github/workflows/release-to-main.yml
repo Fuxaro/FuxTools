@@ -2,10 +2,12 @@ name: Main-Release vorbereiten
 
 # Nur manuell auslösbar (Button "Run workflow" im Actions-Tab) - kein automatischer Trigger
 # bei jedem Push auf beta, damit main weiterhin nur dann aktualisiert wird, wenn das
-# tatsächlich gewollt ist. Nimmt den aktuellen beta-Stand, entfernt alle internen
-# Entwickler-Kommentare (scripts/strip-comments.js) und schaltet den Kanal auf "stable" um
-# (scripts/set-stable-channel.js) - das Ergebnis landet als Pull Request gegen main, damit der
-# Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann.
+# tatsächlich gewollt ist. Nimmt den aktuellen beta-Stand und bringt ihn auf main-Stand:
+# interne Entwickler-Kommentare raus (scripts/strip-comments.js), Kanal/Update-Links auf
+# stable/main umgestellt (scripts/set-stable-channel.js), CHANGELOG.md "Beta"-Abschnitt wird
+# zum neuen "Stable"-Abschnitt (scripts/promote-changelog.js). Das Ergebnis landet als Pull
+# Request gegen main, damit der Diff vor dem Live-Gehen bei den Stable-Nutzern noch
+# gegengeprüft werden kann - kein direkter Push.
 on:
   workflow_dispatch: {}
 
@@ -30,12 +32,6 @@ jobs:
       - name: Abhängigkeiten installieren
         run: npm ci
 
-      - name: Kommentare entfernen und Kanal auf stable umstellen
-        run: |
-          node scripts/strip-comments.js /tmp/fuxtools.stripped.js
-          node scripts/set-stable-channel.js /tmp/fuxtools.stripped.js fuxtools.user.js
-          node -c fuxtools.user.js
-
       - name: Version auslesen
         id: version
         run: |
@@ -43,13 +39,24 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "branch=release/v$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: fuxtools.user.js auf main-Stand bringen
+        run: |
+          node scripts/strip-comments.js /tmp/fuxtools.stripped.js
+          node scripts/set-stable-channel.js /tmp/fuxtools.stripped.js fuxtools.user.js
+          node -c fuxtools.user.js
+
+      - name: CHANGELOG.md auf main-Stand bringen
+        run: |
+          node scripts/promote-changelog.js CHANGELOG.md /tmp/CHANGELOG.main.md "${{ steps.version.outputs.version }}"
+          mv /tmp/CHANGELOG.main.md CHANGELOG.md
+
       - name: Release-Branch committen und pushen
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "${{ steps.version.outputs.branch }}"
-          git add fuxtools.user.js
-          git commit -m "Main-Release v${{ steps.version.outputs.version }}: Kommentare entfernt, Kanal auf stable"
+          git add fuxtools.user.js CHANGELOG.md
+          git commit -m "Main-Release v${{ steps.version.outputs.version }}: Kommentare entfernt, Kanal auf stable, Changelog aktualisiert"
           git push --force origin "${{ steps.version.outputs.branch }}"
 
       - name: Pull Request gegen main erstellen
@@ -64,6 +71,7 @@ jobs:
 
           - Interne Entwickler-Kommentare entfernt (\`scripts/strip-comments.js\`)
           - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
+          - CHANGELOG.md aktualisiert: \`## Beta\`-Abschnitt wird zu \`## Stable (v${{ steps.version.outputs.version }})\` (\`scripts/promote-changelog.js\`)
 
           Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." \
             || echo "Hinweis: PR existiert für diesen Branch evtl. schon, wurde nicht neu angelegt."
