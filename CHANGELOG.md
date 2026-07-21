@@ -78,6 +78,17 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   alle Bildschirme mit Aktions-Buttons.
 - **Wachen umbenennen**: fragt jetzt vorher die Leitstelle(n) ab (wie bei "Fahrzeuge
   umbenennen"), statt immer alle Wachen im ganzen Account anzuzeigen.
+- **Netzwerk-Timeout**: kein Netzwerk-Aufruf im Script hatte bisher ein Zeitlimit - eine
+  haengende Verbindung (Anfrage raus, aber nie eine Antwort) konnte einen Lauf unbegrenzt
+  blockieren, auch "Abbrechen" half in dem Moment nicht. Jeder Aufruf bricht jetzt nach 20s
+  selbst ab und wird wie ein normaler Netzwerkfehler behandelt (einzelnes Fahrzeug/Wache als
+  Fehler markiert, der Rest läuft weiter) - betrifft auch Umbenennen, Bauen/Verkaufen,
+  Schulungen usw. Timeouts landen zusätzlich im Fehlerprotokoll.
+- **Fahrzeug-Besatzung**: Wachen liefen schon strikt sequenziell (verschiedene Wachen aber
+  parallel) - die Anzahl gleichzeitiger Wachen wurde von 3 auf 8 erhöht, damit ein
+  Durchlauf bei sehr vielen Fahrzeugen (mehrere Tausend) nicht unnötig lange dauert.
+- **Fehlerprotokoll**: neuer Button "Anzeigen" in den Einstellungen zeigt die letzten Fehler
+  direkt im Script an, statt nur als Datei herunterladbar zu sein.
 
 ## Stable (v0.5.1)
 
