@@ -63,7 +63,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create \
+          set +e
+          PR_ERROR=$(gh pr create \
             --base main \
             --head "${{ steps.version.outputs.branch }}" \
             --title "Main-Release v${{ steps.version.outputs.version }}" \
@@ -73,5 +74,19 @@ jobs:
           - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
           - CHANGELOG.md aktualisiert: \`## Beta\`-Abschnitt wird zu \`## Stable (v${{ steps.version.outputs.version }})\` (\`scripts/promote-changelog.js\`)
 
-          Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." \
-            || echo "Hinweis: PR existiert für diesen Branch evtl. schon, wurde nicht neu angelegt."
+          Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." 2>&1)
+          STATUS=$?
+          set -e
+          echo "$PR_ERROR"
+          if [ $STATUS -eq 0 ]; then
+            exit 0
+          fi
+          # "already exists" ist der einzige harmlose Fall (Workflow wurde fuer dieselbe
+          # Version schon mal ausgeloest) - alles andere (z.B. fehlende Berechtigung) soll den
+          # Job sichtbar rot fehlschlagen lassen statt es stillschweigend zu verschlucken.
+          if echo "$PR_ERROR" | grep -qi "already exists"; then
+            echo "Hinweis: PR existiert für diesen Branch bereits, wurde nicht neu angelegt."
+            exit 0
+          fi
+          echo "::error::Pull Request konnte nicht erstellt werden - siehe Fehlermeldung oben (z.B. fehlt evtl. unter Settings > Actions > General > Workflow permissions die Option 'Allow GitHub Actions to create and approve pull requests')."
+          exit 1
