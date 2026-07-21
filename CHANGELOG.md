@@ -21,8 +21,15 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - Diese Fehler landen zusätzlich in einem Fehlerprotokoll, das sich in den Einstellungen als
   Datei exportieren lässt - praktisch für Bug-Reports.
 - Neuer Button "Changelog anzeigen" in den Einstellungen zeigt diese Liste direkt im Script.
-- "So funktioniert's" erscheint jetzt automatisch beim allerersten Öffnen von FuxTools -
-  "Bestätigen" merkt sich das dauerhaft, danach nur noch manuell über den Menüpunkt erreichbar.
+- Neuer Menüpunkt "So funktioniert's" erklärt kurz die empfohlene Reihenfolge der Module.
+- **Fahrzeug-Besatzung**: neue Leitstellen-Auswahl vor dem Prüfen/Zuweisen, damit sich gezielt
+  nur ein Teil des Accounts bearbeiten lässt. Die Liste nicht vollständig besetzter Fahrzeuge
+  zeigt jetzt, seit wann ein Fahrzeug als Problem geführt wird, lässt sich Zeile für Zeile
+  oder komplett leeren. Deutlicher sichtbar, welcher Besatzungs-Modus (Minimum/Volle
+  Besatzung) gerade aktiv ist - "Volle Besatzung" ist jetzt rot markiert, da er dazu führen
+  kann, dass anderen Fahrzeugen Personal fehlt.
+- Wachenausbau ans Ende der Modul-Liste verschoben (funktioniert unabhängig von den anderen),
+  Suchfeld verkleinert und direkter Link zu "Geforderte Ausbauten anpassen" ergänzt.
 
 ## Stable (v0.5.1)
 
