@@ -101,6 +101,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Typ überhaupt ein Bauplan sinnvoll ist, bevor man ihn anlegt.
 - **Neu: Statistik** (Hauptmenü &gt; Wachenplanung): Wachen je Gebäudetyp, gruppiert nach
   Leitstelle, dazu Fahrzeug- und Personalzahlen je Gruppe und insgesamt.
+- Mehrere native Browser-Bestätigungsfenster (Bauplan löschen, Namens-Bausteine zurücksetzen,
+  Geforderte Ausbauten zurücksetzen, Fahrzeug-Besatzung "Liste leeren") durch eigene, ins
+  Design passende Bestätigungs-Screens ersetzt - sahen bisher wie ein Fremdkörper aus und
+  waren für Browser-Automatisierung/KI-Testsessions nicht bedienbar.
 
 ## Stable (v0.5.1)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.43
+// @version     0.9.44
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.43";
+  const SCRIPT_VERSION = "0.9.44";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2188,18 +2188,25 @@
         '<span class="text-success">Gespeichert.</span>';
     });
 
-    document.getElementById("vn-btn-reset-required").addEventListener("click", async () => {
-      const confirmed = confirm("Eigene Einstellung löschen und zu den Standard-Empfehlungen zurückkehren?");
-      if (!confirmed) return;
-      const hadOverrides = !!overrides;
-      await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
-      if (hadOverrides) {
-        await logHistoryEntry({
-          type: "required_extensions_config",
-          label: "Zurückgesetzt auf Standard-Empfehlungen",
-        });
-      }
-      renderRequiredExtensionsSettingsScreen(goBack);
+    document.getElementById("vn-btn-reset-required").addEventListener("click", () => {
+      renderSimpleConfirmScreen({
+        title: "Einstellungen › Geforderte Ausbauten › Zurücksetzen",
+        message: "Eigene Einstellung löschen und zu den Standard-Empfehlungen zurückkehren?",
+        confirmLabel: "Zurücksetzen",
+        confirmIcon: "glyphicon-repeat",
+        goBack: () => renderRequiredExtensionsSettingsScreen(goBack),
+        onConfirm: async () => {
+          const hadOverrides = !!overrides;
+          await GM.deleteValue(CUSTOM_REQUIRED_EXTENSIONS_KEY);
+          if (hadOverrides) {
+            await logHistoryEntry({
+              type: "required_extensions_config",
+              label: "Zurückgesetzt auf Standard-Empfehlungen",
+            });
+          }
+          renderRequiredExtensionsSettingsScreen(goBack);
+        },
+      });
     });
   }
 
@@ -2766,15 +2773,21 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderStationSelection);
     document.getElementById("vn-btn-run").addEventListener("click", () => runRenaming(selectedStations));
-    document.getElementById("vn-btn-reset-template").addEventListener("click", async () => {
-      const confirmed = confirm(
-        "Achtung: Das setzt die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2, " +
-          "Nummer) wieder auf die Standardeinstellung zurück. Fortfahren?"
-      );
-      if (!confirmed) return;
-      delete namesStore.__template;
-      await saveNamesStore();
-      renderNameForm(selectedStations);
+    document.getElementById("vn-btn-reset-template").addEventListener("click", () => {
+      renderSimpleConfirmScreen({
+        title: "Fahrzeuge umbenennen › Bausteine zurücksetzen",
+        message:
+          "Die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2, Nummer) wieder auf " +
+          "die Standardeinstellung zurücksetzen?",
+        confirmLabel: "Zurücksetzen",
+        confirmIcon: "glyphicon-repeat",
+        goBack: () => renderNameForm(selectedStations),
+        onConfirm: async () => {
+          delete namesStore.__template;
+          await saveNamesStore();
+          renderNameForm(selectedStations);
+        },
+      });
     });
 
     // Bausteine sofort dauerhaft speichern, sobald sie geaendert werden - nicht erst beim Umbenennen
@@ -5880,16 +5893,20 @@
     }
     updateModeStatus();
 
-    document.getElementById("vn-btn-clear-problems").addEventListener("click", async () => {
+    document.getElementById("vn-btn-clear-problems").addEventListener("click", () => {
       if (!problemsById.size) return;
-      const confirmed = confirm(
-        `${problemsById.size} Einträge aus der Liste entfernen? Macht keine Zuweisung im Spiel rückgängig, nur unsere Anzeige.`,
-      );
-      if (!confirmed) return;
-      problemsById.clear();
-      document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
-      bindProblemsRowButtons();
-      await persistProblems();
+      renderSimpleConfirmScreen({
+        title: "Fahrzeug-Besatzung › Liste leeren",
+        message: `${problemsById.size} Einträge aus der Liste entfernen? Macht keine Zuweisung im Spiel rückgängig, nur unsere Anzeige.`,
+        confirmLabel: "Leeren",
+        confirmIcon: "glyphicon-trash",
+        goBack: () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds),
+        onConfirm: async () => {
+          problemsById.clear();
+          await persistProblems();
+          renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds);
+        },
+      });
     });
 
     body.querySelectorAll(".vn-crew-mode").forEach(btn => {
@@ -6313,12 +6330,10 @@
       });
     });
     body.querySelectorAll(".vn-bp-delete").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("Diesen Bauplan wirklich löschen?")) return;
-        const current = await getStationBlueprints();
-        delete current[btn.dataset.id];
-        await saveStationBlueprints(current);
-        renderStationBlueprintsListScreen(goBack);
+      btn.addEventListener("click", () => {
+        const blueprint = blueprints[btn.dataset.id];
+        if (!blueprint) return;
+        renderBlueprintDeleteConfirmScreen(blueprint, () => renderStationBlueprintsListScreen(goBack));
       });
     });
     body.querySelectorAll(".vn-bp-export").forEach(btn => {
@@ -6335,6 +6350,49 @@
         a.remove();
         URL.revokeObjectURL(url);
       });
+    });
+  }
+
+  // Eigener Bestaetigungs-Screen statt eines nativen browser confirm() - der sprengt nicht nur
+  // optisch unser Design (Browser-Standarddialog mitten im eigenen dunklen Modal), sondern
+  // blockiert Browser-Automatisierung/KI-Testsessions, die auf DOM-Elemente angewiesen sind
+  // und mit einem nativen Dialog nicht interagieren koennen. Fuer einfache Ja/Nein-Aktionen
+  // OHNE Formulardaten, die bei "Abbrechen" verloren gehen koennten (sonst lieber inline/ohne
+  // Navigation loesen, siehe z.B. den Bauplan-Speichern-Handler bei Namensdopplung).
+  function renderSimpleConfirmScreen({ title, message, confirmLabel, confirmClass = "btn-danger", confirmIcon = "glyphicon-ok", onConfirm, goBack }) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle(title);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p class="text-danger"><b>${message}</b></p>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+        <button id="vn-simple-confirm" type="button" class="btn ${confirmClass}">
+          <span class="glyphicon ${confirmIcon}" aria-hidden="true"></span> ${escapeHtml(confirmLabel)}
+        </button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-simple-confirm").addEventListener("click", async () => {
+      await onConfirm();
+    });
+  }
+
+  function renderBlueprintDeleteConfirmScreen(blueprint, goBack) {
+    renderSimpleConfirmScreen({
+      title: "Wachen-Bauplaner › Löschen",
+      message: `Bauplan "${escapeHtml(blueprint.name)}" wirklich löschen? Das kann nicht rückgängig gemacht werden.`,
+      confirmLabel: "Löschen",
+      confirmIcon: "glyphicon-trash",
+      goBack,
+      onConfirm: async () => {
+        const current = await getStationBlueprints();
+        delete current[blueprint.id];
+        await saveStationBlueprints(current);
+        goBack();
+      },
     });
   }
 
