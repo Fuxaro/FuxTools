@@ -45,8 +45,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Bedarf Personal von einem anderen Fahrzeug ab und weist es dem gerade geprüften zu (echte
   freie Personen werden aber immer bevorzugt).
 - Neuer Button "Alle Zuweisungen rückgängig machen" bei Fahrzeug-Besatzung: zieht mit
-  getippter Bestätigung die komplette Besatzung aller Fahrzeuge im gewählten
-  Leitstellen-Bereich ab.
+  Bestätigung die komplette Besatzung aller Fahrzeuge im gewählten Leitstellen-Bereich ab.
+- Rote Warn-/Fehlertexte im Script waren auf dem dunklen Seiten-Theme kaum lesbar (zu
+  dunkles Rot) - jetzt durchgängig auf einen helleren, kontrastreicheren Rotton angehoben.
 
 ## Stable (v0.5.1)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.31
+// @version     0.9.32
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.31";
+  const SCRIPT_VERSION = "0.9.32";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1303,6 +1303,12 @@
         background-color: #8f2626;
         border-color: #7a2020;
         color: #fff;
+      }
+      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme
+         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,
+         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */
+      #vehicle-naming-modal-body .text-danger {
+        color: #ff6b6b;
       }
       #vehicle-naming-modal-body .vn-changelog h3 {
         margin-top: 0;
@@ -5581,13 +5587,11 @@
     });
   }
 
-  const VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD = "zurücksetzen";
-
-  // Eigenes Bestaetigungsfenster (getippte Bestaetigung wie bei "Speicher loeschen") statt
+  // Eigenes Bestaetigungsfenster (Abbrechen/Bestaetigen, wie beim Fahrzeug-Verkaufen) statt
   // eines einfachen confirm() - zieht bei ALLEN Fahrzeugen im aktuellen Leitstellen-Scope
   // (unabhaengig von der "Normale Fahrzeuge einbeziehen"-Anzeige-Checkbox) die komplette
-  // Besatzung ab. Das ist eine ECHTE, sofort wirksame Aenderung im Spiel, deshalb bewusst
-  // keine leichtfertig anklickbare Aktion.
+  // Besatzung ab. Bewusst OHNE getippte Bestaetigung (anders als "Speicher loeschen") - reicht
+  // laut Rueckmeldung als Sicherung.
   function renderVehicleCrewUnassignAllConfirmScreen(vehicles, goBack) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
@@ -5602,37 +5606,24 @@
         übersprungen. Das ist eine echte, sofort wirksame Änderung im Spiel und lässt sich
         nicht per Klick rückgängig machen.
       </p>
-      <div class="form-group">
-        <label for="vn-crew-unassign-confirm-input">
-          Tippe zum Bestätigen <code>${escapeHtml(VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD)}</code> ein:
-        </label>
-        <input type="text" id="vn-crew-unassign-confirm-input" class="form-control" autocomplete="off">
-      </div>
       <div id="vn-crew-unassign-confirm-status" style="margin-top:10px;"></div>
       <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
         </button>
-        <button id="vn-btn-unassign-confirm" type="button" class="btn btn-danger" disabled>
-          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Besatzung endgültig abziehen
+        <button id="vn-btn-unassign-confirm" type="button" class="btn btn-danger">
+          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Besatzung abziehen
         </button>
       </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
 
-    const input = document.getElementById("vn-crew-unassign-confirm-input");
     const confirmBtn = document.getElementById("vn-btn-unassign-confirm");
     const statusEl = document.getElementById("vn-crew-unassign-confirm-status");
 
-    input.addEventListener("input", () => {
-      confirmBtn.disabled = input.value.trim().toLowerCase() !== VEHICLE_CREW_UNASSIGN_ALL_CONFIRM_WORD;
-    });
-    input.focus();
-
     confirmBtn.addEventListener("click", async () => {
       confirmBtn.disabled = true;
-      input.disabled = true;
 
       // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
       // den Personal-Pool), verschiedene Wachen parallel.
