@@ -2,7 +2,7 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Beta
+## Stable (v0.9.27)
 
 - **Wachen-Bauplaner**: eigene Baupläne pro Gebäudetyp (Ausbauten, Fahrzeuge, Personal) -
   zeigt automatisch Soll/Ist je Wache, kann fehlende Ausbauten/Fahrzeuge direkt bauen/kaufen
@@ -23,12 +23,3 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - Neuer Button "Changelog anzeigen" in den Einstellungen zeigt diese Liste direkt im Script.
 - "So funktioniert's" erscheint jetzt automatisch beim allerersten Öffnen von FuxTools -
   "Bestätigen" merkt sich das dauerhaft, danach nur noch manuell über den Menüpunkt erreichbar.
-
-## Stable (v0.5.1)
-
-- **Umbenennen**: Fahrzeuge, Wachen und Leitstellen mit frei einstellbaren
-  Namens-Bausteinen, inkl. Live-Vorschau und Bestätigung vor dem Ausführen.
-- **Wachenausbau**: Übersicht aller Wachen mit Ausbauten, Personal und Werbestatus -
-  Ausbauten, Ausbaustufen und Lagerräume direkt aus der Liste bauen.
-- **Verlauf**: alle über FuxTools durchgeführten Aktionen mit Datum und Kosten.
-- Automatischer Update-Check, Stable- und Beta-Kanal wählbar.
