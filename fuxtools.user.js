@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.23
+// @version     0.9.24
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.23";
+  const SCRIPT_VERSION = "0.9.24";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -95,6 +95,46 @@
   function setScreenTitle(text) {
     const el = document.getElementById("vehicle-naming-modal-breadcrumb");
     if (el) el.textContent = text ? `› ${text}` : "";
+  }
+
+  // Sichtbarer Fehler-Hinweis fuer kritische, sonst nur in der Browser-Konsole sichtbare
+  // Fehler - Beta-Tester oeffnen die Konsole normalerweise nicht, ein reines console.error()
+  // geht also spurlos unter. Erscheint bewusst IMMER direkt auf der Seite (nicht im
+  // FuxTools-Modal), da manche dieser Fehler schon vor dem Oeffnen des Modals passieren
+  // (z.B. beim Start) oder das Modal deswegen ueberhaupt nicht erreichbar ist (z.B. wenn der
+  // Navbar-Eintrag selbst fehlschlaegt - siehe addMenuEntry()). Bleibt bis zum manuellen
+  // Schliessen stehen, damit Tester Zeit haben, einen Screenshot fuer den Bug-Report zu machen.
+  function showErrorBanner(message) {
+    let container = document.getElementById("fuxtools-error-toasts");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "fuxtools-error-toasts";
+      container.style.cssText =
+        "position:fixed; bottom:16px; right:16px; z-index:99999; max-width:380px; " +
+        "display:flex; flex-direction:column; gap:8px; font-family:sans-serif;";
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+    toast.style.cssText =
+      "background:#d9534f; color:#fff; padding:10px 32px 10px 14px; border-radius:4px; " +
+      "box-shadow:0 2px 10px rgba(0,0,0,0.4); font-size:13px; line-height:1.4; position:relative;";
+    toast.innerHTML = `<b>FuxTools-Fehler:</b> ${escapeHtml(message)}`;
+
+    const closeBtn = document.createElement("span");
+    closeBtn.textContent = "×";
+    closeBtn.setAttribute("aria-label", "Schließen");
+    closeBtn.style.cssText =
+      "position:absolute; top:4px; right:10px; cursor:pointer; font-weight:bold; font-size:16px; line-height:1;";
+    closeBtn.addEventListener("click", () => toast.remove());
+    toast.appendChild(closeBtn);
+
+    container.appendChild(toast);
+  }
+
+  function reportError(context, error) {
+    console.error(`[FuxTools] ${context}:`, error);
+    showErrorBanner(`${context} - ${error?.message || error}`);
   }
 
   const modalId = "vehicle-naming-modal";
@@ -2005,11 +2045,12 @@
     // uebernommen, damit Hoehe/Hover-Optik zu den Nachbar-Eintraegen passt. Kein stiller
     // Rueckfall auf die alte Position mehr (bewusst) - aber ein fehlendes #menu_profile darf
     // trotzdem nicht den kompletten Start abbrechen (main() wuerde sonst auch
-    // checkForUpdateInBackground() nie erreichen) - deshalb hier nur ein klarer Konsolen-
-    // Fehler statt eines uncaught TypeError.
+    // checkForUpdateInBackground() nie erreichen) - deshalb hier nur ein sichtbarer Hinweis
+    // statt eines uncaught TypeError. Ohne diesen Menuepunkt ist das Modal fuer den Nutzer gar
+    // nicht erreichbar, deshalb reportError() (Seiten-Banner) statt nur console.error().
     const profileLi = document.querySelector("#menu_profile")?.closest("li");
     if (!profileLi) {
-      console.error("[FuxTools] #menu_profile nicht gefunden - FuxTools-Menüpunkt konnte nicht eingefügt werden.");
+      reportError("Navbar-Eintrag konnte nicht eingefügt werden", new Error("#menu_profile nicht gefunden - FuxTools ist über das Menü nicht erreichbar."));
       return;
     }
     li.className = profileLi.className;
@@ -5883,9 +5924,10 @@
     // Menuepunkt und Update-Check auch bei fehlgeschlagenem Fahrzeug-Katalog nutzbar
     // (betroffene Funktionen wie Umbenennen/Wachen-Bauplaner zeigen dann nur leere Daten,
     // statt das ganze Script lahmzulegen).
+    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher"];
     const results = await Promise.allSettled([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
-    results.forEach(r => {
-      if (r.status === "rejected") console.error("[FuxTools] Initialisierung fehlgeschlagen:", r.reason);
+    results.forEach((r, i) => {
+      if (r.status === "rejected") reportError(`Initialisierung fehlgeschlagen (${initSteps[i]})`, r.reason);
     });
     addMenuEntry();
     checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
