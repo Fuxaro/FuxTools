@@ -18,6 +18,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Neuinstallation).
 - Kritische Fehler (z. B. beim Start) werden jetzt direkt auf der Seite angezeigt statt nur
   in der Browser-Konsole - hilft uns, Bugs aus der Beta-Phase besser nachzuvollziehen.
+- Diese Fehler landen zusätzlich in einem Fehlerprotokoll, das sich in den Einstellungen als
+  Datei exportieren lässt - praktisch für Bug-Reports.
+- Neuer Button "Changelog anzeigen" in den Einstellungen zeigt diese Liste direkt im Script.
 
 ## Stable (v0.5.1)
 
