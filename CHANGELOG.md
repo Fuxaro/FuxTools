@@ -13,6 +13,51 @@ vorbehalten, damit wir nicht ungewollt in Richtung `1.0` rutschen.
 Bei jeder Änderung, die live gehen soll: `@version` im Script hochzählen und pushen. Ohne
 Versionserhöhung erkennt Tampermonkey kein Update.
 
+- **0.9.21**
+  - "Wachen-Baupläne" heißt jetzt "Wachen-Bauplaner" (Menüpunkt, Titel, Buttons überall
+    umbenannt - der Community-Vorbild-Script-Name "Wachenbaupläne" in Code-Kommentaren bleibt
+    als Quellenangabe unverändert).
+  - Großes Update: "Personal-Standard" (manuell gepflegte Soll-Zahlen) entfällt komplett -
+    Personal-Check und Schulungen berechnen den Personalbedarf jetzt automatisch aus dem je
+    Gebäudetyp AKTIVEN Wachenbauplan (dessen Fahrzeuge bestimmen den Bedarf). Pro Gebäudetyp
+    kann nur ein Bauplan gleichzeitig aktiv sein - wird beim Speichern ein neuer aktiviert,
+    deaktiviert das automatisch alle anderen desselben Typs. Gebäudetypen ganz ohne aktiven
+    Bauplan fordern nichts. Beide Screens verlinken jetzt direkt auf den Wachen-Bauplaner.
+  - Wachen-Bauplaner "Bearbeiten": leerer Name übernimmt jetzt automatisch den
+    Gebäudetyp-Namen (z.B. "Feuerwache") statt einen Namen zu erzwingen. Gibt es bereits einen
+    Bauplan mit diesem Namen, wird vor dem Speichern gefragt, ob er ersetzt werden soll.
+- **0.9.20**
+  - Fux-Logo in der Navigationsleiste vergrößert (20px → 24px), war kaum zu erkennen.
+- **0.9.19**
+  - "Speicher löschen" (Einstellungen) öffnet jetzt ein eigenes Bestätigungsfenster statt
+    eines browser confirm() - der Löschen-Button bleibt gesperrt, bis das Wort "löschen"
+    exakt eingetippt wurde, damit ein versehentlicher Klick nicht sofort alle Daten löscht.
+- **0.9.18**
+  - Navbar-Einstiegspunkt vereinfacht: der alte Fallback (AAO-Dropdown) ist raus, falls
+    #menu_profile mal nicht gefunden wird, gibt es jetzt direkt einen Fehler zum Nachschauen
+    statt eines stillen Rückfalls.
+- **0.9.17**
+  - FuxTools-Einstiegspunkt ist jetzt ein eigener Punkt direkt in der Navigationsleiste (mit
+    Fux-Logo), links neben dem Profil-Menü - vorher versteckt im Profil-Dropdown. Fällt auf
+    die alte Position zurück, falls die Navbar-Struktur der Seite mal abweicht.
+- **0.9.16**
+  - Hauptmenü: Sektion "Umbenennen" heißt jetzt "Schnellumbenennung".
+- **0.9.15**
+  - Schulungen: "Ausbilden"-Buttons in der Bedarfs-Tabelle sind jetzt in jeder Zeile vertikal
+    zentriert statt oben ausgerichtet - wirkte bei unterschiedlich hohen Zeilen (z.B. durch
+    umbrechende Ausbildungsnamen) uneinheitlich.
+  - "Personal-Standard anpassen" gibt es jetzt nur noch im Personal-Check-Menü selbst, nicht
+    mehr zusätzlich in den Einstellungen - vermeidet Verwechslung mit dem Wachenbauplan.
+- **0.9.14**
+  - Schulungen: die Gesamt-Raumzahl einer Schule kommt jetzt direkt aus deren echten Ausbauten
+    ("Weiterer Klassenraum", wie auf der Gebäudeseite sichtbar) statt aus der Raum-Auswahl im
+    Lehrgangs-Formular - die existiert dort naemlich nur, wenn gerade ein Raum frei ist, und
+    war deshalb als Quelle fuer die GESAMTZAHL ungeeignet. Betrifft sowohl die
+    Kapazitäts-Anzeige als auch die Zuteilung beim tatsächlichen Lehrgang-Start.
+  - Bugfix: ein per verzögertem Start eingeplanter Lehrgang hat schon einen echten
+    Fertig-Zeitpunkt in der Zukunft, obwohl das "running"-Flag der API noch false ist - belegte
+    Klassenräume werden jetzt anhand des Fertig-Zeitpunkts erkannt statt zusätzlich das
+    "running"-Flag zu verlangen (das hier hinterherhinkt statt umgekehrt).
 - **0.9.13**
   - Bugfix Schulungen: Anzeige "alle X Klassenräume belegt" nutzte einen hart codierten
     Rückfallwert (X=1), wenn die Raum-Auswahl im Formular fehlte, statt die Raumzahl aus

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.13
+// @version     0.9.21
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.13";
+  const SCRIPT_VERSION = "0.9.21";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -79,7 +79,7 @@
   }
 
   // Zeigt im Modal-Header IMMER, in welchem Menue/Untermenue man sich gerade befindet (z.B.
-  // "› Wachen-Baupläne › Anwenden"), statt dass man das nur am Bildschirminhalt selbst
+  // "› Wachen-Bauplaner › Anwenden"), statt dass man das nur am Bildschirminhalt selbst
   // erkennen kann. Wird von jedem render*Screen zu Beginn aufgerufen; leer = nur der reine
   // Hauptmenue-Titel (siehe renderMainMenu).
   function setScreenTitle(text) {
@@ -626,7 +626,6 @@
   const PERSONNEL_SCAN_KEY = "personnelScanData"; // { [buildingId]: { counts, names, total, ... } }
   const PERSONNEL_SCAN_META_KEY = "personnelScanMeta"; // { lastScanAt: timestamp } - EIN Zeitstempel fuer alle Kategorien
   const PERSONNEL_QUALIFICATIONS_KEY = "personnelQualifications"; // { [slug]: displayName }, waechst mit jedem Scan
-  const PERSONNEL_REQUIREMENTS_KEY = "personnelRequirements"; // { [pseudoId]: { [slug]: requiredCount } }
   // Mindest-Personalstaerke (scan.total) einer Wache, bevor Schulungen (siehe unten) ueberhaupt
   // Personal von ihr einplant - schuetzt frisch gebaute/kleine Wachen mit wenig Personal davor,
   // sofort leergeraeumt zu werden. 0 = Standard = keine Einschraenkung.
@@ -680,15 +679,11 @@
     return (await retrieveData(PERSONNEL_QUALIFICATIONS_KEY)) || {};
   }
 
-  async function getPersonnelRequirements() {
-    return (await retrieveData(PERSONNEL_REQUIREMENTS_KEY)) || {};
-  }
-
   async function getPersonnelSchoolingMinStaff() {
     return (await retrieveData(PERSONNEL_SCHOOLING_MIN_STAFF_KEY)) || 0;
   }
 
-  // Wachen-Baupläne: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
+  // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
   // sein soll (Ausbauten, Fahrzeuge+Anzahl, Sollpersonal) - siehe renderStationBlueprints*.
   const STATION_BLUEPRINTS_KEY = "stationBlueprints"; // { [id]: Blueprint }
 
@@ -711,7 +706,6 @@
     PERSONNEL_SCAN_KEY,
     PERSONNEL_SCAN_META_KEY,
     PERSONNEL_QUALIFICATIONS_KEY,
-    PERSONNEL_REQUIREMENTS_KEY,
     PERSONNEL_SCHOOLING_MIN_STAFF_KEY,
     STATION_BLUEPRINTS_KEY,
     VEHICLE_CREW_STAFFING_MODE_KEY,
@@ -1336,7 +1330,7 @@
         <div class="list-group">
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">
             <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
-            Wachen-Baupläne
+            Wachen-Bauplaner
           </button>
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
             <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
@@ -1356,7 +1350,7 @@
           </button>
         </div>
 
-        <p class="text-muted" style="${sectionLabelStyle}">Umbenennen</p>
+        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>
         <div class="list-group">
           <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">
             <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
@@ -1578,21 +1572,9 @@
         </div>
 
         <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Personal-Standard (Personal-Check)</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Legt fest, wie viel Personal mit welcher Ausbildung je Gebäudetyp im Personal-Check
-            gefordert wird. Ausbildungen müssen vorher mindestens einmal im Personal-Check
-            gescannt worden sein.
-          </p>
-          <button id="vn-btn-personnel-requirements" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-user" aria-hidden="true"></span> Personal-Standard anpassen
-          </button>
-        </div>
-
-        <div class="vn-settings-card">
           <p style="margin-top:0;"><b>Einstellungen sichern</b></p>
           <p class="text-muted" style="font-size:12px;">
-            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Personal-Standard, geforderte
+            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Wachen-Bauplaner, geforderte
             Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder
             her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.
           </p>
@@ -1615,7 +1597,6 @@
           <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
             <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
           </button>
-          <div id="vn-clear-status" style="margin-top:10px;"></div>
         </div>
       </div>
 
@@ -1628,7 +1609,6 @@
 
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", renderRequiredExtensionsSettingsScreen);
-    document.getElementById("vn-btn-personnel-requirements").addEventListener("click", () => renderPersonnelRequirementsSettingsScreen());
 
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-settings-transfer-status");
@@ -1677,23 +1657,8 @@
       }
     });
 
-    document.getElementById("vn-btn-clear-storage").addEventListener("click", async () => {
-      const confirmed = confirm(
-        "Achtung: Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen, " +
-          "Namens-Bausteine-Einstellungen) unwiderruflich gelöscht - als wäre das Script gerade " +
-          "neu installiert worden. Fortfahren?"
-      );
-      if (!confirmed) return;
-
-      const statusEl = document.getElementById("vn-clear-status");
-      statusEl.innerHTML = `<em>Speicher wird gelöscht ...</em>`;
-      try {
-        await clearAllStoredData();
-        statusEl.innerHTML = `<span class="text-success">Erledigt. Seite wird neu geladen ...</span>`;
-        location.reload();
-      } catch (e) {
-        statusEl.innerHTML = `<span class="text-danger">Fehler beim Löschen: ${escapeHtml(e.message)}</span>`;
-      }
+    document.getElementById("vn-btn-clear-storage").addEventListener("click", () => {
+      renderClearStorageConfirmScreen(renderSettingsScreen);
     });
 
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
@@ -1968,14 +1933,26 @@
   }
 
   function addMenuEntry() {
-    const icon = document.createElement("span");
-    icon.className = "glyphicon glyphicon-wrench";
-    icon.setAttribute("aria-hidden", "true");
+    const logoImg = document.createElement("img");
+    logoImg.src = LOGO_URL;
+    logoImg.alt = "";
+    logoImg.style.cssText = "height:24px; width:24px; border-radius:3px; vertical-align:middle; margin-right:6px;";
+    // Fehlt das Logo mal (z.B. Netzwerkfehler), auf das alte Schraubenschluessel-Icon
+    // zurueckfallen statt eines kaputten Bild-Icons.
+    logoImg.addEventListener("error", () => {
+      logoImg.replaceWith(
+        Object.assign(document.createElement("span"), {
+          className: "glyphicon glyphicon-wrench",
+          style: "margin-right:6px;",
+        }),
+      );
+    });
 
     const a = document.createElement("a");
     a.href = "#";
-    a.appendChild(icon);
-    a.appendChild(document.createTextNode(CHANNEL === "beta" ? " FuxTools Beta" : " FuxTools"));
+    a.style.cssText = "display:flex; align-items:center; height:100%; padding:15px;";
+    a.appendChild(logoImg);
+    a.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
 
     const li = document.createElement("li");
     li.role = "presentation";
@@ -1983,8 +1960,12 @@
     li.setAttribute("data-target", `#${modalId}`);
     li.appendChild(a);
 
-    const aaosLi = document.querySelector('a[href="/aaos"]').parentNode;
-    aaosLi.parentNode.insertBefore(li, aaosLi.nextSibling);
+    // Eigener Punkt DIREKT in der Navigationsleiste, links neben dem gruen hervorgehobenen
+    // Profil-Menue - nicht mehr versteckt in dessen Dropdown. Klassen des Profil-<li> werden
+    // uebernommen, damit Hoehe/Hover-Optik zu den Nachbar-Eintraegen passt.
+    const profileLi = document.querySelector("#menu_profile")?.closest("li");
+    li.className = profileLi.className;
+    profileLi.parentNode.insertBefore(li, profileLi);
   }
 
   //////////////////////////////////////////////////
@@ -2925,7 +2906,7 @@
   }
 
   // Personal-Zelle: reine Anzahl, ohne Soll-Wert-Vergleich (dafuer gibt es den
-  // Personal-Check mit den eigenen, konfigurierbaren PERSONNEL_REQUIREMENTS_KEY-Werten).
+  // Personal-Check mit dem aus dem aktiven Wachenbauplan berechneten Sollwert).
   function renderPersonnelCell(station) {
     return `${station.personnelCount ?? "-"}`;
   }
@@ -3148,6 +3129,66 @@
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
         confirmBtn.disabled = false;
+      }
+    });
+  }
+
+  // Eigene Bestaetigung fuer "Speicher loeschen" (Einstellungen) statt eines blossen browser
+  // confirm() - der Button bleibt gesperrt, bis das Bestaetigungswort exakt eingetippt wurde,
+  // damit ein versehentlicher Klick nicht sofort alle Daten loescht.
+  const CLEAR_STORAGE_CONFIRM_WORD = "löschen";
+
+  function renderClearStorageConfirmScreen(goBack) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("Einstellungen › Speicher löschen");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p class="text-danger"><b>Speicher wirklich löschen?</b></p>
+      <p>
+        Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen,
+        Namens-Bausteine, Wachen-Bauplaner, Verlauf, ...) unwiderruflich
+        gelöscht - als wäre das Script gerade neu installiert worden.
+      </p>
+      <div class="form-group">
+        <label for="vn-clear-confirm-input">
+          Tippe zum Bestätigen <code>${escapeHtml(CLEAR_STORAGE_CONFIRM_WORD)}</code> ein:
+        </label>
+        <input type="text" id="vn-clear-confirm-input" class="form-control" autocomplete="off">
+      </div>
+      <div id="vn-clear-confirm-status" style="margin-top:10px;"></div>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
+        </button>
+        <button id="vn-btn-clear-confirm" type="button" class="btn btn-danger" disabled>
+          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher endgültig löschen
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+
+    const input = document.getElementById("vn-clear-confirm-input");
+    const confirmBtn = document.getElementById("vn-btn-clear-confirm");
+    const statusEl = document.getElementById("vn-clear-confirm-status");
+
+    input.addEventListener("input", () => {
+      confirmBtn.disabled = input.value.trim().toLowerCase() !== CLEAR_STORAGE_CONFIRM_WORD;
+    });
+    input.focus();
+
+    confirmBtn.addEventListener("click", async () => {
+      confirmBtn.disabled = true;
+      input.disabled = true;
+      statusEl.innerHTML = `<em>Speicher wird gelöscht ...</em>`;
+      try {
+        await clearAllStoredData();
+        statusEl.innerHTML = `<span class="text-success">Erledigt. Seite wird neu geladen ...</span>`;
+        location.reload();
+      } catch (e) {
+        statusEl.innerHTML = `<span class="text-danger">Fehler beim Löschen: ${escapeHtml(e.message)}</span>`;
+        confirmBtn.disabled = false;
+        input.disabled = false;
       }
     });
   }
@@ -3632,7 +3673,7 @@
 
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
-    const requirements = await getPersonnelRequirements();
+    const requirements = await computePersonnelRequirementsFromBlueprints();
     const qualifications = await getPersonnelQualifications();
 
     const applyRowVisibility = makeRowVisibilityFilter({
@@ -3716,11 +3757,14 @@
       <p class="text-muted" style="font-size:12px;">
         Prüft je Wache, ob genug Personal mit bestimmten Ausbildungen vorhanden ist. Grün =
         genau passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
-        Scannt automatisch neu, wenn der letzte Scan mehr als 15 Minuten her ist.
+        Scannt automatisch neu, wenn der letzte Scan mehr als 15 Minuten her ist. Die
+        geforderte Anzahl kommt automatisch aus dem je Gebäudetyp <b>aktiven Wachenbauplan</b>
+        (dessen Fahrzeuge bestimmen den Personalbedarf) - Gebäudetypen ohne aktiven Bauplan
+        fordern nichts.
       </p>
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-        <button type="button" id="vn-personnel-goto-settings" class="btn btn-default btn-sm">
-          <span class="glyphicon glyphicon-cog" aria-hidden="true"></span> Personal-Standard anpassen
+        <button type="button" id="vn-personnel-goto-blueprints" class="btn btn-default btn-sm">
+          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten
         </button>
         <button type="button" id="vn-personnel-goto-schooling" class="btn btn-primary btn-sm">
           <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Schulungen starten
@@ -3772,8 +3816,8 @@
     document.getElementById("vn-personnel-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-personnel-type-filter").addEventListener("change", applyRowVisibility);
     document
-      .getElementById("vn-personnel-goto-settings")
-      .addEventListener("click", () => renderPersonnelRequirementsSettingsScreen(renderPersonalCheckScreen));
+      .getElementById("vn-personnel-goto-blueprints")
+      .addEventListener("click", () => renderStationBlueprintsListScreen(renderPersonalCheckScreen));
     document
       .getElementById("vn-personnel-goto-schooling")
       .addEventListener("click", () => renderSchoolingScreen(renderPersonalCheckScreen));
@@ -3816,7 +3860,8 @@
 
   //////////////////////////////////////////////////
   // Schulungen: nutzt die im Personal-Check gescannten Zahlen (counts pro Wache+Slug)
-  // und die dort gespeicherten Anforderungen (PERSONNEL_REQUIREMENTS_KEY), um fehlendes
+  // und die aus dem je Gebaeudetyp aktiven Wachenbauplan berechnete Anforderung (siehe
+  // computePersonnelRequirementsFromBlueprints), um fehlendes
   // Personal automatisch in die passende Schule zu schicken - ein Klassenraum fasst immer
   // 10 Personen (siehe free_space_for_personnel_selection() im Spiel selbst). Es gibt
   // dafuer keine JSON-API: der Lehrgang-Tab jeder Schule ist eine grosse HTML-Seite, und
@@ -3836,6 +3881,20 @@
 
   const SCHOOLING_SEATS_PER_ROOM = 10;
 
+  // Jede Schule hat 1 Klassenraum als Standard, plus einen weiteren je gebautem "Weiterer
+  // Klassenraum"-Ausbau (Ids 0/1/2, siehe EXTENSION_CATALOG - identisch bei allen 5
+  // Schul-Gebaeudetypen) - im Spiel selbst auf der Gebaeudeseite sichtbar ("Bereits fertig
+  // gebaut"/"Noch nicht gebaut"). Zuverlaessiger als die Raum-Auswahl im Lehrgangs-Formular
+  // zu scrapen (die existiert nur, wenn gerade ein Raum frei ist - fuer die GESAMTZAHL der
+  // Raeume ist das ungeeignet, siehe fetchSchoolPageInfo).
+  const SCHOOL_CLASSROOM_EXTENSION_IDS = [0, 1, 2];
+
+  function countSchoolClassrooms(building) {
+    const extensions = Array.isArray(building.extensions) ? building.extensions : [];
+    const builtExtraRooms = extensions.filter(e => SCHOOL_CLASSROOM_EXTENSION_IDS.includes(e.type_id)).length;
+    return 1 + builtExtraRooms;
+  }
+
   async function loadOwnedSchoolsByCategory() {
     const buildings = await fetchJSON("/api/buildings");
     const byCategory = {};
@@ -3847,6 +3906,7 @@
       (byCategory[category] || (byCategory[category] = [])).push({
         id: String(b.id),
         name: b.caption || `Schule ${b.id}`,
+        maxRooms: countSchoolClassrooms(b),
       });
     }
     return byCategory;
@@ -3949,21 +4009,26 @@
     return await fetchJSON("/api/schoolings");
   }
 
-  // Anzahl der GERADE belegten Klassenraeume einer Schule - "running" UND Fertig-Zeitpunkt
-  // noch in der Zukunft (doppelt geprueft, falls das Flag mal hinterherhinkt).
+  // Anzahl der GERADE (oder demnaechst per verzoegertem Start) belegten Klassenraeume einer
+  // Schule - NUR nach Fertig-Zeitpunkt in der Zukunft, bewusst OHNE das "running"-Flag zu
+  // verlangen: ein per verzoegertem Start eingeplanter Lehrgang hat schon einen echten
+  // finish_time in der Zukunft, obwohl "running" noch false ist (per Test bestaetigt) - der
+  // Klassenraum ist trotzdem schon belegt/reserviert, das Flag hinkt hier also hinterher statt
+  // umgekehrt.
   function countOccupiedRooms(schoolingRuns, schoolId) {
     const now = Date.now();
     return schoolingRuns.filter(
-      run => String(run.building_id) === String(schoolId) && run.running && new Date(run.finish_time).getTime() > now,
+      run => String(run.building_id) === String(schoolId) && new Date(run.finish_time).getTime() > now,
     ).length;
   }
 
-  // Fruehester Fertig-Zeitpunkt unter den GERADE laufenden Lehrgaengen einer Schule (oder
-  // null, falls keiner laeuft) - fuer die Anzeige "belegt bis ..." statt nur "belegt".
+  // Fruehester Fertig-Zeitpunkt unter den (auch per verzoegertem Start) belegten
+  // Klassenraeumen einer Schule (oder null, falls keiner belegt ist) - fuer die Anzeige
+  // "belegt bis ..." statt nur "belegt".
   function earliestSchoolingFinish(schoolingRuns, schoolId) {
     const now = Date.now();
     const finishTimes = schoolingRuns
-      .filter(run => String(run.building_id) === String(schoolId) && run.running)
+      .filter(run => String(run.building_id) === String(schoolId))
       .map(run => new Date(run.finish_time).getTime())
       .filter(t => t > now);
     return finishTimes.length ? Math.min(...finishTimes) : null;
@@ -3991,13 +4056,19 @@
   // einsammeln (bis zur tatsaechlich freien Kapazitaet). Grundlage fuer die eigene
   // Bestaetigungs-Ansicht (siehe renderSchoolingConfirmScreen) statt eines blossen
   // Browser-confirm() - der Spieler soll VOR dem Klick exakt sehen, wer betroffen ist.
-  async function planTrainingRun(need, schoolId) {
+  async function planTrainingRun(need, school) {
+    const schoolId = school.id;
     const schoolingRuns = await fetchSchoolingRuns();
     const occupied = countOccupiedRooms(schoolingRuns, schoolId);
-    const { authenticityToken, freeRooms, educationValue, educationLabel } = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
+    // freeRooms fuer die Zuteilung kommt aus der ECHTEN Raumzahl der Schule (school.maxRooms,
+    // siehe countSchoolClassrooms) statt aus der Raum-Auswahl im Formular - die HTML-Anfrage
+    // hier liefert weiterhin authenticityToken/educationValue, die es nur im echten Formular
+    // gibt.
+    const freeRooms = Math.max(0, school.maxRooms - occupied);
     if (freeRooms <= 0) {
       throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
     }
+    const { authenticityToken, educationValue, educationLabel } = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
 
     const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(need.totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
     const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
@@ -4163,7 +4234,7 @@
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
 
-    const requirements = await getPersonnelRequirements();
+    const requirements = await computePersonnelRequirementsFromBlueprints();
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const qualifications = await getPersonnelQualifications();
@@ -4176,6 +4247,12 @@
     for (const category of Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY)) {
       schoolByCategory[category] = pickSchoolForCategory(schoolsByCategory, category);
     }
+    // Raumzahl kommt jetzt direkt aus den ECHTEN Ausbauten der Schule (school.maxRooms, siehe
+    // countSchoolClassrooms) statt aus der Raum-Auswahl im Lehrgangs-Formular - die existiert
+    // im HTML naemlich nur, wenn gerade ein Raum frei ist, und war deshalb als Quelle fuer die
+    // GESAMTZAHL ungeeignet (siehe fetchSchoolPageInfo). Belegte Raeume kommen weiterhin aus
+    // /api/schoolings (countOccupiedRooms) - kein HTML-Scraping mehr fuer die Uebersicht
+    // noetig.
     const capacityBySchoolId = {};
     let schoolingRuns = [];
     try {
@@ -4183,20 +4260,13 @@
     } catch (e) {
       console.warn("[FuxTools] /api/schoolings konnte nicht geladen werden:", e);
     }
-    await Promise.all(
-      Object.values(schoolByCategory)
-        .filter(Boolean)
-        .map(async school => {
-          try {
-            const occupied = countOccupiedRooms(schoolingRuns, school.id);
-            const { maxRooms, freeRooms } = await fetchSchoolPageInfo(school.id, occupied);
-            const nextFreeAt = earliestSchoolingFinish(schoolingRuns, school.id);
-            capacityBySchoolId[school.id] = { maxRooms, freeRooms, nextFreeAt };
-          } catch (e) {
-            capacityBySchoolId[school.id] = { error: e.message };
-          }
-        }),
-    );
+    for (const school of Object.values(schoolByCategory)) {
+      if (!school) continue;
+      const occupied = countOccupiedRooms(schoolingRuns, school.id);
+      const freeRooms = Math.max(0, school.maxRooms - occupied);
+      const nextFreeAt = earliestSchoolingFinish(schoolingRuns, school.id);
+      capacityBySchoolId[school.id] = { maxRooms: school.maxRooms, freeRooms, nextFreeAt };
+    }
 
     let needs = [];
     function recomputeNeeds() {
@@ -4265,9 +4335,9 @@
               const needKey = `${need.category}::${need.slug}`;
               return `
                 <tr>
-                  <td>${escapeHtml(qualificationName)}</td>
-                  <td title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>
-                  <td>
+                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>
+                  <td style="vertical-align:middle;" title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>
+                  <td style="vertical-align:middle;">
                     <button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" ${school ? "" : "disabled"}>
                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden
                     </button>
@@ -4296,12 +4366,13 @@
     function render() {
       body.innerHTML = `
         <p class="text-muted" style="font-size:12px;">
-          Zeigt, wie viel Personal laut Personal-Standard (Einstellungen) und dem letzten
-          Personal-Check-Scan noch fehlt, gruppiert nach Schultyp, und schickt es automatisch
-          (bis zu ${SCHOOLING_SEATS_PER_ROOM} Personen pro Klassenraum) in den passenden
-          Lehrgang der eigenen Schule. Startet echte Lehrgänge (mehrere Tage, Personal steht
-          währenddessen nicht für Einsätze zur Verfügung) - bitte die Anzahl vor dem Klick
-          prüfen.
+          Zeigt, wie viel Personal laut dem je Gebäudetyp <b>aktiven Wachenbauplan</b> (dessen
+          Fahrzeuge bestimmen den Personalbedarf - Gebäudetypen ohne aktiven Bauplan fordern
+          nichts) und dem letzten Personal-Check-Scan noch fehlt, gruppiert nach Schultyp, und
+          schickt es automatisch (bis zu ${SCHOOLING_SEATS_PER_ROOM} Personen pro Klassenraum)
+          in den passenden Lehrgang der eigenen Schule. Startet echte Lehrgänge (mehrere Tage,
+          Personal steht währenddessen nicht für Einsätze zur Verfügung) - bitte die Anzahl vor
+          dem Klick prüfen.
         </p>
         <div id="vn-schooling-overview">${renderSchoolOverview()}</div>
         <div class="form-inline" style="margin-bottom:10px;">
@@ -4319,6 +4390,9 @@
           <button type="button" id="vn-schooling-scan-btn" class="btn btn-primary">
             <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan jetzt starten
           </button>
+          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">
+            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten
+          </button>
           <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">
             ${
               scanMeta.lastScanAt
@@ -4330,6 +4404,9 @@
       `;
 
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
+      document
+        .getElementById("vn-schooling-goto-blueprints")
+        .addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingScreen(goBack)));
 
       document.getElementById("vn-schooling-min-staff").addEventListener("change", async e => {
         minStaff = Math.max(0, parseInt(e.target.value, 10) || 0);
@@ -4376,7 +4453,7 @@
           btn.disabled = true;
           statusEl.textContent = "Lade Vorschau ...";
           try {
-            const plan = await planTrainingRun(need, school.id);
+            const plan = await planTrainingRun(need, school);
             renderSchoolingConfirmScreen({
               need,
               school,
@@ -4919,7 +4996,7 @@
   }
 
   //////////////////////////////////////////////////
-  // Wachen-Baupläne: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
+  // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
   // sein soll (welche Ausbauten, welche Fahrzeuge in welcher Anzahl, wie viel Sollpersonal).
   // Konzept und Datenmodell (Bauplan-Felder, Verfuegbar/Zugewiesen-Doppelliste fuer Ausbauten)
   // vom Community-Script "Wachenbaupläne" (BOS-Ernie) uebernommen - die Personal-
@@ -4966,6 +5043,26 @@
     return totals;
   }
 
+  // Personal-Anforderung fuer Personal-Check/Schulungen: statt einer separaten, manuell
+  // gepflegten Konfiguration kommt sie jetzt direkt aus dem je Gebaeudetyp AKTIVEN
+  // Wachenbauplan (pro Typ kann nur einer aktiv sein, siehe renderStationBlueprintEditScreen -
+  // automatische Deaktivierung anderer Plaene desselben Typs beim Speichern). Gebaeudetypen
+  // ganz ohne aktiven Bauplan fordern nichts (0) - dieselbe Form wie frueher
+  // PERSONNEL_REQUIREMENTS_KEY ({ [pseudoId]: { [slug]: requiredCount } }), damit
+  // computeTrainingNeeds()/personnelMissingCount() unveraendert bleiben koennen.
+  async function computePersonnelRequirementsFromBlueprints() {
+    const blueprints = await getStationBlueprints();
+    const result = {};
+    for (const blueprint of Object.values(blueprints)) {
+      if (!blueprint.enabled) continue;
+      const totals = computeBlueprintPersonnelRequirements(blueprint);
+      const obj = {};
+      for (const [slug, count] of totals) obj[slug] = count;
+      result[blueprint.pseudoId] = obj;
+    }
+    return result;
+  }
+
   function typeNameForPseudoId(pseudoId) {
     const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
     if (!pseudo) return "Unbekannt";
@@ -4973,12 +5070,12 @@
     return BUILDING_TYPE_NAMES[key] || `Typ ${key}`;
   }
 
-  // Einstellungen > "Wachen-Baupläne verwalten": Liste aller Baupläne mit Bearbeiten/
+  // Hauptmenü > "Wachen-Bauplaner": Liste aller Baupläne mit Bearbeiten/
   // Löschen/Exportieren/Importieren, plus je Bauplan ein direkter Sprung zur Anwenden-
   // Ansicht (siehe renderStationBlueprintApplyScreen).
   async function renderStationBlueprintsListScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle("Wachen-Baupläne");
+    setScreenTitle("Wachen-Bauplaner");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
 
@@ -5123,7 +5220,7 @@
   // Bauplan gilt einfach fuer alle Wachen des gewaehlten Gebäudetyps.
   async function renderStationBlueprintEditScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
-    setScreenTitle("Wachen-Baupläne › Bearbeiten");
+    setScreenTitle("Wachen-Bauplaner › Bearbeiten");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
@@ -5249,7 +5346,7 @@
         <div class="form-group">
           <label class="col-sm-2 control-label">Name</label>
           <div class="col-sm-10">
-            <input type="text" id="vn-bp-name" class="form-control" value="${escapeHtml(existing?.name || "")}" placeholder="z.B. Rettungswache Standard">
+            <input type="text" id="vn-bp-name" class="form-control" value="${escapeHtml(existing?.name || "")}" placeholder="leer = Gebäudetyp-Name (z.B. Rettungswache)">
           </div>
         </div>
         <div class="form-group">
@@ -5346,12 +5443,16 @@
 
     document.getElementById("vn-bp-save").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-bp-edit-status");
-      const name = document.getElementById("vn-bp-name").value.trim();
       const pseudoId = document.getElementById("vn-bp-pseudo-id").value;
-      if (!name || !pseudoId) {
-        statusEl.innerHTML = `<span class="text-danger">Bitte Name und Gebäudetyp angeben.</span>`;
+      if (!pseudoId) {
+        statusEl.innerHTML = `<span class="text-danger">Bitte Gebäudetyp angeben.</span>`;
         return;
       }
+      // Leerer Name -> Gebaeudetyp-Name als Standard (z.B. "Feuerwache"), statt einen Namen
+      // zu erzwingen.
+      const typedName = document.getElementById("vn-bp-name").value.trim();
+      const name = typedName || typeNameForPseudoId(pseudoId);
+
       const enabled = document.querySelector('input[name="vn-bp-enabled"]:checked')?.value !== "no";
       const extensions = [...document.getElementById("vn-bp-ext-assigned").options].map(opt => Number(opt.value));
       const vehicles = [...body.querySelectorAll(".vn-bp-vehicle-qty")]
@@ -5360,6 +5461,22 @@
       const personnelSetPoint = parseInt(document.getElementById("vn-bp-personnel-set-point").value, 10) || 0;
 
       const current = await getStationBlueprints();
+
+      // Namensdopplung (unabhaengig von Gross/Kleinschreibung) mit einem ANDEREN Bauplan -
+      // vorher fragen, ob dieser ersetzt werden soll, statt zwei gleich benannte Plaene
+      // nebeneinander stehen zu haben (kann sonst z.B. beim Anwenden verwirren).
+      const duplicate = Object.values(current).find(
+        bp => bp.id !== id && bp.name.trim().toLowerCase() === name.toLowerCase(),
+      );
+      if (duplicate) {
+        const confirmed = confirm(`Ein Bauplan mit dem Namen "${name}" existiert bereits. Diesen überschreiben (ersetzen)?`);
+        if (!confirmed) {
+          statusEl.innerHTML = `<span class="text-danger">Abgebrochen - bitte einen anderen Namen wählen.</span>`;
+          return;
+        }
+        delete current[duplicate.id];
+      }
+
       current[id] = {
         id,
         enabled,
@@ -5369,8 +5486,28 @@
         extensions,
         vehicles,
       };
+
+      // Pro Gebaeudetyp darf nur EIN Bauplan aktiv sein - dessen Fahrzeuge liefern
+      // automatisch die Personal-Anforderung fuer Personal-Check/Schulungen (siehe
+      // computePersonnelRequirementsFromBlueprints). Wird hier ein Plan aktiviert, alle
+      // ANDEREN aktiven Plaene desselben Typs automatisch deaktivieren, statt das dem
+      // Nutzer manuell zu ueberlassen.
+      let deactivated = [];
+      if (enabled) {
+        deactivated = Object.values(current).filter(bp => bp.id !== id && bp.pseudoId === pseudoId && bp.enabled);
+        deactivated.forEach(bp => {
+          current[bp.id] = { ...bp, enabled: false };
+        });
+      }
+
       await saveStationBlueprints(current);
-      goBack();
+
+      if (deactivated.length) {
+        statusEl.innerHTML = `<span class="text-success">Gespeichert. "${escapeHtml(deactivated.map(bp => bp.name).join('", "'))}" wurde automatisch deaktiviert (nur ein aktiver Bauplan je Gebäudetyp).</span>`;
+        setTimeout(goBack, 1800);
+      } else {
+        goBack();
+      }
     });
   }
 
@@ -5381,7 +5518,7 @@
   // Schulungen.
   async function renderStationBlueprintApplyScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
-    setScreenTitle("Wachen-Baupläne › Anwenden");
+    setScreenTitle("Wachen-Bauplaner › Anwenden");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
 
@@ -5678,322 +5815,6 @@
         console.warn("[FuxTools] Personal-Rescan im Wachenbauplan fehlgeschlagen:", e);
       }
       renderStationBlueprintApplyScreen(blueprintId, goBack);
-    });
-  }
-
-  // Fest hinterlegter Katalog, welche Ausbildungen es je Gebaeudetyp ueberhaupt gibt (nur
-  // Namen, keine Vorschlagswerte) - macht die Liste im Einstellungs-Screen von Anfang an
-  // vollstaendig, statt sie erst nach und nach durch Scannen aufzubauen. Ein Feld wird erst
-  // bedienbar, sobald der zugehoerige echte Slug (data-filterable-by) einmal beim Scannen
-  // entdeckt wurde - siehe normalizeQualificationName()/nameToSlug unten. Quelle: vom User
-  // bereitgestellte Referenz-Tabelle (nur Ausbildungen mit "max. Personal" > 0 je Typ).
-  // Kleinwachen (18/19/20) nutzen denselben Ausbildungs-Pool wie ihre normale Wache
-  // (0/6/2) - die Referenz-Tabelle listet sie nicht separat auf. Deshalb hier einmal
-  // definiert und unten fuer beide Pseudo-IDs je Paar referenziert, statt dupliziert.
-  const FEUERWACHE_QUALIFICATION_NAMES = [
-    "Bahnrettung",
-    "Dekon-P-Lehrgang",
-    "Drohnen-Schulung",
-    "ELW 2 Lehrgang",
-    "Feuerwehr-Verpflegungseinheit",
-    "Feuerwehrkran Lehrgang",
-    "GW-Gefahrgut Lehrgang",
-    "GW-Messtechnik Lehrgang",
-    "Höhenrettung Lehrgang",
-    "NEA200 Fortbildung",
-    "Verpflegungshelfer",
-    "Wechsellader Lehrgang",
-  ];
-  const POLIZEIWACHE_QUALIFICATION_NAMES = [
-    "Autobahnpolizei",
-    "Dienstgruppenleitung",
-    "Kriminalpolizei",
-    "Motorradstaffel",
-  ];
-  const RETTUNGSWACHE_QUALIFICATION_NAMES = [
-    "Intensivpflege",
-    "LNA-Ausbildung",
-    "Notarzt-Ausbildung",
-    "OrgL-Ausbildung",
-  ];
-
-  const KNOWN_QUALIFICATION_NAMES_BY_PSEUDO_ID = {
-    "11": [
-      // Bereitschaftspolizei
-      "Hundertschaftsführer (FüKW)",
-      "Lautsprecheroperator",
-      "MEK",
-      "Reiterstaffel",
-      "SEK",
-      "Wasserwerfer",
-      "Zugführer (leBefKw)",
-    ],
-    "25": [
-      // Bergrettungswache
-      "Einsatzleiter Bergrettung",
-      "Höhenretter",
-      "Notarzt-Ausbildung",
-      "Rettungshundeführer",
-    ],
-    "0": FEUERWACHE_QUALIFICATION_NAMES,
-    "18": FEUERWACHE_QUALIFICATION_NAMES, // Feuerwache (Kleinwache)
-    "6": POLIZEIWACHE_QUALIFICATION_NAMES,
-    "19": POLIZEIWACHE_QUALIFICATION_NAMES, // Polizeiwache (Kleinwache)
-    "13": [
-      // Polizeihubschrauberstation
-      "Polizeihubschrauber",
-      "Windenoperator",
-    ],
-    "2": RETTUNGSWACHE_QUALIFICATION_NAMES,
-    "20": RETTUNGSWACHE_QUALIFICATION_NAMES, // Rettungswache (Kleinwache)
-    "5": [
-      // Rettungshubschrauber-Station
-      "Notarzt-Ausbildung",
-      "Windenoperator",
-    ],
-    "12": [
-      // Schnelleinsatzgruppe (SEG)
-      "Betreuungsdienst",
-      "Drohnenoperator",
-      "GW-Taucher Lehrgang",
-      "GW-Wasserrettung Lehrgang",
-      "Rettungshundeführer",
-      "SEG - Einsatzleitung",
-      "SEG - GW-San",
-      "Verpflegungshelfer",
-    ],
-    "26": [
-      // Seenotrettungswache
-      "Seenotretter",
-    ],
-    "28": [
-      // Hubschrauberstation (Seenotrettung)
-      "Hubschrauberpilot (Seenotrettung)",
-      "Wasserrettungsausbildung für Notfallsanitäter",
-      "Windenoperator",
-    ],
-    "9": [
-      // THW
-      "Fachgruppe Bergungstaucher",
-      "Fachgruppe Brückenbau",
-      "Fachgruppe Elektroversorgung",
-      "Fachgruppe Räumen",
-      "Fachgruppe Rettungshundeführer",
-      "Fachgruppe Schwere Bergung",
-      "Fachgruppe Wassergefahren",
-      "Fachgruppe Wasserschaden/Pumpen",
-      "Fachzug Führung und Kommunikation",
-      "Kranführer",
-      "Logistik-Verpflegung",
-      "Trupp Unbemannte Luftfahrtsysteme",
-      "Verpflegungshelfer",
-      "Zugtrupp",
-    ],
-    "15": [
-      // Wasserrettung
-      "GW-Taucher Lehrgang",
-      "GW-Wasserrettung Lehrgang",
-    ],
-  };
-
-  function normalizeQualificationName(name) {
-    return (name || "")
-      .toLowerCase()
-      .replace(/\s*(lehrgang|ausbildung|fortbildung|schulung)\s*$/i, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  // Einstellungen > "Personal-Standard anpassen": pro Gebaeudetyp eine Soll-Anzahl je
-  // Ausbildung. Die Liste je Gebaeudetyp kommt aus dem festen Katalog oben, ergaenzt um
-  // ggf. zusaetzlich entdeckte, dort noch nicht gelistete Ausbildungen. Bedienbar (echtes
-  // Eingabefeld) ist ein Eintrag erst, sobald der echte Slug bekannt ist - vorher nur als
-  // gesperrter Hinweis sichtbar.
-  async function renderPersonnelRequirementsSettingsScreen(goBack = renderSettingsScreen) {
-    setModalWidth(MODAL_WIDTH_WIDE);
-    setScreenTitle("Einstellungen › Personal-Standard");
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade ...</p>`;
-
-    const requirements = await getPersonnelRequirements();
-    const qualifications = await getPersonnelQualifications();
-    const scanData = await getPersonnelScanData();
-    const stations = await loadPersonnelCheckStations();
-
-    // Nach Kategorie gruppiert (wie im Wachen-Check/Personal-Check), statt alphabetisch
-    // durcheinander - macht die grosse Anzahl an Gebaeudetypen ueberschaubarer.
-    const types = Object.keys(BUILDING_TYPE_NAMES)
-      .map(buildingKey => {
-        const [buildingTypeStr, size] = buildingKey.split("_");
-        const entry = PSEUDO_BUILDING_TYPES.find(
-          t => t.buildingType === Number(buildingTypeStr) && t.smallBuilding === (size === "small"),
-        );
-        if (!entry) return null;
-        const category = categoryForBuilding({
-          building_type: entry.buildingType,
-          small_building: entry.smallBuilding,
-        });
-        return { pseudoId: entry.id, typeName: BUILDING_TYPE_NAMES[buildingKey], category };
-      })
-      // Krankenhaeuser/Schulen und "Sonstiges" haben kein zuweisbares Personal - siehe
-      // loadPersonnelCheckStations().
-      .filter(t => t && t.category !== "Krankenhäuser & Schulen" && t.category !== "Sonstiges")
-      .sort((a, b) => {
-        const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
-        return catDiff !== 0 ? catDiff : a.typeName.localeCompare(b.typeName, "de");
-      });
-
-    // Ohne gespeicherte Konfiguration ist der Standard ueberall 0 (nichts gefordert) -
-    // jeder Spieler konfiguriert die Soll-Anzahlen selbst.
-    function currentValue(pseudoId, slug) {
-      return requirements[pseudoId]?.[slug] ?? 0;
-    }
-
-    // Ausbildungs-Slugs, die je Wache beim Scannen tatsaechlich gefunden wurden - dient
-    // dazu, bekannte Katalog-Namen mit ihrem echten Slug zu verknuepfen (nur dann ist ein
-    // Feld bedienbar) und um zusaetzlich entdeckte, im Katalog noch fehlende Ausbildungen
-    // zu ergaenzen.
-    const slugsByPseudoId = {};
-    for (const station of stations) {
-      const scan = scanData[station.id];
-      if (!scan) continue;
-      const set = slugsByPseudoId[station.pseudoId] || (slugsByPseudoId[station.pseudoId] = new Set());
-      Object.keys(scan.counts).forEach(slug => set.add(slug));
-    }
-
-    // Normalisierter Name -> Slug, aus allen bisher entdeckten Ausbildungen (ueber alle
-    // Gebaeudetypen hinweg entdeckt, siehe getPersonnelQualifications()).
-    const nameToSlug = {};
-    for (const [slug, name] of Object.entries(qualifications)) {
-      nameToSlug[normalizeQualificationName(name)] = slug;
-    }
-
-    // Ein Block je Gebaeudetyp (Ausbildung direkt neben dem zugehoerigen Feld) statt einer
-    // breiten Tabelle - Label und Zahl bleiben beim Scrollen immer zusammen sichtbar, die
-    // Kategorie-Ueberschrift bleibt beim Scrollen oben haengen (sticky).
-    const groups = [];
-    let lastCategory = null;
-    for (const t of types) {
-      if (t.category !== lastCategory) {
-        lastCategory = t.category;
-        groups.push(`
-          <div style="font-weight:bold; background:var(--vn-modal-bg, #333); padding:4px 6px; position:sticky; top:0; z-index:1;">
-            ${escapeHtml(lastCategory)}
-          </div>
-        `);
-      }
-
-      // Kombinierte Liste: fester Katalog (auch ohne bekannten Slug) + zusaetzlich
-      // entdeckte Ausbildungen, die im Katalog (noch) nicht stehen.
-      const entries = new Map(); // normalisierter Name -> { name, slug|null }
-      (KNOWN_QUALIFICATION_NAMES_BY_PSEUDO_ID[t.pseudoId] || []).forEach(name => {
-        const key = normalizeQualificationName(name);
-        entries.set(key, { name, slug: nameToSlug[key] || null });
-      });
-      [...(slugsByPseudoId[t.pseudoId] || [])].forEach(slug => {
-        const name = qualifications[slug] || slug;
-        const key = normalizeQualificationName(name);
-        if (!entries.has(key)) entries.set(key, { name, slug });
-      });
-      const sortedEntries = [...entries.values()].sort((a, b) => a.name.localeCompare(b.name, "de"));
-
-      const fields = sortedEntries.length
-        ? sortedEntries
-            .map(({ name, slug }) =>
-              slug
-                ? `
-                <label style="display:flex; align-items:center; gap:4px; margin:2px 12px 2px 0; font-weight:normal;">
-                  <span style="font-size:11px;">${escapeHtml(name)}</span>
-                  <input type="number" min="0" class="form-control input-sm vn-personnel-req-input"
-                         data-pseudo-id="${t.pseudoId}" data-slug="${slug}"
-                         value="${currentValue(t.pseudoId, slug)}" style="width:55px;">
-                </label>
-              `
-                : `
-                <span class="text-muted" style="display:inline-flex; align-items:center; gap:3px;
-                     margin:2px 12px 2px 0; font-size:11px;"
-                     title="Wird bedienbar, sobald diese Ausbildung im Personal-Check einmal gescannt wurde.">
-                  ${escapeHtml(name)} <span class="glyphicon glyphicon-lock" style="font-size:9px;"></span>
-                </span>
-              `,
-            )
-            .join("")
-        : `<span class="text-muted" style="font-size:11px;">
-             Für diesen Gebäudetyp sind keine Ausbildungen bekannt.
-           </span>`;
-      groups.push(`
-        <div style="padding:5px 6px; border-bottom:1px solid rgba(255,255,255,0.08);">
-          <div style="white-space:nowrap; margin-bottom:3px;">${escapeHtml(t.typeName)}</div>
-          <div style="display:flex; flex-wrap:wrap; align-items:center;">${fields}</div>
-        </div>
-      `);
-    }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Soll-Anzahl je Ausbildung, sortiert nach Gebäudetyp - nicht jeder Typ hat jede
-        Ausbildung. Ausgegraute Einträge (<span class="glyphicon glyphicon-lock" style="font-size:9px;"></span>)
-        werden bedienbar, sobald sie im Personal-Check einmal gescannt wurden. 0 = nichts
-        gefordert. Änderungen gelten erst nach "Speichern".
-      </p>
-      <div style="max-height:60vh; overflow:auto;">${groups.join("")}</div>
-      <div id="vn-personnel-req-status" style="margin-top:6px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-save-personnel-req" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern
-        </button>
-        <button id="vn-btn-reset-personnel-req" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Zurücksetzen auf Standard
-        </button>
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
-
-    document.getElementById("vn-btn-save-personnel-req").addEventListener("click", async () => {
-      const newRequirements = {};
-      for (const t of types) newRequirements[t.pseudoId] = {};
-      body.querySelectorAll(".vn-personnel-req-input").forEach(input => {
-        const value = Math.max(0, parseInt(input.value, 10) || 0);
-        if (value > 0) newRequirements[input.dataset.pseudoId][input.dataset.slug] = value;
-      });
-
-      const changes = [];
-      for (const t of types) {
-        const before = requirements[t.pseudoId] || {};
-        const after = newRequirements[t.pseudoId];
-        const parts = [];
-        for (const slug of new Set([...Object.keys(before), ...Object.keys(after)])) {
-          const b = before[slug] || 0;
-          const a = after[slug] || 0;
-          if (a !== b) parts.push(`${qualifications[slug] || slug}: ${b}→${a}`);
-        }
-        if (parts.length) changes.push(`${t.typeName}: ${parts.join(", ")}`);
-      }
-
-      await storeData(newRequirements, PERSONNEL_REQUIREMENTS_KEY);
-      if (changes.length) {
-        await logHistoryEntry({ type: "personnel_requirements_config", label: changes.join(" · ") });
-      }
-      document.getElementById("vn-personnel-req-status").innerHTML =
-        '<span class="text-success">Gespeichert.</span>';
-    });
-
-    document.getElementById("vn-btn-reset-personnel-req").addEventListener("click", async () => {
-      const confirmed = confirm("Eigene Einstellung löschen und auf 0 (nichts gefordert) zurücksetzen?");
-      if (!confirmed) return;
-      const hadRequirements = Object.keys(requirements).length > 0;
-      await GM.deleteValue(PERSONNEL_REQUIREMENTS_KEY);
-      if (hadRequirements) {
-        await logHistoryEntry({
-          type: "personnel_requirements_config",
-          label: "Zurückgesetzt auf 0",
-        });
-      }
-      renderPersonnelRequirementsSettingsScreen(goBack);
     });
   }
 
