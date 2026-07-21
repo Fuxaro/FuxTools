@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.40
+// @version     0.9.41
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.40";
+  const SCRIPT_VERSION = "0.9.41";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -6717,12 +6717,37 @@
       ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
       : "Personal noch nie gescannt";
 
+    // Hilfe zur Selbsthilfe, wenn 0 Wachen passen (z.B. Bauplan fuer "Feuerwache (Kleinwache)"
+    // angelegt, aber alle eigenen Feuerwachen sind normale, keine Kleinwachen) - zeigt, als
+    // welchen Gebaeudetyp FuxTools die eigenen Wachen tatsaechlich erkennt, statt nur
+    // ergebnislos "Keine passenden Wachen gefunden" anzuzeigen.
+    const noMatchHint =
+      matchingStations.length === 0
+        ? (() => {
+            const counts = new Map();
+            for (const s of allStations) {
+              const label = s.typeName || "Unbekannter Gebäudetyp";
+              counts.set(label, (counts.get(label) || 0) + 1);
+            }
+            const breakdown = [...counts.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([label, count]) => `${count}x ${escapeHtml(label)}`)
+              .join(", ");
+            return `
+              <p class="text-danger" style="font-size:12px;">
+                Keine Wache mit Gebäudetyp "${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}" gefunden.
+                Deine Wachen laut FuxTools: ${breakdown || "keine gefunden"}.
+              </p>`;
+          })()
+        : "";
+
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
         Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)
         angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,
         Personal über Personal-Check/Schulungen/Fahrzeug-Besatzung nachrüsten.
       </p>
+      ${noMatchHint}
       <div style="max-height:60vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
           <thead id="vn-bp-apply-thead">${theadHtml()}</thead>
