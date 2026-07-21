@@ -71,6 +71,13 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Wachen-Bauplaner, Personal-Check und Schulungen (die zusammenhängen) bleiben für sich unter
   der Sektion "Wachenplanung" (vorher "Wachen & Fahrzeuge", passte nach der Aufteilung nicht
   mehr).
+- **Bugfix Layout**: bei langen Listen (z.B. viele Fahrzeugtypen bei "Fahrzeuge umbenennen")
+  rutschten noch nicht gescrollte Zeilen sichtbar unter die Aktions-Buttons durch. Die Buttons
+  liegen jetzt in einer eigenen, nicht scrollenden Zeile unterhalb der Liste (wie Kopf-/
+  Fusszeile) statt als "sticky" Element innerhalb des Scrollbereichs - betrifft automatisch
+  alle Bildschirme mit Aktions-Buttons.
+- **Wachen umbenennen**: fragt jetzt vorher die Leitstelle(n) ab (wie bei "Fahrzeuge
+  umbenennen"), statt immer alle Wachen im ganzen Account anzuzeigen.
 
 ## Stable (v0.5.1)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.37
+// @version     0.9.38
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.37";
+  const SCRIPT_VERSION = "0.9.38";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1322,16 +1322,21 @@
       #vehicle-naming-modal-body .vn-changelog li {
         margin-bottom: 6px;
       }
-      /* Haelt Aktions-/Zurueck-Buttons am unteren Rand des Modal-Scrollbereichs fest,
-         statt dass man bei langen Screens erst dorthin scrollen muss. */
-      #vehicle-naming-modal-body .vn-sticky-footer {
-        position: sticky;
-        bottom: 0;
-        z-index: 2;
+      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-
+         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter
+         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange
+         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */
+      .vn-sticky-footer {
         margin-top: 10px;
         padding: 10px 0 2px;
         background: var(--vn-modal-bg, #333);
         border-top: 1px solid rgba(255, 255, 255, 0.15);
+      }
+      #vehicle-naming-modal-actions {
+        flex-shrink: 0;
+      }
+      #vehicle-naming-modal-actions:empty {
+        display: none;
       }
       /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei
          langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-
@@ -1403,6 +1408,36 @@
     // scrollt nur dieser Bereich, nicht das ganze Fenster/Modal.
     modalBody.innerHTML = `<p><em>Lade Wachen &amp; Fahrzeuge ...</em></p>`;
 
+    const modalActions = document.createElement("div");
+    modalActions.id = "vehicle-naming-modal-actions";
+
+    // Jede render*Screen()-Funktion schreibt ihre Aktions-Buttons als ".vn-sticky-footer"
+    // einfach MIT in modalBody.innerHTML (unveraendert, keine Anpassung an jedem der 30+
+    // Aufrufe noetig). Frueher hielt CSS position:sticky diesen Block am unteren Rand des
+    // SCROLLENDEN Bereichs fest - bei langen Listen (z.B. viele Fahrzeugtypen bei "Fahrzeuge
+    // umbenennen") rutschten aber noch nicht gescrollte Zeilen sichtbar darunter durch,
+    // weil sie im DOM VOR dem Footer stehen und der Scrollbereich weiterlaeuft. Hier wird
+    // der Footer deshalb bei JEDER Vollersetzung von modalBody automatisch in eine EIGENE,
+    // nicht scrollende Zeile (Sibling von modalBody, wie Kopf-/Fusszeile) verschoben - dort
+    // kann nichts mehr dahinter durchscrollen. Ein gezielter Override von .innerHTML NUR auf
+    // diesem einen Element (nicht am Element.prototype!) reicht dafuer aus und faengt auch
+    // Screens ohne eigene Anpassung automatisch mit ab; Teil-Updates einzelner Kind-Elemente
+    // (z.B. nur die Problem-Liste) loesen das bewusst NICHT aus, weil sie nicht ueber
+    // modalBody.innerHTML laufen.
+    const nativeBodyInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+    Object.defineProperty(modalBody, "innerHTML", {
+      configurable: true,
+      get() {
+        return nativeBodyInnerHTML.get.call(this);
+      },
+      set(html) {
+        nativeBodyInnerHTML.set.call(this, html);
+        modalActions.innerHTML = "";
+        const footer = this.querySelector(".vn-sticky-footer");
+        if (footer) modalActions.appendChild(footer);
+      },
+    });
+
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
     modalFooter.style.cssText = "display:flex; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
@@ -1413,6 +1448,7 @@
     modalContent.className = "modal-content";
     modalContent.appendChild(modalHeader);
     modalContent.appendChild(modalBody);
+    modalContent.appendChild(modalActions);
     modalContent.appendChild(modalFooter);
 
     const modalDialog = document.createElement("div");
@@ -1435,11 +1471,13 @@
     modal.style.zIndex = "5000";
 
     document.body.appendChild(modal);
-    // Sticky-Footer (siehe .vn-sticky-footer) braucht einen deckenden Hintergrund, damit
-    // beim Scrollen nichts durchscheint - liest dafuer die TATSAECHLICHE Hintergrundfarbe
-    // des Modals aus (Seiten-Theme, kein von uns geratener Farbwert), statt einen festen
-    // Hex-Wert zu hinterlegen, der bei einem anderen Theme/Subdomain nicht mehr passt.
-    modalBody.style.setProperty("--vn-modal-bg", getComputedStyle(modalContent).backgroundColor);
+    // Aktionsleiste (siehe .vn-sticky-footer) braucht einen deckenden Hintergrund - liest
+    // dafuer die TATSAECHLICHE Hintergrundfarbe des Modals aus (Seiten-Theme, kein von uns
+    // geratener Farbwert), statt einen festen Hex-Wert zu hinterlegen, der bei einem anderen
+    // Theme/Subdomain nicht mehr passt. Auf modalContent gesetzt (nicht modalBody), weil die
+    // Aktionsleiste jetzt in #vehicle-naming-modal-actions liegt - einem Sibling von
+    // modalBody, das die Custom Property sonst nicht erben wuerde.
+    modalContent.style.setProperty("--vn-modal-bg", getComputedStyle(modalContent).backgroundColor);
 
     // show.bs.modal feuert SOFORT beim Oeffnen, noch bevor die Fade-in-Animation
     // startet - so wird das Hauptmenue gesetzt, bevor ueberhaupt etwas sichtbar ist.
@@ -1578,7 +1616,7 @@
       currentMode = "reset";
       renderLeitstelleSelection();
     });
-    document.getElementById("vn-menu-stations").addEventListener("click", renderStationRenameScreen);
+    document.getElementById("vn-menu-stations").addEventListener("click", renderStationRenameLeitstelleSelection);
     document.getElementById("vn-menu-leitstellen").addEventListener("click", renderLeitstelleRenameScreen);
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
     document.getElementById("vn-menu-personnel-check").addEventListener("click", renderPersonalCheckScreen);
@@ -2874,6 +2912,7 @@
   // Fahrzeug-Screens, da hier auch Wachen ohne Fahrzeuge auftauchen sollen.
   async function loadAllBuildings() {
     const buildings = await fetchJSON("/api/buildings");
+    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
 
     const leitstelleIds = new Set();
     for (const b of buildings) {
@@ -2887,10 +2926,83 @@
 
     const stations = buildings
       .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
-      .map(b => ({ id: String(b.id), name: b.caption || `Wache ${b.id}`, category: categoryForBuilding(b) }))
+      .map(b => {
+        const leitstelleId = b.leitstelle_building_id != null ? String(b.leitstelle_building_id) : null;
+        const leitstelleBuilding = leitstelleId ? buildingsById.get(leitstelleId) : null;
+        return {
+          id: String(b.id),
+          name: b.caption || `Wache ${b.id}`,
+          category: categoryForBuilding(b),
+          leitstelleId: leitstelleId || "none",
+          leitstelleName: leitstelleId ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return { leitstellen, stations };
+  }
+
+  //////////////////////////////////////////////////
+  // Wachen umbenennen - Schritt 0: Leitstelle(n) auswaehlen (analog zu "Fahrzeuge
+  // umbenennen" - dieselbe Filterung, damit man sich bei vielen Leitstellen auf einen Teil
+  // beschraenken kann, statt immer ALLE Wachen im Account angezeigt zu bekommen).
+  //////////////////////////////////////////////////
+
+  async function renderStationRenameLeitstelleSelection() {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Wachen umbenennen › Leitstelle wählen");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `<p><em>Lade Leitstellen &amp; Wachen ...</em></p>`;
+
+    let stations;
+    try {
+      ({ stations } = await loadAllBuildings());
+    } catch (e) {
+      body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
+      return;
+    }
+
+    const byLeitstelle = new Map();
+    for (const s of stations) {
+      if (!byLeitstelle.has(s.leitstelleId)) byLeitstelle.set(s.leitstelleId, { name: s.leitstelleName, stations: [] });
+      byLeitstelle.get(s.leitstelleId).stations.push(s);
+    }
+
+    const rows = [...byLeitstelle.entries()]
+      .sort((a, b) => a[1].name.localeCompare(b[1].name))
+      .map(([id, info]) => `
+        <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">
+          <label>
+            <input type="checkbox" class="vn-leitstelle-check" value="${id}">
+            ${escapeHtml(info.name)} <span class="text-muted">(${info.stations.length} Wachen)</span>
+          </label>
+        </div>`)
+      .join("");
+
+    body.innerHTML = `
+      <p>Wähle die Leitstelle(n) aus:</p>
+      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
+        ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
+      </div>
+      <div class="vn-sticky-footer">
+        <button type="button" id="vn-btn-back" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">
+          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
+        </button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-next-leitstelle").addEventListener("click", () => {
+      const ids = [...body.querySelectorAll(".vn-leitstelle-check:checked")].map(el => el.value);
+      if (!ids.length) {
+        alert("Bitte mindestens eine Leitstelle auswählen.");
+        return;
+      }
+      renderStationRenameScreen(ids);
+    });
   }
 
   // Letzter Bestaetigungsschritt vor dem Umbenennen von Wachen/Leitstellen - zeigt
@@ -2916,7 +3028,7 @@
     });
   }
 
-  async function renderStationRenameScreen() {
+  async function renderStationRenameScreen(selectedLeitstelleIds) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2928,6 +3040,9 @@
     } catch (e) {
       body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
       return;
+    }
+    if (selectedLeitstelleIds) {
+      stations = stations.filter(s => selectedLeitstelleIds.includes(s.leitstelleId));
     }
 
     const byCategory = new Map();
@@ -2976,7 +3091,7 @@
       </div>
     `;
 
-    document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-back").addEventListener("click", renderStationRenameLeitstelleSelection);
     document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
       const plan = [];
       body.querySelectorAll(".vn-building-row").forEach(row => {
@@ -2993,7 +3108,7 @@
         alert("Kein neuer Name eingetragen.");
         return;
       }
-      renderBuildingRenameConfirm(plan, "umbenannt", renderStationRenameScreen, "Wache(n)");
+      renderBuildingRenameConfirm(plan, "umbenannt", () => renderStationRenameScreen(selectedLeitstelleIds), "Wache(n)");
     });
   }
 
