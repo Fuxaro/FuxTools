@@ -1,0 +1,5282 @@
+{
+  "0": {
+    "caption": "LF 20",
+    "coins": 25,
+    "color": "#cc0000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 2000,
+    "wtank": 2000
+  },
+  "1": {
+    "caption": "LF 10",
+    "coins": 25,
+    "color": "#bb0000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 1200,
+    "wtank": 1200
+  },
+  "10": {
+    "caption": "GW-Öl",
+    "coins": 25,
+    "color": "#8b1818",
+    "credits": 12000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Kann ab 6 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "100": {
+    "caption": "MLW 4",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 7,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wasserschaden/Pumpen": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 7,
+      "min": 1,
+      "training": {
+        "THW": {
+          "water_damage_pump": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "101": {
+    "caption": "Anh SwPu",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "pumpCapacity": 15000,
+    "pumpType": "sewage",
+    "pumpcap": 15000,
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wasserschaden/Pumpen": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "water_damage_pump": {
+            "min": 1
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      100,
+      123
+    ],
+    "waterBonus": 25
+  },
+  "102": {
+    "caption": "Anh 7",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "pumpCapacity": 12400,
+    "pumpType": "sewage",
+    "pumpcap": 12400,
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wasserschaden/Pumpen": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "water_damage_pump": {
+            "min": 1
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      100,
+      123
+    ],
+    "waterBonus": 25
+  },
+  "103": {
+    "caption": "FuStW (DGL)",
+    "coins": 25,
+    "color": "#339900",
+    "credits": 25000,
+    "icon": "taxi",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      19
+    ],
+    "schooling": {
+      "Polizei": {
+        "Dienstgruppenleitung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Pro aktivierten Dienstgruppenleitung-Ausbau kann ein Funkstreifenwagen (Dienstgruppenleitung) gekauft werden.",
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "police_service_group_leader": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "104": {
+    "caption": "GW-L1",
+    "coins": 45,
+    "color": "#330000",
+    "credits": 8000,
+    "equipmentCapacity": 20,
+    "icon": "truck-ramp-box",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    }
+  },
+  "105": {
+    "caption": "GW-L2",
+    "coins": 25,
+    "color": "#330000",
+    "credits": 12000,
+    "equipmentCapacity": 30,
+    "icon": "truck-ramp-box",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    }
+  },
+  "106": {
+    "caption": "MTF-L",
+    "coins": 10,
+    "color": "#330000",
+    "credits": 4000,
+    "equipmentCapacity": 15,
+    "icon": "truck-ramp-box",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    }
+  },
+  "107": {
+    "caption": "LF-L",
+    "coins": 15,
+    "color": "#330000",
+    "credits": 9000,
+    "equipmentCapacity": 15,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-ramp-box",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 2000,
+    "wtank": 2000
+  },
+  "108": {
+    "caption": "AB-L",
+    "coins": 12,
+    "color": "#330000",
+    "credits": 7000,
+    "equipmentCapacity": 30,
+    "icon": "truck-ramp-box",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "109": {
+    "caption": "MzGW SB",
+    "coins": 25,
+    "color": "#001bcc",
+    "credits": 15000,
+    "icon": "truck-pickup",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Schwere Bergung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 1,
+      "training": {
+        "THW": {
+          "heavy_rescue": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "11": {
+    "caption": "GW-L2-Wasser",
+    "coins": 25,
+    "color": "#e61919",
+    "credits": 17300,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Ein Schlauchwagen wird ab 7 Feuerwachen benötigt. Er gibt 25% Bonus auf die Wassermenge, die durch (H/T)LF vor Ort ist.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterBonus": 25
+  },
+  "110": {
+    "caption": "NEA50",
+    "coins": 20,
+    "color": "#36759e",
+    "credits": 10000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (MzGW (FGr N))",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      41
+    ]
+  },
+  "111": {
+    "caption": "NEA50",
+    "coins": 20,
+    "color": "#f60303",
+    "credits": 10000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (HLF 10, RW, GW-Gefahrgut, Dekon-P, WLF, GW-L1, GW-L2, LF 8/6, LF 10/6, LF 16-TS, SW 2000-Tr, SW Kats, TLF 3000, TLF 16/24-Tr, TLF 16/25)",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      90,
+      4,
+      27,
+      53,
+      104,
+      105,
+      6,
+      8,
+      9,
+      15,
+      16,
+      18,
+      21,
+      22
+    ]
+  },
+  "112": {
+    "caption": "NEA200",
+    "coins": 20,
+    "color": "#36759e",
+    "credits": 50000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Elektroversorgung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (LKW 7 Lbw (FGr E), LKW 7 Lbw)",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "thw_energy_supply": {
+            "min": 1
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      122
+    ]
+  },
+  "113": {
+    "caption": "NEA200",
+    "coins": 20,
+    "color": "#fd090f",
+    "credits": 50000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "NEA200 Fortbildung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (HLF 10, RW, GW-Gefahrgut, Dekon-P, WLF, GW-L1, GW-L2, LF 8/6, LF 10/6, LF 16-TS, SW 2000-Tr, SW Kats, TLF 3000, TLF 16/24-Tr, TLF 16/25)",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "energy_supply": {
+            "min": 1
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      90,
+      4,
+      27,
+      53,
+      104,
+      105,
+      6,
+      8,
+      9,
+      15,
+      16,
+      18,
+      21,
+      22
+    ]
+  },
+  "114": {
+    "caption": "GW-Lüfter",
+    "coins": 25,
+    "color": "#b40f0f",
+    "credits": 25000,
+    "icon": "fan",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Mobile Großventilatoren führen Rauch und Hitze aus großen Gebäuden ab.",
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "115": {
+    "caption": "Anh Lüfter",
+    "coins": 15,
+    "color": "#b62e2e",
+    "credits": 10000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (HLF 10, RW, GW-Gefahrgut, Dekon-P, WLF, GW-L1, GW-L2, LF 8/6, LF 10/6, LF 16-TS, SW 2000-Tr, SW Kats, TLF 3000, TLF 16/24-Tr, TLF 16/25, GW-Werkfeuerwehr, GW-A)",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      90,
+      4,
+      27,
+      53,
+      104,
+      105,
+      6,
+      8,
+      9,
+      15,
+      16,
+      18,
+      21,
+      22,
+      83,
+      5
+    ]
+  },
+  "116": {
+    "caption": "AB-Lüfter",
+    "coins": 12,
+    "color": "#9d2424",
+    "credits": 7000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "117": {
+    "caption": "AB-Tank",
+    "coins": 12,
+    "color": "#9d2424",
+    "credits": 4000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ],
+    "waterTank": 10000,
+    "wtank": 10000
+  },
+  "118": {
+    "caption": "Kleintankwagen",
+    "coins": 15,
+    "color": "#dd2222",
+    "credits": 10000,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 10000,
+    "wtank": 10000
+  },
+  "119": {
+    "caption": "AB-Lösch",
+    "coins": 12,
+    "color": "#9d2424",
+    "credits": 8000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ],
+    "waterTank": 8000,
+    "wtank": 8000
+  },
+  "12": {
+    "caption": "GW-Messtechnik",
+    "coins": 25,
+    "color": "#791515",
+    "credits": 18300,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Messtechnik Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Kann ab 10 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "gw_messtechnik": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "120": {
+    "caption": "Tankwagen",
+    "coins": 15,
+    "color": "#dd2222",
+    "credits": 15000,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 20000,
+    "wtank": 20000
+  },
+  "121": {
+    "caption": "GTLF",
+    "coins": 15,
+    "color": "#dd2222",
+    "credits": 10000,
+    "foamTank": 1500,
+    "ftank": 1500,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 10000,
+    "wtank": 10000
+  },
+  "122": {
+    "caption": "LKW 7 Lbw (FGr E)",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "123": {
+    "caption": "LKW 7 Lbw (FGr WP)",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "124": {
+    "caption": "MTW-OV",
+    "coins": 13,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 7,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 7,
+      "min": 1
+    }
+  },
+  "125": {
+    "caption": "MTW-Tr UL",
+    "coins": 15,
+    "color": "#36759e",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 4,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Trupp Unbemannte Luftfahrtsysteme": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 4,
+      "training": {
+        "THW": {
+          "thw_drone": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "126": {
+    "caption": "MTF Drohne",
+    "coins": 15,
+    "color": "#fd090f",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 5,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Drohnen-Schulung": {
+          "min": 4
+        }
+      }
+    },
+    "staff": {
+      "max": 5,
+      "min": 4,
+      "training": {
+        "Feuerwehr": {
+          "fire_drone": {
+            "min": 4
+          }
+        }
+      }
+    }
+  },
+  "127": {
+    "caption": "GW UAS",
+    "coins": 15,
+    "color": "#bb5811",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 4,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Drohnenoperator": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 4,
+      "training": {
+        "Rettungsdienst": {
+          "seg_drone": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "128": {
+    "caption": "ELW Drohne",
+    "coins": 25,
+    "color": "#fd090f",
+    "credits": 20000,
+    "icon": "truck",
+    "maxPersonnel": 5,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Drohnen-Schulung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Der ELW Drohne ist ein Einsatzleitwagen 1 und eine Drohneneinheit für die Ortung und Erkundung aus der Luft.",
+    "staff": {
+      "max": 5,
+      "min": 4,
+      "training": {
+        "Feuerwehr": {
+          "fire_drone": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "129": {
+    "caption": "ELW2 Drohne",
+    "coins": 25,
+    "color": "#fd090f",
+    "credits": 35000,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Drohnen-Schulung": {
+          "all": true
+        },
+        "ELW 2 Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Der ELW2 Drohne kombiniert einen Einsatzleitwagen 2 mit einer Drohneneinheit für die Ortung und Erkundung aus der Luft.",
+    "staff": {
+      "max": 6,
+      "min": 4,
+      "training": {
+        "Feuerwehr": {
+          "elw2": {
+            "all": true
+          },
+          "fire_drone": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "13": {
+    "caption": "SW 1000",
+    "coins": 25,
+    "color": "#dc1818",
+    "credits": 17300,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Ein Schlauchwagen wird ab 7 Feuerwachen benötigt. Er gibt 25% Bonus auf die Wassermenge, die durch (H/T)LF vor Ort ist.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterBonus": 25
+  },
+  "130": {
+    "caption": "GW-Bt",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 35000,
+    "icon": "car-side",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Betreuungsdienst": {
+          "min": 1
+        },
+        "Verpflegungshelfer": {
+          "min": 2
+        }
+      }
+    },
+    "special": "Der GW-Bt transportiert Betreuungs- und Verpflegungsausstattung und kann als Feldküche zur Versorgung von Einsatzkräften und Betroffenen",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "Rettungsdienst": {
+          "care_service": {
+            "min": 1
+          },
+          "care_service_equipment": {
+            "min": 2
+          }
+        }
+      }
+    }
+  },
+  "131": {
+    "caption": "Bt-Kombi",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 25000,
+    "icon": "car-side",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Betreuungsdienst": {
+          "all": true
+        }
+      }
+    },
+    "special": "Der Bt-Kombi transportiert Betreuungsdienstler zur Versorgung von Einsatzkräften und Betroffenen zu Einsätzen.",
+    "staff": {
+      "max": 9,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "care_service": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "132": {
+    "caption": "FKH",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 20000,
+    "icon": "car-side",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": null,
+    "special": "Der FKH kann als Feldküche zur Versorgung von Einsatzkräften und Betroffenen eingesetzt werden und ist Teil der Betreuungs- und Verpflegungsausstattung.",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      133
+    ]
+  },
+  "133": {
+    "caption": "Bt LKW",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 15000,
+    "icon": "car-side",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Betreuungsdienst": {
+          "min": 1
+        },
+        "Verpflegungshelfer": {
+          "min": 2
+        }
+      }
+    },
+    "special": "Der Bt LKW transportiert Betreuungs- und Verpflegungsausstattung ohne Feldküche und muss mit einem FKH kombiniert werden",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "Rettungsdienst": {
+          "care_service": {
+            "min": 1
+          },
+          "care_service_equipment": {
+            "min": 2
+          }
+        }
+      }
+    }
+  },
+  "134": {
+    "caption": "Pferdetransporter klein",
+    "coins": 20,
+    "color": "#438350",
+    "credits": 20000,
+    "icon": "horse",
+    "maxPersonnel": 4,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      11,
+      24
+    ],
+    "schooling": {
+      "Polizei": {
+        "Reiterstaffel": {
+          "min": 2
+        }
+      }
+    },
+    "special": "Transportiert 2 Pferde",
+    "staff": {
+      "max": 4,
+      "min": 2,
+      "training": {
+        "Polizei": {
+          "police_horse": {
+            "min": 2
+          }
+        }
+      }
+    }
+  },
+  "135": {
+    "caption": "Pferdetransporter groß",
+    "coins": 25,
+    "color": "#438350",
+    "credits": 120000,
+    "icon": "horse",
+    "maxPersonnel": 2,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      11,
+      24
+    ],
+    "schooling": {
+      "Polizei": {
+        "Reiterstaffel": {
+          "min": 0
+        }
+      }
+    },
+    "special": "Transportiert 4 Pferde",
+    "staff": {
+      "max": 2,
+      "min": 2,
+      "training": {
+        "Polizei": {
+          "police_horse": {
+            "min": 0
+          }
+        }
+      },
+      "trainingAtScene": 4
+    }
+  },
+  "136": {
+    "caption": "Anh Pferdetransport",
+    "coins": 15,
+    "color": "#438350",
+    "credits": 15000,
+    "icon": "horse",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      11,
+      24
+    ],
+    "schooling": {
+      "Polizei": {
+        "Reiterstaffel": {
+          "min": 0
+        }
+      }
+    },
+    "special": "Transportiert 2 Pferde",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Polizei": {
+          "police_horse": {
+            "min": 0
+          }
+        }
+      },
+      "trainingAtScene": 2
+    },
+    "tractiveVehicles": [
+      134,
+      135,
+      137
+    ]
+  },
+  "137": {
+    "caption": "Zugfahrzeug Pferdetransport",
+    "coins": 10,
+    "color": "#438350",
+    "credits": 5000,
+    "icon": "horse",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      11,
+      24
+    ],
+    "schooling": null,
+    "special": "Kann den Anh Pferdetransport ziehen.",
+    "staff": {
+      "max": 6,
+      "min": 1
+    }
+  },
+  "138": {
+    "caption": "GW-Verpflegung",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 20000,
+    "icon": "car-side",
+    "maxPersonnel": 6,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Feuerwehr-Verpflegungseinheit": {
+          "min": 1
+        },
+        "Verpflegungshelfer": {
+          "min": 2
+        }
+      }
+    },
+    "special": "",
+    "staff": {
+      "max": 6,
+      "min": 3,
+      "training": {
+        "Feuerwehr": {
+          "care_service_equipment": {
+            "min": 2
+          },
+          "fire_care_service": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "139": {
+    "caption": "GW-Küche",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 35000,
+    "icon": "car-side",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Feuerwehr-Verpflegungseinheit": {
+          "min": 1
+        },
+        "Verpflegungshelfer": {
+          "min": 2
+        }
+      }
+    },
+    "special": "",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "Feuerwehr": {
+          "care_service_equipment": {
+            "min": 2
+          },
+          "fire_care_service": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "14": {
+    "caption": "SW 2000",
+    "coins": 25,
+    "color": "#ca1616",
+    "credits": 17300,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Ein Schlauchwagen wird ab 7 Feuerwachen benötigt. Er gibt 25% Bonus auf die Wassermenge, die durch (H/T)LF vor Ort ist.",
+    "staff": {
+      "max": 6,
+      "min": 1
+    },
+    "waterBonus": 25
+  },
+  "140": {
+    "caption": "MTW-Verpflegung",
+    "coins": 13,
+    "color": "#a34100",
+    "credits": 15000,
+    "icon": "car-side",
+    "maxPersonnel": 6,
+    "minPersonnel": 6,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Feuerwehr-Verpflegungseinheit": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 6,
+      "min": 6,
+      "training": {
+        "Feuerwehr": {
+          "fire_care_service": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "141": {
+    "caption": "FKH",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 10000,
+    "icon": "car-side",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Der FKH kann zur Versorgung von Einsatzkräften eingesetzt werden und ist Teil des Verpflegungsdienstes.",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      138
+    ]
+  },
+  "142": {
+    "caption": "AB-Küche",
+    "coins": 12,
+    "color": "#9d2424",
+    "credits": 7000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "143": {
+    "caption": "Anh Schlauch",
+    "coins": 10,
+    "color": "#b62e2e",
+    "credits": 5000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (HLF 10, RW, GW-Gefahrgut, Dekon-P, GW-L1, GW-L2, LF 10, LF 8/6, LF 10/6, LF 16-TS, SW 2000-Tr, SW Kats, TLF 3000, TLF 16/24-Tr, TLF 16/25, MTW)",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      90,
+      4,
+      27,
+      53,
+      104,
+      105,
+      6,
+      8,
+      9,
+      15,
+      16,
+      18,
+      21,
+      22,
+      36
+    ],
+    "waterBonus": 10
+  },
+  "144": {
+    "caption": "FüKW (THW)",
+    "coins": 15,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 4,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachzug Führung und Kommunikation": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_command": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "145": {
+    "caption": "FüKomKW",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 25000,
+    "icon": "truck",
+    "maxPersonnel": 7,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachzug Führung und Kommunikation": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 7,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_command": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "146": {
+    "caption": "Anh FüLa",
+    "coins": 10,
+    "color": "#36759e",
+    "credits": 10000,
+    "icon": "truck",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      145
+    ]
+  },
+  "147": {
+    "caption": "FmKW",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 20000,
+    "icon": "truck",
+    "maxPersonnel": 7,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachzug Führung und Kommunikation": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 7,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_command": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "148": {
+    "caption": "MTW-FGr K",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 20000,
+    "icon": "truck",
+    "maxPersonnel": 4,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachzug Führung und Kommunikation": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 4,
+      "training": {
+        "THW": {
+          "thw_command": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "149": {
+    "caption": "GW-Bergrettung (NEF)",
+    "coins": 25,
+    "color": "#bc7f52",
+    "credits": 25000,
+    "equipmentCapacity": 10,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 6,
+      "min": 3,
+      "training": {
+        "Rettungsdienst": {
+          "notarzt": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "15": {
+    "caption": "SW 2000-Tr",
+    "coins": 25,
+    "color": "#b81414",
+    "credits": 17300,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Ein Schlauchwagen wird ab 7 Feuerwachen benötigt. Er gibt 25% Bonus auf die Wassermenge, die durch (H/T)LF vor Ort ist.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterBonus": 25
+  },
+  "150": {
+    "caption": "GW-Bergrettung",
+    "coins": 15,
+    "color": "#bc7f52",
+    "credits": 15000,
+    "equipmentCapacity": 10,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 3
+    }
+  },
+  "151": {
+    "caption": "ELW Bergrettung",
+    "coins": 25,
+    "color": "#bc7f52",
+    "credits": 25000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Einsatzleiter Bergrettung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "mountain_command": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "152": {
+    "caption": "ATV",
+    "coins": 15,
+    "color": "#bc7f52",
+    "credits": 5000,
+    "icon": "truck",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 1,
+      "min": 1
+    }
+  },
+  "153": {
+    "caption": "Hundestaffel (Bergrettung)",
+    "coins": 25,
+    "color": "#bc7f52",
+    "credits": 25000,
+    "icon": "truck",
+    "maxPersonnel": 5,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Rettungshundeführer": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 5,
+      "min": 4,
+      "training": {
+        "Rettungsdienst": {
+          "seg_rescue_dogs": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "154": {
+    "caption": "Schneefahrzeug",
+    "coins": 15,
+    "color": "#bc7f52",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 1,
+      "min": 1
+    }
+  },
+  "155": {
+    "caption": "Anh Höhenrettung (Bergrettung)",
+    "coins": 15,
+    "color": "#bc7f52",
+    "credits": 10000,
+    "icon": "truck",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Höhenretter": {
+          "min": 4
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Rettungsdienst": {
+          "mountain_height_rescue": {
+            "min": 4
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      149,
+      150
+    ]
+  },
+  "156": {
+    "caption": "Polizeihubschrauber mit verbauter Winde",
+    "coins": 30,
+    "color": "#bc7f52",
+    "credits": 400000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      13
+    ],
+    "schooling": {
+      "Polizei": {
+        "Polizeihubschrauber": {
+          "min": 1
+        },
+        "Windenoperator": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "police_helicopter_lift": {
+            "min": 1
+          },
+          "polizeihubschrauber": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "157": {
+    "caption": "RTH Winde",
+    "coins": 30,
+    "color": "#bc7f52",
+    "credits": 400000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      5
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        },
+        "Windenoperator": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "notarzt": {
+            "min": 1
+          },
+          "rescue_helicopter_lift": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "158": {
+    "caption": "GW-Höhenrettung (Bergrettung)",
+    "coins": 25,
+    "color": "#bc7f52",
+    "credits": 25000,
+    "icon": "truck",
+    "maxPersonnel": 4,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      25
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Höhenretter": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 4,
+      "training": {
+        "Rettungsdienst": {
+          "mountain_height_rescue": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "159": {
+    "caption": "Seenotrettungskreuzer",
+    "coins": 25,
+    "color": "#cf871a",
+    "credits": 75000,
+    "icon": "ship",
+    "maxPersonnel": 9,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      26
+    ],
+    "schooling": {
+      "Wasserrettung": {
+        "Seenotretter": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 4,
+      "training": {
+        "Wasserrettung": {
+          "coastal_rescue": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "16": {
+    "caption": "SW Kats",
+    "coins": 25,
+    "color": "#a51212",
+    "credits": 17300,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Ein Schlauchwagen wird ab 7 Feuerwachen benötigt. Er gibt 25% Bonus auf die Wassermenge, die durch (H/T)LF vor Ort ist.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterBonus": 25
+  },
+  "160": {
+    "caption": "Seenotrettungsboot",
+    "coins": 10,
+    "color": "#cf871a",
+    "credits": 50000,
+    "icon": "ship",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      26
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "161": {
+    "caption": "Hubschrauber (Seenotrettung)",
+    "coins": 30,
+    "color": "#cf871a",
+    "credits": 400000,
+    "icon": "helicopter",
+    "maxPersonnel": 4,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      28
+    ],
+    "schooling": {
+      "Wasserrettung": {
+        "Hubschrauberpilot (Seenotrettung)": {
+          "min": 1
+        },
+        "Wasserrettungsausbildung für Notfallsanitäter": {
+          "min": 1
+        },
+        "Windenoperator": {
+          "min": 1
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 3,
+      "training": {
+        "Wasserrettung": {
+          "coastal_helicopter": {
+            "min": 1
+          },
+          "coastal_helicopter_lift": {
+            "min": 1
+          },
+          "emergency_paramedic_water_rescue": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "162": {
+    "caption": "RW-Schiene",
+    "coins": 25,
+    "color": "#992b22",
+    "credits": 18500,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Bahnrettung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "railway_fire": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "163": {
+    "caption": "HLF Schiene",
+    "coins": 25,
+    "color": "#992b22",
+    "credits": 30000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2400,
+    "pumpType": "fire",
+    "pumpcap": 2400,
+    "schooling": {
+      "Feuerwehr": {
+        "Bahnrettung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "railway_fire": {
+            "all": true
+          }
+        }
+      }
+    },
+    "waterTank": 1460,
+    "wtank": 1460
+  },
+  "164": {
+    "caption": "AB-Schiene",
+    "coins": 25,
+    "color": "#992b22",
+    "credits": 25000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "165": {
+    "caption": "LauKw",
+    "coins": 25,
+    "color": "#1a7d2a",
+    "credits": 32000,
+    "icon": "bus",
+    "maxPersonnel": 5,
+    "minPersonnel": 5,
+    "possibleBuildings": [
+      11
+    ],
+    "schooling": {
+      "Polizei": {
+        "Lautsprecheroperator": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 5,
+      "min": 5,
+      "training": {
+        "Polizei": {
+          "police_speaker_operator": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "166": {
+    "caption": "PTLF 4000",
+    "coins": 15,
+    "color": "#992b22",
+    "credits": 10000,
+    "foamTank": 1000,
+    "ftank": 1000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    },
+    "waterTank": 5000,
+    "wtank": 5000
+  },
+  "167": {
+    "caption": "SLF",
+    "coins": 15,
+    "color": "#992b22",
+    "credits": 10000,
+    "foamTank": 5000,
+    "ftank": 5000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    },
+    "waterTank": 3500,
+    "wtank": 3500
+  },
+  "168": {
+    "caption": "Anh Sonderlöschmittel",
+    "coins": 10,
+    "color": "#b62e2e",
+    "credits": 5000,
+    "foamTank": 250,
+    "ftank": 250,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (HLF 10, RW, GW-Gefahrgut, Dekon-P, GW-L1, GW-L2, LF 10, LF 8/6, LF 10/6, LF 16-TS, SW 2000-Tr, SW Kats, TLF 3000, TLF 16/24-Tr, TLF 16/25, MTW)",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      90,
+      4,
+      27,
+      53,
+      104,
+      105,
+      6,
+      8,
+      9,
+      15,
+      16,
+      18,
+      21,
+      22,
+      36
+    ]
+  },
+  "169": {
+    "caption": "AB-Sonderlöschmittel",
+    "coins": 12,
+    "color": "#992b22",
+    "credits": 6000,
+    "foamTank": 10000,
+    "ftank": 10000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "17": {
+    "caption": "TLF 2000",
+    "coins": 25,
+    "color": "#cc2222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 2000,
+    "wtank": 2000
+  },
+  "170": {
+    "caption": "AB-Wasser/Schaum",
+    "coins": 12,
+    "color": "#992b22",
+    "credits": 6000,
+    "foamTank": 5000,
+    "ftank": 5000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ],
+    "waterTank": 3000,
+    "wtank": 3000
+  },
+  "171": {
+    "caption": "GW TeSi",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 35000,
+    "icon": "car-side",
+    "maxPersonnel": 5,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Technik und Sicherheit": {
+          "all": true
+        }
+      }
+    },
+    "special": "Der Gerätewagen Technik und Sicherheit ist bei Großeinsätzen für die technische und logistische Unterstützung anderer Einsatzgruppen zuständig.",
+    "staff": {
+      "max": 5,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "disaster_response_technology": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "172": {
+    "caption": "LKW Technik (Notstrom)",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 30000,
+    "icon": "car-side",
+    "maxPersonnel": 6,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Technik und Sicherheit": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Der LKW Technik (Notstrom) unterstützt andere SEG-Einheiten mit Strom und Licht. Dementsprechend ist er ein wichtiger Bestandteil der technischen Infrastruktur bei SEG-Einsätzen.",
+    "staff": {
+      "max": 6,
+      "min": 2,
+      "training": {
+        "Rettungsdienst": {
+          "disaster_response_technology": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "173": {
+    "caption": "MTW TeSi",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 20000,
+    "icon": "car-side",
+    "maxPersonnel": 7,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Technik und Sicherheit": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Der MTW Technik und Sicherheit transportiert Einsatzkräfte der Gruppe Technik und Sicherheit.",
+    "staff": {
+      "max": 7,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "disaster_response_technology": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "174": {
+    "caption": "Anh TeSi",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 10000,
+    "icon": "car-side",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Technik und Sicherheit": {
+          "min": 2
+        }
+      }
+    },
+    "special": "Der Anhänger Technik und Sicherheit wird bei SEG-Einsätzen für den Transport von technischer Ausrüstung und den Infrastrukturaufbau genutzt. Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (GW TeSi)",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Rettungsdienst": {
+          "disaster_response_technology": {
+            "min": 2
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      171,
+      173
+    ]
+  },
+  "175": {
+    "caption": "NEA50",
+    "coins": 15,
+    "color": "#a34100",
+    "credits": 10000,
+    "icon": "car-side",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Technik und Sicherheit": {
+          "min": 2
+        }
+      }
+    },
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (LKW Technik (Notstrom)). Ist gleichwertig mit den anderen beiden NEA50's",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Rettungsdienst": {
+          "disaster_response_technology": {
+            "min": 2
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      172
+    ]
+  },
+  "176": {
+    "caption": "LKW 7 Lbw (FGr Log-V)",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Logistik-Verpflegung": {
+          "min": 1
+        },
+        "Verpflegungshelfer": {
+          "min": 2
+        }
+      }
+    },
+    "special": "",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "THW": {
+          "care_service_equipment": {
+            "min": 2
+          },
+          "thw_care_service": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "177": {
+    "caption": "MTW-FGr Log-V",
+    "coins": 12,
+    "color": "#36759e",
+    "credits": 2500,
+    "icon": "car-side",
+    "maxPersonnel": 5,
+    "minPersonnel": 5,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Logistik-Verpflegung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 5,
+      "min": 5,
+      "training": {
+        "THW": {
+          "thw_care_service": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "178": {
+    "caption": "Anh 12 Lbw (FGr Log-V)",
+    "coins": 12,
+    "color": "#36759e",
+    "credits": 5000,
+    "icon": "car-side",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "special": "Der Anh 12 Lbw (FGr Log-V) dient zur Verpflegung von Einsatzkräften und Betroffenen und ist Teil der Betreuungs- und Verpflegungsausstattung. Er hat somit dieselbe Funktion wie der Anh FKH der Feuerwehr.",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      176
+    ]
+  },
+  "179": {
+    "caption": "AB-NEA50",
+    "coins": 12,
+    "color": "#f60303",
+    "credits": 5000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "18": {
+    "caption": "TLF 3000",
+    "coins": 25,
+    "color": "#bb2222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 3000,
+    "wtank": 3000
+  },
+  "180": {
+    "caption": "AB-NEA200",
+    "coins": 12,
+    "color": "#fd090f",
+    "credits": 8000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "NEA200 Fortbildung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "energy_supply": {
+            "min": 1
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "181": {
+    "caption": "MzGW (FGr BrB)",
+    "coins": 25,
+    "color": "#001bcc",
+    "credits": 15000,
+    "icon": "truck-pickup",
+    "maxPersonnel": 9,
+    "minPersonnel": 6,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Brückenbau": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 6,
+      "training": {
+        "THW": {
+          "thw_bridge_construction": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "182": {
+    "caption": "Mobilkran",
+    "coins": 25,
+    "color": "#001bcc",
+    "credits": 30000,
+    "icon": "truck",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Kranführer": {
+          "all": true
+        }
+      }
+    },
+    "special": "Kann durch den FwK ersetzt werden",
+    "staff": {
+      "max": 1,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_bridge_construction_crane": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "183": {
+    "caption": "Anh Plattform (FGr BrB)",
+    "coins": 20,
+    "color": "#001bcc",
+    "credits": 50000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Brückenbau": {
+          "min": 6
+        }
+      }
+    },
+    "special": "Es handelt sich um einen Anhänger, der ein Zugfahrzeug benötigt. (MzGW (FGr BrB))",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "thw_bridge_construction": {
+            "min": 6
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      181
+    ]
+  },
+  "184": {
+    "caption": "FuStW (AP)",
+    "coins": 25,
+    "color": "#005500",
+    "credits": 12500,
+    "icon": "taxi",
+    "maxPersonnel": 2,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      6,
+      19,
+      29
+    ],
+    "schooling": {
+      "Polizei": {
+        "Autobahnpolizei": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 2,
+      "training": {
+        "Polizei": {
+          "highway_police": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "19": {
+    "caption": "TLF 8/8",
+    "coins": 25,
+    "color": "#aa2222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 800,
+    "pumpType": "fire",
+    "pumpcap": 800,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 800,
+    "wtank": 800
+  },
+  "2": {
+    "caption": "DLK 23",
+    "coins": 30,
+    "color": "#d92626",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Kann ab 3 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "20": {
+    "caption": "TLF 8/18",
+    "coins": 25,
+    "color": "#992222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 800,
+    "pumpType": "fire",
+    "pumpcap": 800,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 1800,
+    "wtank": 1800
+  },
+  "21": {
+    "caption": "TLF 16/24-Tr",
+    "coins": 25,
+    "color": "#882222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1600,
+    "pumpType": "fire",
+    "pumpcap": 1600,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 2400,
+    "wtank": 2400
+  },
+  "22": {
+    "caption": "TLF 16/25",
+    "coins": 25,
+    "color": "#772222",
+    "credits": 5000,
+    "foamTank": 750,
+    "ftank": 750,
+    "icon": "truck-moving",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1600,
+    "pumpType": "fire",
+    "pumpcap": 1600,
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    },
+    "waterTank": 2400,
+    "wtank": 2400
+  },
+  "23": {
+    "caption": "TLF 16/45",
+    "coins": 25,
+    "color": "#662222",
+    "credits": 5000,
+    "foamTank": 750,
+    "ftank": 750,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1600,
+    "pumpType": "fire",
+    "pumpcap": 1600,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 4500,
+    "wtank": 4500
+  },
+  "24": {
+    "caption": "TLF 20/40",
+    "coins": 25,
+    "color": "#552222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 4000,
+    "wtank": 4000
+  },
+  "25": {
+    "caption": "TLF 20/40-SL",
+    "coins": 25,
+    "color": "#442222",
+    "credits": 5000,
+    "foamTank": 750,
+    "ftank": 750,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 4000,
+    "wtank": 4000
+  },
+  "26": {
+    "caption": "TLF 16",
+    "coins": 25,
+    "color": "#332222",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1600,
+    "pumpType": "fire",
+    "pumpcap": 1600,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 1800,
+    "wtank": 1800
+  },
+  "27": {
+    "caption": "GW-Gefahrgut",
+    "coins": 25,
+    "color": "#681212",
+    "credits": 19200,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Gefahrgut Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 11 Feuerwachen benötigt.",
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "gw_gefahrgut": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "28": {
+    "caption": "RTW",
+    "coins": 25,
+    "color": "#f59f00",
+    "credits": 5000,
+    "icon": "ambulance",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18,
+      2,
+      12,
+      20,
+      25
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "29": {
+    "caption": "NEF",
+    "coins": 25,
+    "color": "#e09200",
+    "credits": 20000,
+    "icon": "car-side",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18,
+      2,
+      20,
+      25
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Notarzt-Ausbildung": {
+          "all": true
+        }
+      },
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 3 Rettungswachen benötigt.",
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "notarzt": {
+            "all": true
+          }
+        },
+        "Rettungsdienst": {
+          "notarzt": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "3": {
+    "caption": "ELW 1",
+    "coins": 25,
+    "color": "#d02525",
+    "credits": 10000,
+    "icon": "car-side",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Kann ab 6 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "30": {
+    "caption": "HLF 20",
+    "coins": 25,
+    "color": "#440000",
+    "credits": 20000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 1600,
+    "wtank": 1600
+  },
+  "31": {
+    "caption": "RTH",
+    "coins": 30,
+    "color": "#ddaa3c",
+    "credits": 300000,
+    "equipmentCapacity": 10,
+    "icon": "helicopter",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      5
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "notarzt": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "32": {
+    "caption": "FuStW",
+    "coins": 25,
+    "color": "#005500",
+    "credits": 5000,
+    "icon": "taxi",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      19
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "33": {
+    "caption": "GW-Höhenrettung",
+    "coins": 25,
+    "color": "#570f0f",
+    "credits": 19500,
+    "icon": "truck",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Höhenrettung Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 12 Feuerwachen benötigt.",
+    "staff": {
+      "max": 9,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "gw_hoehenrettung": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "34": {
+    "caption": "ELW 2",
+    "coins": 25,
+    "color": "#bf2222",
+    "credits": 25500,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "ELW 2 Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 13 Feuerwachen benötigt.",
+    "staff": {
+      "max": 6,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "elw2": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "35": {
+    "caption": "leBefKw",
+    "coins": 25,
+    "color": "#288f28",
+    "credits": 10000,
+    "icon": "bus",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      11
+    ],
+    "schooling": {
+      "Polizei": {
+        "Zugführer (leBefKw)": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "police_einsatzleiter": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "36": {
+    "caption": "MTW",
+    "coins": 12,
+    "color": "#450c0c",
+    "credits": 2500,
+    "icon": "shuttle-van",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    }
+  },
+  "37": {
+    "caption": "TSF-W",
+    "coins": 25,
+    "color": "#4a0303",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    },
+    "waterTank": 500,
+    "wtank": 500
+  },
+  "38": {
+    "caption": "KTW",
+    "coins": 25,
+    "color": "#ffb61a",
+    "credits": 5000,
+    "icon": "ambulance",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      2,
+      18,
+      20,
+      25
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "39": {
+    "caption": "GKW",
+    "coins": 25,
+    "color": "#00138f",
+    "credits": 13000,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    }
+  },
+  "4": {
+    "caption": "RW",
+    "coins": 25,
+    "color": "#ad1f1f",
+    "credits": 12180,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Kann ab 4 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "40": {
+    "caption": "MTW-TZ",
+    "coins": 12,
+    "color": "#0016a3",
+    "credits": 2500,
+    "icon": "shuttle-van",
+    "maxPersonnel": 4,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Zugtrupp": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_zugtrupp": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "41": {
+    "caption": "MzGW (FGr N)",
+    "coins": 25,
+    "color": "#0018b8",
+    "credits": 15000,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    }
+  },
+  "42": {
+    "caption": "LKW K 9",
+    "coins": 25,
+    "color": "#001bcc",
+    "credits": 15000,
+    "icon": "truck-pickup",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Räumen": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_raumen": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "43": {
+    "caption": "BRmG R",
+    "coins": 25,
+    "color": "#001ee0",
+    "credits": 15000,
+    "icon": "snowplow",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "special": "Muss vom \"LKW K 9\" zum Einsatz gezogen werden",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      42
+    ]
+  },
+  "44": {
+    "caption": "Anh DLE",
+    "coins": 25,
+    "color": "#0021f5",
+    "credits": 15000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "special": "Muss von einem \"GKW\", \"MzGW (FGr N)\", \"MTW-TZ\" oder \"MLW 5\" zum Einsatz gezogen werden.",
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      39,
+      40,
+      41,
+      45
+    ]
+  },
+  "45": {
+    "caption": "MLW 5",
+    "coins": 12,
+    "color": "#0a2bff",
+    "credits": 2500,
+    "icon": "truck-moving",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Räumen": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 6,
+      "min": 1,
+      "training": {
+        "THW": {
+          "thw_raumen": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "46": {
+    "caption": "WLF",
+    "coins": 12,
+    "color": "#f04242",
+    "credits": 5000,
+    "icon": "truck-field",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Wechsellader Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "wechsellader": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "47": {
+    "caption": "AB-Rüst",
+    "coins": 12,
+    "color": "#ad0e0e",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "48": {
+    "caption": "AB-Atemschutz",
+    "coins": 12,
+    "color": "#9c0b0b",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "49": {
+    "caption": "AB-Öl",
+    "coins": 12,
+    "color": "#8b0707",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "5": {
+    "caption": "GW-A",
+    "coins": 25,
+    "color": "#9c1c1c",
+    "credits": 11680,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "special": "Kann ab 5 Feuerwachen angefordert werden.",
+    "staff": {
+      "max": 3,
+      "min": 1
+    }
+  },
+  "50": {
+    "caption": "GruKw",
+    "coins": 25,
+    "color": "#2d9f29",
+    "credits": 10000,
+    "icon": "bus",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      11
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    }
+  },
+  "51": {
+    "caption": "FüKW (Polizei)",
+    "coins": 25,
+    "color": "#31af31",
+    "credits": 17500,
+    "icon": "car-side",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      11,
+      17
+    ],
+    "schooling": {
+      "Polizei": {
+        "Hundertschaftsführer (FüKw)": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "police_fukw": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "52": {
+    "caption": "GefKw",
+    "coins": 25,
+    "color": "#36bf36",
+    "credits": 13000,
+    "icon": "bus-alt",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      11
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "53": {
+    "caption": "Dekon-P",
+    "coins": 25,
+    "color": "#450909",
+    "credits": 23100,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Dekon-P Lehrgang": {
+          "min": 0
+        }
+      }
+    },
+    "special": "Pro Dekon-P müssen 6 Personen mit Dekon-P-Ausbildung vor Ort sein. Wird ab 14 Feuerwachen benötigt.",
+    "staff": {
+      "max": 6,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "dekon_p": {
+            "min": 0
+          }
+        }
+      },
+      "trainingAtScene": 6
+    }
+  },
+  "54": {
+    "caption": "AB-Dekon-P",
+    "coins": 12,
+    "color": "#450707",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Dekon-P Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "dekon_p": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 6
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "55": {
+    "caption": "KdoW-LNA",
+    "coins": 25,
+    "color": "#805c0f",
+    "credits": 20000,
+    "icon": "car-side",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      2,
+      20
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "LNA-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 5 Rettungswachen benötigt.",
+    "staff": {
+      "max": 1,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "lna": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "56": {
+    "caption": "KdoW-OrgL",
+    "coins": 25,
+    "color": "#926911",
+    "credits": 20000,
+    "icon": "car-side",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      2,
+      20
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "OrgL-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 10 Rettungswachen benötigt.",
+    "staff": {
+      "max": 1,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "orgl": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "57": {
+    "caption": "FwK",
+    "coins": 25,
+    "color": "#230606",
+    "credits": 30000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Feuerwehrkran Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Wird ab 14 Feuerwachen benötigt. Kann durch den Mobilkran des THW ersetzt werden",
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "fwk": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "58": {
+    "caption": "KTW Typ B",
+    "coins": 25,
+    "color": "#cc5200",
+    "credits": 5000,
+    "icon": "ambulance",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": null,
+    "special": "Kann, wenn ein GW-San vor Ort ist, behandelte Patienten vom Einsatzort abtransportieren. Ein Transport mit Notarztbegleitung durch ein NEF ist auch möglich.",
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "59": {
+    "caption": "ELW 1 (SEG)",
+    "coins": 25,
+    "color": "#a34100",
+    "credits": 25500,
+    "icon": "car-side",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "SEG - Einsatzleitung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Kann automatisch eingehende Sprechwünsche der eigenen Rettungsmittel bearbeiten und ihnen im Transportfall ein geeignetes Krankenhaus zuweisen. Die automatische Zuweisungsfunktion kann in dessen Einstellungen verändert werden.",
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Rettungsdienst": {
+          "seg_elw": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "6": {
+    "caption": "LF 8/6",
+    "coins": 25,
+    "color": "#aa0000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 800,
+    "pumpType": "fire",
+    "pumpcap": 800,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 600,
+    "wtank": 600
+  },
+  "60": {
+    "caption": "GW-San",
+    "coins": 25,
+    "color": "#8f3900",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 6,
+    "possibleBuildings": [
+      12
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "SEG - GW-San": {
+          "all": true
+        }
+      }
+    },
+    "special": "Pro GW-San können 5 KTW Typ B wie ein RTW arbeiten. Er behandelt die Patienten zwar größtenteils, aber für die letzten paar Prozente braucht man dann einen RTW, KTW Typ B oder ähnliches.",
+    "staff": {
+      "max": 6,
+      "min": 6,
+      "training": {
+        "Rettungsdienst": {
+          "seg_gw_san": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "61": {
+    "caption": "Polizeihubschrauber",
+    "coins": 30,
+    "color": "#14743f",
+    "credits": 300000,
+    "equipmentCapacity": 10,
+    "icon": "helicopter",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      13
+    ],
+    "schooling": {
+      "Polizei": {
+        "Polizeihubschrauber": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "polizeihubschrauber": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "62": {
+    "caption": "AB-Schlauch",
+    "coins": 12,
+    "color": "#e60808",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 0,
+      "min": 0
+    },
+    "tractiveVehicles": [
+      46
+    ],
+    "waterBonus": 25
+  },
+  "63": {
+    "caption": "GW-Taucher",
+    "coins": 25,
+    "color": "#88ecc4",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      0,
+      12,
+      15,
+      18,
+      22
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Taucher Lehrgang": {
+          "all": true
+        }
+      },
+      "Rettungsdienst": {
+        "GW-Taucher Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 2,
+      "training": {
+        "Feuerwehr": {
+          "gw_taucher": {
+            "all": true
+          }
+        },
+        "Rettungsdienst": {
+          "gw_taucher": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "64": {
+    "caption": "GW-Wasserrettung",
+    "coins": 25,
+    "color": "#91dab5",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      12,
+      15,
+      18,
+      22
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      },
+      "Rettungsdienst": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 6,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        },
+        "Rettungsdienst": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "65": {
+    "caption": "LKW 7 Lkr 19 tm",
+    "coins": 25,
+    "color": "#123183",
+    "credits": 10000,
+    "icon": "truck-pickup",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 2,
+      "min": 1
+    }
+  },
+  "66": {
+    "caption": "Anh MzB",
+    "coins": 12,
+    "color": "#1b428a",
+    "credits": 6000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wassergefahren": {
+          "all": true
+        }
+      }
+    },
+    "special": "Muss von einem \"LKW 7 Lkr 19 tm\" zum Einsatz gezogen werden. Pro gefordertem Boot müssen mind. 4 Personen mit der Ausbildung \"GW-Wasserrettung\" oder \"Wassergefahren\" vor Ort sein!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 4
+    },
+    "tractiveVehicles": [
+      65
+    ]
+  },
+  "67": {
+    "caption": "Anh SchlB",
+    "coins": 12,
+    "color": "#245390",
+    "credits": 6000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wassergefahren": {
+          "all": true
+        }
+      }
+    },
+    "special": "Muss von einem \"LKW 7 Lkr 19 tm\" zum Einsatz gezogen werden. Pro gefordertem Boot müssen mind. 4 Personen mit der Ausbildung \"GW-Wasserrettung\" oder \"Wassergefahren\" vor Ort sein!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 4
+    },
+    "tractiveVehicles": [
+      65
+    ]
+  },
+  "68": {
+    "caption": "Anh MzAB",
+    "coins": 12,
+    "color": "#296497",
+    "credits": 6000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Wassergefahren": {
+          "all": true
+        }
+      }
+    },
+    "special": "Muss von einem \"LKW 7 Lkr 19 tm\" zum Einsatz gezogen werden. Pro gefordertem Boot müssen mind. 4 Personen mit der Ausbildung \"GW-Wasserrettung\" oder \"Wassergefahren\" vor Ort sein!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 4
+    },
+    "tractiveVehicles": [
+      65
+    ]
+  },
+  "69": {
+    "caption": "Tauchkraftwagen",
+    "coins": 25,
+    "color": "#36759e",
+    "credits": 10000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Bergungstaucher": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "THW": {
+          "gw_taucher": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "7": {
+    "caption": "LF 20/16",
+    "coins": 25,
+    "color": "#990000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 1600,
+    "wtank": 1600
+  },
+  "70": {
+    "caption": "MZB",
+    "coins": 12,
+    "color": "#9ac8a6",
+    "credits": 6000,
+    "icon": "trailer",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      12,
+      15,
+      18,
+      22
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      },
+      "Rettungsdienst": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Muss von einem \"GW-Wasserrettung\" oder einem \"GW-Taucher\" zum Einsatz gezogen werden. Pro gefordertem Boot müssen mind. 4 Personen mit der Ausbildung \"GW-Wasserrettung\" oder \"Wassergefahren\" vor Ort sein!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        },
+        "Rettungsdienst": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 4
+    },
+    "tractiveVehicles": [
+      63,
+      64
+    ]
+  },
+  "71": {
+    "caption": "AB-MZB",
+    "coins": 12,
+    "color": "#bf7f6a",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      },
+      "Rettungsdienst": {
+        "GW-Wasserrettung Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "special": "Pro gefordertem Boot müssen mind. 4 Personen mit der Ausbildung \"GW-Wasserrettung\" oder \"Wassergefahren\" vor Ort sein!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        },
+        "Rettungsdienst": {
+          "gw_wasserrettung": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 4
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "72": {
+    "caption": "WaWe 10",
+    "coins": 25,
+    "color": "#36b15d",
+    "credits": 13000,
+    "icon": "bus-alt",
+    "maxPersonnel": 5,
+    "minPersonnel": 5,
+    "possibleBuildings": [
+      11
+    ],
+    "schooling": {
+      "Polizei": {
+        "Wasserwerfer": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 5,
+      "min": 5,
+      "training": {
+        "Polizei": {
+          "police_wasserwerfer": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "73": {
+    "caption": "GRTW",
+    "coins": 25,
+    "color": "#cc8500",
+    "credits": 25000,
+    "icon": "ambulance",
+    "maxPersonnel": 6,
+    "minPersonnel": 6,
+    "possibleBuildings": [
+      0,
+      2,
+      18,
+      20,
+      25
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      },
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Der GRTW kann in zwei verschiedenen Modi alarmiert werden:<br>1. Für leichtverletzte Personen, die keinen Notarzt benötigen. Dann können in dem GRTW 7 Patienten gleichzeitig behandelt und abtransportiert werden. Es wird kein Notarzt zum Ausrücken benötigt.<br>2. Für schwerverletzte Personen, die einen Notarzt benötigen. Dann können in dem GRTW 3 Patienten gleichzeitig behandelt werden. Es wird mind. 1 Notarzt zum Ausrücken benötigt.<br>Pro 20 Rettungswachen (bzw. 15 Rettungswachen mit Premium-Account) kann ein GRTW gekauft werden.",
+    "staff": {
+      "max": 6,
+      "min": 6,
+      "training": {
+        "Feuerwehr": {
+          "notarzt": {
+            "min": 1
+          }
+        },
+        "Rettungsdienst": {
+          "notarzt": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "74": {
+    "caption": "NAW",
+    "coins": 25,
+    "color": "#b87700",
+    "credits": 25000,
+    "icon": "ambulance",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      0,
+      2,
+      18,
+      20,
+      25
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      },
+      "Rettungsdienst": {
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Insgesamt so viele NAW kaufbar wie Rettungswachen (und auf einsatzbereit gestellte Rettungsdienst-Erweiterungen) vorhanden. Alle auch auf einer Wache platzierbar.",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "Feuerwehr": {
+          "notarzt": {
+            "min": 1
+          }
+        },
+        "Rettungsdienst": {
+          "notarzt": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "75": {
+    "caption": "FLF",
+    "coins": 25,
+    "color": "#7a534a",
+    "credits": 80000,
+    "foamTank": 1500,
+    "ftank": 1500,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Flugfeldlöschfahrzeug-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 2,
+      "training": {
+        "Feuerwehr": {
+          "arff": {
+            "all": true
+          }
+        }
+      }
+    },
+    "waterTank": 12000,
+    "wtank": 12000
+  },
+  "76": {
+    "caption": "Rettungstreppe",
+    "coins": 25,
+    "color": "#6f6157",
+    "credits": 20000,
+    "icon": "truck",
+    "maxPersonnel": 2,
+    "minPersonnel": 2,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Rettungstreppen-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 2,
+      "training": {
+        "Feuerwehr": {
+          "rettungstreppe": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "77": {
+    "caption": "AB-Gefahrgut",
+    "coins": 12,
+    "color": "#680101",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "GW-Gefahrgut Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "gw_gefahrgut": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 1
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "78": {
+    "caption": "AB-Einsatzleitung",
+    "coins": 12,
+    "color": "#bf1111",
+    "credits": 6000,
+    "icon": "square",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "ELW 2 Lehrgang": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Feuerwehr": {
+          "elw2": {
+            "all": true
+          }
+        }
+      },
+      "trainingAtScene": 1
+    },
+    "tractiveVehicles": [
+      46
+    ]
+  },
+  "79": {
+    "caption": "SEK - ZF",
+    "coins": 25,
+    "color": "#217d1a",
+    "credits": 10000,
+    "icon": "shuttle-van",
+    "maxPersonnel": 4,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      11,
+      17
+    ],
+    "schooling": {
+      "Polizei": {
+        "SEK": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 3,
+      "training": {
+        "Polizei": {
+          "police_sek": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "8": {
+    "caption": "LF 10/6",
+    "coins": 25,
+    "color": "#880000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 600,
+    "wtank": 600
+  },
+  "80": {
+    "caption": "SEK - MTF",
+    "coins": 25,
+    "color": "#1a7d1b",
+    "credits": 10000,
+    "icon": "bus",
+    "maxPersonnel": 9,
+    "minPersonnel": 9,
+    "possibleBuildings": [
+      11,
+      17
+    ],
+    "schooling": {
+      "Polizei": {
+        "SEK": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 9,
+      "training": {
+        "Polizei": {
+          "police_sek": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "81": {
+    "caption": "MEK - ZF",
+    "coins": 25,
+    "color": "#1a7d22",
+    "credits": 10000,
+    "icon": "shuttle-van",
+    "maxPersonnel": 4,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      11,
+      17
+    ],
+    "schooling": {
+      "Polizei": {
+        "MEK": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 4,
+      "min": 3,
+      "training": {
+        "Polizei": {
+          "police_mek": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "82": {
+    "caption": "MEK - MTF",
+    "coins": 25,
+    "color": "#1a7d2a",
+    "credits": 10000,
+    "icon": "bus",
+    "maxPersonnel": 9,
+    "minPersonnel": 9,
+    "possibleBuildings": [
+      11,
+      17
+    ],
+    "schooling": {
+      "Polizei": {
+        "MEK": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 9,
+      "training": {
+        "Polizei": {
+          "police_mek": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "83": {
+    "caption": "GW-Werkfeuerwehr",
+    "coins": 30,
+    "color": "#99222b",
+    "credits": 15000,
+    "icon": "truck",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Werkfeuerwehr-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 9,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "werkfeuerwehr": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "84": {
+    "caption": "ULF mit Löscharm",
+    "coins": 25,
+    "color": "#992234",
+    "credits": 20000,
+    "foamTank": 3000,
+    "ftank": 3000,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Werkfeuerwehr-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "werkfeuerwehr": {
+            "all": true
+          }
+        }
+      }
+    },
+    "waterTank": 5000,
+    "wtank": 5000
+  },
+  "85": {
+    "caption": "TM 50",
+    "coins": 30,
+    "color": "#992b22",
+    "credits": 20000,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Werkfeuerwehr-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "werkfeuerwehr": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "86": {
+    "caption": "Turbolöscher",
+    "coins": 30,
+    "color": "#993422",
+    "credits": 12500,
+    "icon": "truck",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Werkfeuerwehr-Ausbildung": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 3,
+      "min": 1,
+      "training": {
+        "Feuerwehr": {
+          "werkfeuerwehr": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "87": {
+    "caption": "TLF 4000",
+    "coins": 25,
+    "color": "#dd2222",
+    "credits": 5000,
+    "foamTank": 500,
+    "ftank": 500,
+    "icon": "truck-moving",
+    "maxPersonnel": 3,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 2000,
+    "pumpType": "fire",
+    "pumpcap": 2000,
+    "schooling": null,
+    "staff": {
+      "max": 3,
+      "min": 1
+    },
+    "waterTank": 4000,
+    "wtank": 4000
+  },
+  "88": {
+    "caption": "KLF",
+    "coins": 25,
+    "color": "#660000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    },
+    "waterTank": 500,
+    "wtank": 500
+  },
+  "89": {
+    "caption": "MLF",
+    "coins": 25,
+    "color": "#550000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 6,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 6,
+      "min": 1
+    },
+    "waterTank": 1000,
+    "wtank": 1000
+  },
+  "9": {
+    "caption": "LF 16-TS",
+    "coins": 25,
+    "color": "#770000",
+    "credits": 5000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1600,
+    "pumpType": "fire",
+    "pumpcap": 1600,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 0,
+    "wtank": 0
+  },
+  "90": {
+    "caption": "HLF 10",
+    "coins": 25,
+    "color": "#330000",
+    "credits": 20000,
+    "foamTank": 150,
+    "ftank": 150,
+    "icon": "truck-moving",
+    "maxPersonnel": 9,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      0,
+      18
+    ],
+    "pumpCapacity": 1000,
+    "pumpType": "fire",
+    "pumpcap": 1000,
+    "schooling": null,
+    "staff": {
+      "max": 9,
+      "min": 1
+    },
+    "waterTank": 1000,
+    "wtank": 1000
+  },
+  "91": {
+    "caption": "Rettungshundefahrzeug",
+    "coins": 25,
+    "color": "#864708",
+    "credits": 25000,
+    "icon": "paw",
+    "maxPersonnel": 5,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      12,
+      21
+    ],
+    "schooling": {
+      "Rettungsdienst": {
+        "Rettungshundeführer": {
+          "all": true
+        }
+      }
+    },
+    "special": "Am Einsatzort sind ein \"Rettungshundefahrzeug\" und ein \"Anh Hund\" vom THW gleichwertig!",
+    "staff": {
+      "max": 5,
+      "min": 4,
+      "training": {
+        "Rettungsdienst": {
+          "seg_rescue_dogs": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "92": {
+    "caption": "Anh Hund",
+    "coins": 0,
+    "color": "#131f6e",
+    "credits": 6000,
+    "icon": "paw",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": {
+      "THW": {
+        "Fachgruppe Rettungshundeführer": {
+          "all": true
+        }
+      }
+    },
+    "special": "Muss von einem \"MTW-O\" an den Einsatzort gezogen werden. Am Einsatzort sind ein \"Anh Hund\" und ein \"Rettungshundefahrzeug\" vom Rettungsdienst gleichwertig!",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "THW": {
+          "thw_rescue_dogs": {
+            "all": true
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      93
+    ]
+  },
+  "93": {
+    "caption": "MTW-O",
+    "coins": 0,
+    "color": "#14165e",
+    "credits": 19000,
+    "icon": "paw",
+    "maxPersonnel": 5,
+    "minPersonnel": 4,
+    "possibleBuildings": [
+      9
+    ],
+    "schooling": null,
+    "staff": {
+      "max": 5,
+      "min": 4
+    }
+  },
+  "94": {
+    "caption": "DHuFüKW",
+    "coins": 10,
+    "color": "#339900",
+    "credits": 15000,
+    "icon": "paw",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      11,
+      17,
+      19,
+      22
+    ],
+    "schooling": {
+      "Polizei": {
+        "Hundeführer (Schutzhund)": {
+          "all": true
+        }
+      }
+    },
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "k9": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "95": {
+    "caption": "Polizeimotorrad",
+    "coins": 10,
+    "color": "#004400",
+    "credits": 3000,
+    "icon": "motorcycle",
+    "maxPersonnel": 1,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      19
+    ],
+    "schooling": {
+      "Polizei": {
+        "Motorradstaffel": {
+          "all": true
+        }
+      }
+    },
+    "special": "Das Polizeimotorrad kann im Spiel anstelle eines FuStW verwendet werden. Der Nachteil: Es kann keine Gefangenen transportieren und arbeitet nur halb so schnell wie ein FuStW.",
+    "staff": {
+      "max": 1,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "police_motorcycle": {
+            "all": true
+          }
+        }
+      }
+    }
+  },
+  "96": {
+    "caption": "Außenlastbehälter (allgemein)",
+    "coins": 10,
+    "color": "#0a580c",
+    "credits": 50000,
+    "icon": "fill",
+    "isTrailer": true,
+    "maxPersonnel": 0,
+    "minPersonnel": 0,
+    "possibleBuildings": [
+      13
+    ],
+    "schooling": {
+      "Polizei": {
+        "Brandbekämpfung": {
+          "all": true
+        }
+      }
+    },
+    "special": "Kann an Polizeihubschrauber und Polizeihubschrauber mit verbauter Winde angehängt werden. Das Personal auf dem Hubschrauber benötigt zusätzlich die Ausbildung \"brandbekämpfung\".",
+    "staff": {
+      "max": 0,
+      "min": 0,
+      "training": {
+        "Polizei": {
+          "police_firefighting": {
+            "all": true
+          }
+        }
+      }
+    },
+    "tractiveVehicles": [
+      61,
+      156
+    ],
+    "waterTank": 1000,
+    "wtank": 1000
+  },
+  "97": {
+    "caption": "ITW",
+    "coins": 25,
+    "color": "#b87700",
+    "credits": 30000,
+    "icon": "ambulance",
+    "maxPersonnel": 3,
+    "minPersonnel": 3,
+    "possibleBuildings": [
+      0,
+      2,
+      18,
+      20,
+      25
+    ],
+    "schooling": {
+      "Feuerwehr": {
+        "Intensivpflege": {
+          "min": 2
+        },
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      },
+      "Rettungsdienst": {
+        "Intensivpflege": {
+          "min": 2
+        },
+        "Notarzt-Ausbildung": {
+          "min": 1
+        }
+      }
+    },
+    "special": "Kann auch als NAW eingesetzt werden. Verdienst bei der Mission: 30 Credits pro km, max. 1.500 Credits. Hat das angefahrene Krankenhaus nicht die erforderliche Abteilung, wird der Verdienst 30% weniger betragen. Kann alle 15 (10 mit Premium) Rettungswachen gekauft werden. 2 Leute brauchen die \"Intensivpflege\" Ausbildung, Eine weitere Person davon die Notarzt Ausbildung",
+    "staff": {
+      "max": 3,
+      "min": 3,
+      "training": {
+        "Feuerwehr": {
+          "intensive_care": {
+            "min": 2
+          },
+          "notarzt": {
+            "min": 1
+          }
+        },
+        "Rettungsdienst": {
+          "intensive_care": {
+            "min": 2
+          },
+          "notarzt": {
+            "min": 1
+          }
+        }
+      }
+    }
+  },
+  "98": {
+    "caption": "Zivilstreifenwagen",
+    "coins": 25,
+    "color": "#005500",
+    "credits": 5000,
+    "icon": "taxi",
+    "maxPersonnel": 2,
+    "minPersonnel": 1,
+    "possibleBuildings": [
+      6,
+      19
+    ],
+    "schooling": {
+      "Polizei": {
+        "Kriminalpolizei": {
+          "all": true
+        }
+      }
+    },
+    "special": "Kann FuStW in bestimmten Einsätzen ersetzen. Wird auf vorhandene Polizeistellplätze gestellt.",
+    "staff": {
+      "max": 2,
+      "min": 1,
+      "training": {
+        "Polizei": {
+          "criminal_investigation": {
+            "all": true
+          }
+        }
+      }
+    }
+  }
+}

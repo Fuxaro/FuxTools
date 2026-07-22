@@ -1,0 +1,92 @@
+name: Main-Release vorbereiten
+
+# Nur manuell auslösbar (Button "Run workflow" im Actions-Tab) - kein automatischer Trigger
+# bei jedem Push auf beta, damit main weiterhin nur dann aktualisiert wird, wenn das
+# tatsächlich gewollt ist. Nimmt den aktuellen beta-Stand und bringt ihn auf main-Stand:
+# interne Entwickler-Kommentare raus (scripts/strip-comments.js), Kanal/Update-Links auf
+# stable/main umgestellt (scripts/set-stable-channel.js), CHANGELOG.md "Beta"-Abschnitt wird
+# zum neuen "Stable"-Abschnitt (scripts/promote-changelog.js). Das Ergebnis landet als Pull
+# Request gegen main, damit der Diff vor dem Live-Gehen bei den Stable-Nutzern noch
+# gegengeprüft werden kann - kein direkter Push.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: beta auschecken
+        uses: actions/checkout@v5
+        with:
+          ref: beta
+
+      - name: Node einrichten
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Version auslesen
+        id: version
+        run: |
+          VERSION=$(grep -m1 -oP '@version\s+\K[0-9.]+' fuxtools.user.js)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "branch=release/v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: fuxtools.user.js auf main-Stand bringen
+        run: |
+          node scripts/strip-comments.js /tmp/fuxtools.stripped.js
+          node scripts/set-stable-channel.js /tmp/fuxtools.stripped.js fuxtools.user.js
+          node -c fuxtools.user.js
+
+      - name: CHANGELOG.md auf main-Stand bringen
+        run: |
+          node scripts/promote-changelog.js CHANGELOG.md /tmp/CHANGELOG.main.md "${{ steps.version.outputs.version }}"
+          mv /tmp/CHANGELOG.main.md CHANGELOG.md
+
+      - name: Release-Branch committen und pushen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ steps.version.outputs.branch }}"
+          git add fuxtools.user.js CHANGELOG.md
+          git commit -m "Main-Release v${{ steps.version.outputs.version }}: Kommentare entfernt, Kanal auf stable, Changelog aktualisiert"
+          git push --force origin "${{ steps.version.outputs.branch }}"
+
+      - name: Pull Request gegen main erstellen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          PR_ERROR=$(gh pr create \
+            --base main \
+            --head "${{ steps.version.outputs.branch }}" \
+            --title "Main-Release v${{ steps.version.outputs.version }}" \
+            --body "Automatisch erzeugter Release-PR aus \`beta\` (v${{ steps.version.outputs.version }}).
+
+          - Interne Entwickler-Kommentare entfernt (\`scripts/strip-comments.js\`)
+          - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
+          - CHANGELOG.md aktualisiert: \`## Beta\`-Abschnitt wird zu \`## Stable (v${{ steps.version.outputs.version }})\` (\`scripts/promote-changelog.js\`)
+
+          Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." 2>&1)
+          STATUS=$?
+          set -e
+          echo "$PR_ERROR"
+          if [ $STATUS -eq 0 ]; then
+            exit 0
+          fi
+          # "already exists" ist der einzige harmlose Fall (Workflow wurde fuer dieselbe
+          # Version schon mal ausgeloest) - alles andere (z.B. fehlende Berechtigung) soll den
+          # Job sichtbar rot fehlschlagen lassen statt es stillschweigend zu verschlucken.
+          if echo "$PR_ERROR" | grep -qi "already exists"; then
+            echo "Hinweis: PR existiert für diesen Branch bereits, wurde nicht neu angelegt."
+            exit 0
+          fi
+          echo "::error::Pull Request konnte nicht erstellt werden - siehe Fehlermeldung oben (z.B. fehlt evtl. unter Settings > Actions > General > Workflow permissions die Option 'Allow GitHub Actions to create and approve pull requests')."
+          exit 1
