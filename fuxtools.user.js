@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.50
+// @version     0.9.51
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.50";
+  const SCRIPT_VERSION = "0.9.51";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -78,6 +78,169 @@
   // in Ruhe bestaetigen koennen soll.
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
+
+  //////////////////////////////////////////////////
+  // Hintergrund-Task-System: laesst lang laufende Aktionen (Umbenennen, Fahrzeug-Besatzung)
+  // auch nach Schliessen des Fensters weiterlaufen, solange man auf der FuxTools-Startseite
+  // bleibt (FuxTools laeuft nur dort, siehe @match - eine echte Navigation zu einer anderen
+  // Spielseite wuerde das Script komplett beenden, das ist technisch nicht zu umgehen).
+  // Zeigt den Fortschritt stattdessen ueber ein kleines Icon direkt am Navbar-Eintrag, Klick
+  // darauf oeffnet wieder genau den laufenden/zuletzt fertigen Task statt des Hauptmenues.
+  // Bewusst nur EIN Task gleichzeitig aktiv - ein waehrenddessen gestarteter zweiter Task
+  // (z.B. erst Personalzuweisung, dann Umbenennen) landet in einer Warteschlange und startet
+  // automatisch, sobald der vorherige fertig ist, statt parallel zu laufen.
+  //////////////////////////////////////////////////
+  let backgroundTaskBadgeEl = null; // im Navbar-Eintrag, siehe addMenuEntry()
+  const backgroundTaskQueue = []; // { title, start() } - start() rendert+laeuft den Task
+  let activeBackgroundTask = null; // { title, percent, progressText, cancel() }
+  let finishedBackgroundTask = null; // { title, renderResult() } - bis angeschaut/reopened
+  // Fahrzeug-Besatzung erlaubt bewusst MEHRERE Kategorien gleichzeitig (siehe bindCategoryButtons/
+  // runningCategoryRuns) - passt nicht in den "ein Task"-Slot oben, zaehlt aber fuer Warteschlange
+  // und Badge trotzdem als "etwas laeuft".
+  let activeCrewCategoryRunCount = 0;
+
+  function isBackgroundTaskSlotBusy() {
+    return !!activeBackgroundTask || activeCrewCategoryRunCount > 0;
+  }
+
+  function updateBackgroundTaskBadge() {
+    if (!backgroundTaskBadgeEl) return;
+    if (isBackgroundTaskSlotBusy()) {
+      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
+      backgroundTaskBadgeEl.title = `${activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung"} läuft im Hintergrund ...`;
+      backgroundTaskBadgeEl.style.display = "";
+    } else if (finishedBackgroundTask) {
+      backgroundTaskBadgeEl.innerHTML = `<span class="vn-task-done-dot"></span>`;
+      backgroundTaskBadgeEl.title = `${finishedBackgroundTask.title}: fertig - klicken zum Ansehen`;
+      backgroundTaskBadgeEl.style.display = "";
+    } else {
+      backgroundTaskBadgeEl.style.display = "none";
+    }
+  }
+
+  // Aktualisiert den Fortschritt eines laufenden Tasks - fasst NUR den Zustand an, die
+  // eigentlichen DOM-Elemente (falls die Fortschritts-Ansicht gerade sichtbar ist) werden
+  // separat aktualisiert (siehe renderBackgroundTaskProgressScreen) - so geht bei
+  // geschlossenem Fenster oder einer inzwischen anders belegten Modal-Ansicht nichts kaputt.
+  function updateBackgroundTaskProgress(percent, text) {
+    if (!activeBackgroundTask) return;
+    activeBackgroundTask.percent = percent;
+    activeBackgroundTask.progressText = text;
+    const bar = document.getElementById("vn-exec-progress-bar");
+    const txt = document.getElementById("vn-exec-progress-text");
+    if (bar) bar.style.width = `${percent}%`;
+    if (txt) txt.textContent = text;
+  }
+
+  function renderBackgroundTaskProgressScreen() {
+    if (!activeBackgroundTask) return;
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle(activeBackgroundTask.title);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">Läuft im Hintergrund weiter, auch wenn du dieses Fenster schließt.</p>
+      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
+        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
+        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
+             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
+             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
+      </div>
+      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
+        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+      </button>
+    `;
+    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => activeBackgroundTask?.cancel());
+  }
+
+  // Startet einen Task sofort, oder haengt ihn an die Warteschlange, falls schon einer
+  // laeuft (auch eine laufende Fahrzeug-Besatzung zaehlt, siehe isBackgroundTaskSlotBusy) -
+  // "start" bekommt KEINE Argumente und muss selbst activeBackgroundTask setzen (siehe
+  // beginBackgroundTask()) sowie am Ende finishBackgroundTask() aufrufen.
+  function runOrQueueBackgroundTask(title, start) {
+    if (isBackgroundTaskSlotBusy()) {
+      backgroundTaskQueue.push({ title, start });
+      return "queued";
+    }
+    start();
+    return "started";
+  }
+
+  function tryStartNextQueuedBackgroundTask() {
+    if (isBackgroundTaskSlotBusy() || !backgroundTaskQueue.length) return;
+    const next = backgroundTaskQueue.shift();
+    next.start();
+  }
+
+  function beginBackgroundTask(title, cancel) {
+    activeBackgroundTask = { title, percent: 0, progressText: "", cancel };
+    finishedBackgroundTask = null;
+    updateBackgroundTaskBadge();
+  }
+
+  // Ob das FuxTools-Fenster GERADE sichtbar ist (Bootstrap-Klasse "in"/"show" je nach
+  // Bootstrap-Version) - wenn ja, sieht der Nutzer das Ergebnis sowieso sofort live
+  // (renderResult() wird trotzdem IMMER aufgerufen, siehe Aufrufer), der Badge muss dann
+  // nicht zusaetzlich noch "ungesehen" gruen blinken.
+  function isModalOpen() {
+    const modal = document.getElementById(modalId);
+    return !!modal && (modal.classList.contains("in") || modal.classList.contains("show"));
+  }
+
+  // renderResult() wird spaeter aufgerufen (Klick auf Badge oder erneutes Oeffnen), falls
+  // das Fenster beim Abschluss geschlossen war - laeuft der naechste Task aus der
+  // Warteschlange, wird dessen Fortschritt bevorzugt gezeigt statt des alten Ergebnisses.
+  function finishBackgroundTask(title, renderResult) {
+    activeBackgroundTask = null;
+    finishedBackgroundTask = isModalOpen() ? null : { title, renderResult };
+    updateBackgroundTaskBadge();
+    tryStartNextQueuedBackgroundTask();
+  }
+
+  function renderBackgroundTaskQueuedScreen(title, goBack) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle(title);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>
+        <span class="glyphicon glyphicon-time" aria-hidden="true"></span>
+        <b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung")}</b> läuft noch -
+        <b>${escapeHtml(title)}</b> startet automatisch danach (Warteschlange, um nicht zu viele Anfragen
+        gleichzeitig zu stellen).
+      </p>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+  }
+
+  // Fahrzeug-Besatzung erlaubt mehrere gleichzeitig laufende Kategorien (siehe
+  // bindCategoryButtons) - deren Fortschritt lebt in einer lokalen Closure von
+  // renderVehicleCrewScreen(), die beim Schliessen/Wiederoeffnen des Fensters neu aufgebaut
+  // wuerde. Ein frischer Aufruf waehrend ein Lauf noch aktiv ist wuerde also nichts von den
+  // laufenden Workern wissen und liesse dieselbe Kategorie ein zweites Mal (parallel,
+  // fehleranfaellig) starten - deshalb stattdessen nur dieser einfache Hinweis, bis alle
+  // Kategorien fertig sind.
+  function renderCrewAssignmentRunningScreen() {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("Fahrzeug-Besatzung");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `
+      <p>
+        <span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>
+        Fahrzeug-Besatzung läuft noch im Hintergrund (${activeCrewCategoryRunCount} Kategorie(n) aktiv) -
+        der Bildschirm lässt sich erst wieder öffnen, wenn alle fertig sind.
+      </p>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
+      </div>
+    `;
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+  }
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
   // breit fuer den Wachen-Check mit seiner Tabelle - vermeidet leere Flaechen links/
@@ -1181,29 +1344,22 @@
   // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
   // renameFn/itemNoun erlauben die Wiederverwendung fuer Fahrzeuge, Wachen und
   // Leitstellen (alle drei sind technisch dasselbe Formular-Umbenennen-Muster).
-  async function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
-    const body = document.getElementById("vehicle-naming-modal-body");
-    renameCancelled = false;
+  // Startet sofort, oder haengt sich an die Hintergrund-Task-Warteschlange, falls schon ein
+  // anderer Task (Umbenennen oder Fahrzeug-Besatzung) laeuft - siehe runOrQueueBackgroundTask().
+  function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
+    const title = `${itemNoun} ${verb === "umbenannt" ? "umbenennen" : "zurücksetzen"}`;
+    const queued = runOrQueueBackgroundTask(title, () =>
+      runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title),
+    );
+    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+  }
 
-    body.innerHTML = `
-      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
-        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:0%;"></div>
-        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
-             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
-             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">
-        </div>
-      </div>
-      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
-        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-      </button>
-    `;
-    const progressBarEl = document.getElementById("vn-exec-progress-bar");
-    // Eigenes, fest positioniertes Element fuer den Text - liegt ueber der gesamten
-    // Balkenbreite und wandert dadurch nicht mit, wenn der farbige Balken waechst.
-    const progressTextEl = document.getElementById("vn-exec-progress-text");
-    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => {
+  async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title) {
+    renameCancelled = false;
+    beginBackgroundTask(title, () => {
       renameCancelled = true;
     });
+    renderBackgroundTaskProgressScreen();
 
     let done = 0;
     let finished = 0;
@@ -1233,8 +1389,10 @@
           if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
         }
         finished++;
-        progressBarEl.style.width = `${Math.round((finished / plan.length) * 100)}%`;
-        progressTextEl.textContent = `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`;
+        updateBackgroundTaskProgress(
+          Math.round((finished / plan.length) * 100),
+          `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`,
+        );
       }
     }
 
@@ -1250,7 +1408,13 @@
       });
     }
 
-    renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
+    const renderResult = () =>
+      renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
+    // Erst anzeigen (bei offenem Fenster sofort sichtbar), DANACH finishBackgroundTask() -
+    // die zieht ggf. sofort den naechsten Warteschlangen-Task und ueberschreibt damit die
+    // Ansicht erneut (gewollt: automatischer Uebergang zum naechsten Fortschritt).
+    renderResult();
+    finishBackgroundTask(title, renderResult);
   }
 
   function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
@@ -1618,14 +1782,30 @@
         renderUpdateRequiredScreen();
         return;
       }
+      // Ein laufender/gerade fertiger Hintergrund-Task (siehe Hintergrund-Task-System oben)
+      // hat Vorrang vor dem Hauptmenue - man landet beim erneuten Oeffnen wieder genau dort,
+      // wo man das Fenster geschlossen hat, statt den Fortschritt neu suchen zu muessen.
+      if (activeBackgroundTask) {
+        renderBackgroundTaskProgressScreen();
+        return;
+      }
+      if (activeCrewCategoryRunCount > 0) {
+        renderCrewAssignmentRunningScreen();
+        return;
+      }
+      if (finishedBackgroundTask) {
+        finishedBackgroundTask.renderResult();
+        finishedBackgroundTask = null;
+        updateBackgroundTaskBadge();
+        return;
+      }
       renderMainMenu();
     });
 
-    // Schliessen waehrend einer laufenden Umbenennung (X oben, Klick daneben, Escape)
-    // soll die Umbenennung stoppen statt einfach im Hintergrund weiterzulaufen.
-    pageJQuery(modal).on("hide.bs.modal", () => {
-      renameCancelled = true;
-    });
+    // Schliessen (X oben, Klick daneben, Escape) laesst einen laufenden Hintergrund-Task
+    // (Umbenennen, Fahrzeug-Besatzung) bewusst weiterlaufen (siehe Hintergrund-Task-System
+    // oben) statt ihn abzubrechen - Fortschritt/Ergebnis zeigt der Navbar-Badge, echtes
+    // Abbrechen geht weiterhin nur ueber den expliziten "Abbrechen"-Button.
   }
 
   function closeModal() {
@@ -2466,7 +2646,22 @@
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
 
+  function injectBackgroundTaskStyles() {
+    const style = document.createElement("style");
+    style.textContent = `
+      .vn-task-spin { display:inline-block; animation: vn-task-spin 1s linear infinite; }
+      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      .vn-task-done-dot {
+        display:inline-block; width:10px; height:10px; border-radius:50%; background:#5cb85c;
+        animation: vn-task-blink 1s ease-in-out infinite;
+      }
+      @keyframes vn-task-blink { 0%, 100% { opacity:1; } 50% { opacity:0.25; } }
+    `;
+    document.head.appendChild(style);
+  }
+
   function addMenuEntry() {
+    injectBackgroundTaskStyles();
     const logoImg = document.createElement("img");
     logoImg.src = LOGO_URL;
     logoImg.alt = "";
@@ -2487,6 +2682,14 @@
     a.style.cssText = "display:flex; align-items:center; height:100%; padding:15px;";
     a.appendChild(logoImg);
     a.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
+
+    // Fortschritts-Icon fuer Hintergrund-Tasks (siehe Hintergrund-Task-System oben) - per
+    // Default versteckt, wird von updateBackgroundTaskBadge() ein-/ausgeblendet. Klick oeffnet
+    // ganz normal das Modal (data-toggle am <li>), der show.bs.modal-Handler zeigt dann den
+    // laufenden/fertigen Task statt des Hauptmenues.
+    backgroundTaskBadgeEl = document.createElement("span");
+    backgroundTaskBadgeEl.style.cssText = "margin-left:6px; display:none;";
+    a.appendChild(backgroundTaskBadgeEl);
 
     const li = document.createElement("li");
     li.role = "presentation";
@@ -3105,7 +3308,7 @@
       return;
     }
 
-    await executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
+    executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
 
   //////////////////////////////////////////////////
@@ -6164,6 +6367,8 @@
 
           const state = { cancelled: false };
           runningCategoryRuns.set(category, state);
+          activeCrewCategoryRunCount++;
+          updateBackgroundTaskBadge();
           const categoryVehicles = byCategory.get(category) || [];
           const categoryStatusEl = body.querySelector(`.vn-crew-category-status[data-category="${btn.dataset.category}"]`);
           btn.classList.remove("btn-primary");
@@ -6232,6 +6437,9 @@
             categoryStatusEl.textContent = `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
           }
           runningCategoryRuns.delete(category);
+          activeCrewCategoryRunCount--;
+          updateBackgroundTaskBadge();
+          tryStartNextQueuedBackgroundTask();
           btn.classList.remove("btn-danger");
           btn.classList.add("btn-primary");
           btn.innerHTML = originalLabel;
@@ -6789,17 +6997,22 @@
         if (!byCategory.has(category)) byCategory.set(category, []);
         byCategory.get(category).push(t);
       }
+      // <details>/<summary> statt eigenem Klick-Handler: Kategorien mit bereits gewaehlten
+      // Fahrzeugen (z.B. beim Bearbeiten eines bestehenden Bauplans) starten aufgeklappt,
+      // alle anderen eingeklappt - deutlich uebersichtlicher als alle 16 auf einmal offen.
       return FIRE_VEHICLE_CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map(
-          category => `
-            <div style="margin-bottom:10px;">
-              <div class="text-muted" style="font-size:11px; font-weight:bold; text-transform:uppercase; margin-bottom:4px;">
-                ${escapeHtml(category)}
-              </div>
-              ${vehicleGridHtml(byCategory.get(category), quantities)}
-            </div>
-          `,
-        )
+        .map(category => {
+          const categoryTypes = byCategory.get(category);
+          const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
+          return `
+            <details style="margin-bottom:6px;" ${selectedCount ? "open" : ""}>
+              <summary style="cursor:pointer; font-size:11px; font-weight:bold; text-transform:uppercase; padding:4px 0;">
+                ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}
+              </summary>
+              ${vehicleGridHtml(categoryTypes, quantities)}
+            </details>
+          `;
+        })
         .join("");
     }
 

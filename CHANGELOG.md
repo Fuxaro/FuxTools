@@ -41,6 +41,13 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   ohnehin selbst zuordnen.
 - **Wachen umbenennen**: Liste jetzt nach Wachen-ID statt Name sortiert, für eine vom aktuellen
   Namen unabhängige, stabile Reihenfolge.
+- **Wachen-Bauplaner**: Feuerwehr-Fahrzeugkategorien sind jetzt auf-/zuklappbar statt alle auf
+  einmal offen.
+- Lang laufende Aktionen (Umbenennen/Zurücksetzen, Fahrzeug-Besatzung) laufen jetzt im
+  Hintergrund weiter, wenn das Fenster geschlossen wird - ein Symbol direkt am
+  FuxTools-Menüpunkt zeigt den Fortschritt (blinkt grün bei Fertigstellung), erneutes Öffnen
+  zeigt wieder den laufenden/fertigen Task. Ein währenddessen gestarteter zweiter Task landet
+  in einer Warteschlange, statt parallel zu laufen.
 
 ## Stable (v0.5.1)
 
