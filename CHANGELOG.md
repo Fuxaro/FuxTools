@@ -58,8 +58,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Voll- auf Minimum-Besatzung), oder nur fehlendes Personal ergänzt und nie etwas antastet.
 - Einheitliches Design für aufklappbare Kategorien (blauer Rand, Hintergrund, drehender Pfeil)
   jetzt auch bei Fahrzeuge/Wachen umbenennen, nicht nur im Wachen-Bauplaner.
-- **Wachen umbenennen**: Wachen-ID wird direkt mit angezeigt, Reihenfolge innerhalb der
-  Kategorien wahlweise nach Wachen-ID oder Name sortierbar.
+- **Wachen umbenennen**: jetzt als echte Tabelle (Wachen-ID, Name, Neuer Name als Spalten) -
+  Sortierung per Klick auf die Spaltenüberschrift statt separater Buttons. Blaue
+  Kategorie-Hervorhebung war durch einen CSS-Konflikt mit dem Seiten-Design unsichtbar, jetzt
+  behoben.
 
 ## Stable (v0.5.1)
 

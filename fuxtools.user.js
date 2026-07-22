@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.55
+// @version     0.9.56
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.55";
+  const SCRIPT_VERSION = "0.9.56";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2674,11 +2674,15 @@
       /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-
          Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -
          blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */
+      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei
+         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge
+         gewinnen kann. */
       .vn-category-heading {
-        cursor:pointer; background:rgba(128,128,128,0.15); border-left:3px solid #337ab7;
-        border-radius:3px; padding:6px 10px; margin-bottom:2px;
+        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;
+        border-left:3px solid #337ab7 !important; border-radius:3px !important;
+        padding:6px 10px !important; margin-bottom:2px !important;
       }
-      .vn-category-heading:hover { background:rgba(128,128,128,0.28); }
+      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }
       .vn-category-heading .glyphicon-chevron-right,
       .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }
       .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }
@@ -3499,6 +3503,21 @@
     // erneut vom Server zu laden.
     let sortMode = "id";
 
+    // Spaltenkopf ueber der gesamten Liste (nicht pro Kategorie wiederholt) - Klick auf
+    // "Wachen-ID"/"Name" sortiert wie bei einer echten Tabelle, ein Pfeil zeigt die aktive
+    // Spalte + Richtung an. Die Breiten muessen exakt zu den <col>-Elementen der Tabellen
+    // je Kategorie passen (siehe unten), damit Kopf und Zeilen sich nicht verschieben.
+    function sortHeaderHtml() {
+      const arrow = col => (sortMode === col ? '<span class="glyphicon glyphicon-triangle-bottom" aria-hidden="true"></span>' : "");
+      return `
+        <div style="display:flex; font-size:12px; font-weight:bold; padding:4px 10px; border-bottom:2px solid rgba(128,128,128,0.4);">
+          <div class="vn-wache-sort-th" data-sort="id" style="flex:0 0 18%; cursor:pointer;">Wachen-ID ${arrow("id")}</div>
+          <div class="vn-wache-sort-th" data-sort="name" style="flex:1; cursor:pointer;">Name ${arrow("name")}</div>
+          <div style="flex:1;">Neuer Name</div>
+        </div>
+      `;
+    }
+
     function render() {
       const byCategory = new Map();
       for (const s of stations) {
@@ -3515,13 +3534,13 @@
           const rows = catStations
             .map(
               s => `
-            <div class="form-group vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" data-name="${escapeHtml(s.name)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-              <label style="flex: 0 0 45%; margin:0;">
-                ${escapeHtml(s.name)} <span class="text-muted" style="font-size:11px;">(ID ${escapeHtml(s.id)})</span>
-              </label>
-              <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
-              <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
-            </div>`
+            <tr class="vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" data-name="${escapeHtml(s.name)}">
+              <td class="text-muted">${escapeHtml(s.id)}</td>
+              <td>${escapeHtml(s.name)}</td>
+              <td>
+                <input type="text" class="form-control input-sm vn-building-name-input" placeholder="leer = keine Änderung">
+              </td>
+            </tr>`
             )
             .join("");
           return `
@@ -3531,25 +3550,18 @@
               <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
             </div>
             <div id="${collapseId}" class="panel-collapse collapse">
-              <div class="panel-body">${rows}</div>
+              <table class="table table-condensed" style="font-size:12px; margin-bottom:0;">
+                <colgroup><col style="width:18%;"><col><col></colgroup>
+                <tbody>${rows}</tbody>
+              </table>
             </div>
           </div>`;
         })
         .join("");
 
       body.innerHTML = `
-        <div class="form-inline" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
-          <label style="font-size:12px; margin:0;">Sortierung innerhalb der Kategorien:</label>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="btn btn-sm ${sortMode === "id" ? "btn-primary" : "btn-default"} vn-wache-sort" data-sort="id">
-              Nach Wachen-ID
-            </button>
-            <button type="button" class="btn btn-sm ${sortMode === "name" ? "btn-primary" : "btn-default"} vn-wache-sort" data-sort="name">
-              Nach Name
-            </button>
-          </div>
-        </div>
         <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung.</p>
+        ${categoryBlocks ? sortHeaderHtml() : ""}
         ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
         <div class="vn-sticky-footer">
           <button id="vn-btn-back" type="button" class="btn btn-default">
@@ -3561,9 +3573,9 @@
         </div>
       `;
 
-      body.querySelectorAll(".vn-wache-sort").forEach(btn => {
-        btn.addEventListener("click", () => {
-          sortMode = btn.dataset.sort;
+      body.querySelectorAll(".vn-wache-sort-th").forEach(th => {
+        th.addEventListener("click", () => {
+          sortMode = th.dataset.sort;
           render();
         });
       });
