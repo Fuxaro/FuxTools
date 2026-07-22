@@ -8,8 +8,8 @@
 // @match       https://www.leitstellenspiel.de/
 // @match       https://polizei.leitstellenspiel.de/
 // @icon        https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png
-// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
-// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js
+// @updateURL   https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
+// @downloadURL https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js
 // @run-at      document-idle
 // @grant       GM.setValue
 // @grant       GM.getValue
@@ -30,128 +30,51 @@
 // fuer die genauen Bedingungen.
 // -----------------------------------------------------------------------------
 
-(async function () {
-  //////////////////////////////////////////////////////////////////////////////
-  // KONFIGURATION - bei jedem Release/Beta-Push hier pruefen und anpassen.
-  //
-  //   SCRIPT_VERSION  muss manuell synchron mit dem @version-Wert im Header
-  //                   ganz oben in der Datei gehalten werden.
-  //   CHANNEL         "stable" auf dem main-Branch, "beta" auf dem beta-Branch.
-  //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
-  //                   passend zum jeweiligen Branch gesetzt sein.
-  //////////////////////////////////////////////////////////////////////////////
+(async function() {
   const SCRIPT_VERSION = "0.9.71";
-  const CHANNEL = "beta"; // "stable" oder "beta"
-  //////////////////////////////////////////////////////////////////////////////
-
+  const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
   const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
-  // Immer main, unabhaengig vom Kanal - das Logo ist ein reines Bild-Asset ohne
-  // Versionsbezug und liegt deshalb nur auf einem Branch (main), nicht auf beta.
   const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
-  // Eigene Kopie des Fahrzeug-Katalogs im FuxTools-Repo (siehe data/vehicle-types-fallback.json)
-  // - wird NUR genutzt, wenn die eigentliche Quelle api.lss-manager.de nicht erreichbar ist
-  // (siehe fetchVehicleTypeCatalog()). Ist zwangslaeufig irgendwann veraltet, verhindert aber,
-  // dass FuxTools komplett ohne Fahrzeugdaten dasteht, falls die fremde Seite mal down geht
-  // oder ganz verschwindet.
-  const VEHICLE_TYPES_FALLBACK_STABLE_URL =
-    "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
-  const VEHICLE_TYPES_FALLBACK_BETA_URL =
-    "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/data/vehicle-types-fallback.json";
+  const VEHICLE_TYPES_FALLBACK_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
+  const VEHICLE_TYPES_FALLBACK_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/data/vehicle-types-fallback.json";
   const VEHICLE_TYPES_FALLBACK_URL = CHANNEL === "beta" ? VEHICLE_TYPES_FALLBACK_BETA_URL : VEHICLE_TYPES_FALLBACK_STABLE_URL;
-  // Fuer den "Changelog anzeigen"-Button in den Einstellungen - zeigt immer den Stand des
-  // eigenen Kanals (Beta liest von beta, Stable von main), analog zu STABLE_URL/BETA_URL.
   const CHANGELOG_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/CHANGELOG.md";
   const CHANGELOG_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/CHANGELOG.md";
   const CHANGELOG_URL = CHANNEL === "beta" ? CHANGELOG_BETA_URL : CHANGELOG_STABLE_URL;
-
   let modalFooterEl = null;
   let availableUpdateVersion = null;
   let lastUpdateCheckAt = 0;
-  const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-  // Gesetzt, sobald irgendwo ein Update-Tab geoeffnet wurde (Update-Button in den
-  // Einstellungen oder "Neuinstallation erzwingen") - beim naechsten Oeffnen von
-  // FuxTools in diesem Tab wird dann einmalig neu geladen, damit garantiert die neue
-  // Version laeuft, falls der User sie im anderen Tab installiert hat. Bewusst kein
-  // sofortiger Reload-Zwang, da der User den Tampermonkey-Dialog im anderen Tab erst
-  // in Ruhe bestaetigen koennen soll.
+  const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1e3;
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
-
-  //////////////////////////////////////////////////
-  // Hintergrund-Task-System: laesst lang laufende Aktionen (Umbenennen, Fahrzeug-Besatzung)
-  // auch nach Schliessen des Fensters weiterlaufen, solange man auf der FuxTools-Startseite
-  // bleibt (FuxTools laeuft nur dort, siehe @match - eine echte Navigation zu einer anderen
-  // Spielseite wuerde das Script komplett beenden, das ist technisch nicht zu umgehen).
-  // Zeigt den Fortschritt stattdessen ueber ein kleines Icon direkt am Navbar-Eintrag, Klick
-  // darauf oeffnet wieder genau den laufenden/zuletzt fertigen Task statt des Hauptmenues.
-  // Bewusst nur EIN Task gleichzeitig aktiv - ein waehrenddessen gestarteter zweiter Task
-  // (z.B. erst Personalzuweisung, dann Umbenennen) landet in einer Warteschlange und startet
-  // automatisch, sobald der vorherige fertig ist, statt parallel zu laufen.
-  //////////////////////////////////////////////////
-  let backgroundTaskBadgeEl = null; // Icon-Overlay im eigenen Task-Center-Navbar-Eintrag
-  let taskCenterEntryEl = null; // das <li> selbst, siehe addMenuEntry()
-  const backgroundTaskQueue = []; // { title, start() } - start() rendert+laeuft den Task
-  let activeBackgroundTask = null; // { title, percent, progressText, cancel() }
-  let finishedBackgroundTask = null; // { title, renderResult() } - bis angeschaut/reopened
-  // Fahrzeug-Besatzung erlaubt bewusst MEHRERE Kategorien gleichzeitig (siehe bindCategoryButtons/
-  // runningCategoryRuns) - passt nicht in den "ein Task"-Slot oben, zaehlt aber fuer Warteschlange
-  // und Badge trotzdem als "etwas laeuft".
+  let backgroundTaskBadgeEl = null;
+  let taskCenterEntryEl = null;
+  const backgroundTaskQueue = [];
+  let activeBackgroundTask = null;
+  let finishedBackgroundTask = null;
   let activeCrewCategoryRunCount = 0;
-
-  // category -> laufender Abbrechen-Zustand ({cancelled, statusText}), solange ein Lauf aktiv
-  // ist - bewusst AUSSERHALB von renderVehicleCrewScreen (Modul-Ebene statt lokaler Closure!),
-  // damit ein Schliessen+Wiederoeffnen des Fensters (frischer Aufruf der Funktion) den Lauf
-  // weiterhin kennt: der neue Bildschirm zeigt die Kategorie sofort korrekt als "laeuft"/rot an
-  // statt sie versehentlich ein zweites Mal parallel starten zu koennen (siehe renderGroups/
-  // bindCategoryButtons). Alle Status-Updates suchen sich Button/Statuszeile bei JEDEM Update
-  // frisch per body.querySelector() statt einmal gecacht - body selbst ist ein fixer, nie neu
-  // erzeugter DOM-Knoten (nur .innerHTML wechselt), dadurch findet auch ein alter, noch
-  // laufender Worker-Loop nach einem Neu-Rendern die jeweils AKTUELLEN Elemente wieder.
-  const runningCategoryRuns = new Map();
-
-  // category -> {summary, finishedAt} fuer gerade fertig gewordene Kategorien, bis sie im
-  // Task-Center angesehen/verworfen wurden (siehe renderTaskCenterScreen) - ohne das wuerde
-  // der Navbar-Hinweis sofort nach Fertigstellung wieder verschwinden, ohne dass man das
-  // Ergebnis je zu sehen bekommt.
-  const finishedCrewCategoryRuns = new Map();
-
+  const runningCategoryRuns = new Map;
+  const finishedCrewCategoryRuns = new Map;
   function isBackgroundTaskSlotBusy() {
     return !!activeBackgroundTask || activeCrewCategoryRunCount > 0;
   }
-
   function updateBackgroundTaskBadge() {
     if (!backgroundTaskBadgeEl || !taskCenterEntryEl) return;
-    // Immer sichtbar (nicht mehr nur bei aktiven/fertigen Aufgaben versteckt) - man soll
-    // die Aufgaben-Uebersicht jederzeit oeffnen koennen, auch um zu sehen, dass gerade
-    // nichts laeuft/wartet, statt raten zu muessen, ob der Eintrag aus einem Grund fehlt.
     taskCenterEntryEl.style.display = "";
     if (isBackgroundTaskSlotBusy()) {
       const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
-      // Dreht sich NUR, waehrend wirklich etwas laeuft - kein Farb-Unterschied mehr noetig,
-      // drehen (laeuft) vs. stillstehen (fertig/Leerlauf) reicht als Signal.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
-      taskCenterEntryEl.title =
-        total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
+      taskCenterEntryEl.title = total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
     } else if (finishedBackgroundTask || finishedCrewCategoryRuns.size > 0) {
-      // Fertig: dasselbe Icon bleibt STEHEN (keine Animation mehr) statt zu einem anderen
-      // Symbol zu wechseln.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
       taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
     } else {
-      // Leerlauf: gleiches Icon, still stehend, kein Hintergrund.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
       taskCenterEntryEl.title = "FuxTools - Aufgaben-Übersicht (nichts aktiv)";
     }
   }
-
-  // Aktualisiert den Fortschritt eines laufenden Tasks - fasst NUR den Zustand an, die
-  // eigentlichen DOM-Elemente werden separat aktualisiert, je nachdem welcher Bildschirm
-  // GERADE sichtbar ist (eigene Fortschritts-Ansicht ODER Task-Center - siehe
-  // renderBackgroundTaskProgressScreen/renderTaskCenterScreen) - so geht bei geschlossenem
-  // Fenster oder einer inzwischen anders belegten Modal-Ansicht nichts kaputt, und die
-  // Anzeige "friert" nicht mehr ein, waehrend man das Task-Center offen laesst.
   function updateBackgroundTaskProgress(percent, text) {
     if (!activeBackgroundTask) return;
     activeBackgroundTask.percent = percent;
@@ -165,196 +88,82 @@
     if (tcBar) tcBar.style.width = `${percent}%`;
     if (tcTxt) tcTxt.textContent = text;
   }
-
   function renderBackgroundTaskProgressScreen() {
     if (!activeBackgroundTask) return;
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(activeBackgroundTask.title);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">Läuft im Hintergrund weiter, auch wenn du dieses Fenster schließt.</p>
-      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">
-        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
-        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;
-             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;
-             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
-      </div>
-      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">
-        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-      </button>
-    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">Läuft im Hintergrund weiter, auch wenn du dieses Fenster schließt.</p>\n      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">\n        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:${activeBackgroundTask.percent || 0}%;"></div>\n        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;\n             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;\n             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>\n      </div>\n      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">\n        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n      </button>\n    `;
     document.getElementById("vn-btn-cancel-run").addEventListener("click", () => activeBackgroundTask?.cancel());
   }
-
-  // Startet einen Task sofort, oder haengt ihn an die Warteschlange, falls schon einer
-  // laeuft (auch eine laufende Fahrzeug-Besatzung zaehlt, siehe isBackgroundTaskSlotBusy) -
-  // "start" bekommt KEINE Argumente und muss selbst activeBackgroundTask setzen (siehe
-  // beginBackgroundTask()) sowie am Ende finishBackgroundTask() aufrufen.
-  // "start" bekommt jetzt ein viaQueue-Flag: false beim direkten, synchronen Klick-Start
-  // (Nutzer ist gerade auf diesem Bildschirm - Fortschritt/Ergebnis darf den Bildschirm
-  // wechseln), true beim automatischen Weiterlaufen aus der Warteschlange (Nutzer ist
-  // moeglicherweise laengst woanders im Menue unterwegs - dann NICHT ungefragt dorthin
-  // umschalten, siehe runRenamePlan/finishBackgroundTask). Sichtbarkeit laeuft in dem Fall
-  // nur noch ueber den Navbar-Badge und das Task-Center.
   function runOrQueueBackgroundTask(title, start) {
     if (isBackgroundTaskSlotBusy()) {
-      backgroundTaskQueue.push({ title, start });
+      backgroundTaskQueue.push({
+        title: title,
+        start: start
+      });
       return "queued";
     }
     start(false);
     return "started";
   }
-
   function tryStartNextQueuedBackgroundTask() {
     if (isBackgroundTaskSlotBusy() || !backgroundTaskQueue.length) return;
     const next = backgroundTaskQueue.shift();
     next.start(true);
   }
-
   function beginBackgroundTask(title, cancel) {
-    activeBackgroundTask = { title, percent: 0, progressText: "", cancel };
+    activeBackgroundTask = {
+      title: title,
+      percent: 0,
+      progressText: "",
+      cancel: cancel
+    };
     finishedBackgroundTask = null;
     updateBackgroundTaskBadge();
     refreshTaskCenterIfVisible();
   }
-
-  // renderResult() wird spaeter aufgerufen (Klick auf Badge/Task-Center oder erneutes
-  // Oeffnen), falls der Nutzer bei Abschluss NICHT mehr auf der eigenen Fortschritts-Ansicht
-  // dieses Laufs war (shownLive false - siehe Aufrufer: prueft per DOM, ob genau dieser
-  // Bildschirm gerade sichtbar ist, NICHT nur "irgendein FuxTools-Fenster offen") - dann
-  // koennte der Nutzer laengst in einem ganz anderen Menue (z.B. Task-Center) unterwegs sein,
-  // ein ungefragter Bildschirmwechsel waere dort ueberraschend. Laeuft der naechste Task aus
-  // der Warteschlange, wird dessen Fortschritt bevorzugt gezeigt statt des alten Ergebnisses.
   function finishBackgroundTask(title, renderResult, shownLive) {
     activeBackgroundTask = null;
-    finishedBackgroundTask = shownLive ? null : { title, renderResult };
+    finishedBackgroundTask = shownLive ? null : {
+      title: title,
+      renderResult: renderResult
+    };
     updateBackgroundTaskBadge();
     tryStartNextQueuedBackgroundTask();
     refreshTaskCenterIfVisible();
   }
-
   function renderBackgroundTaskQueuedScreen(title, goBack) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(title);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>
-        <span class="glyphicon glyphicon-time" aria-hidden="true"></span>
-        <b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung")}</b> läuft noch -
-        <b>${escapeHtml(title)}</b> startet automatisch danach (Warteschlange, um nicht zu viele Anfragen
-        gleichzeitig zu stellen).
-      </p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
+    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-time" aria-hidden="true"></span>\n        <b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung")}</b> läuft noch -\n        <b>${escapeHtml(title)}</b> startet automatisch danach (Warteschlange, um nicht zu viele Anfragen\n        gleichzeitig zu stellen).\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
-
-  // Eigener Bildschirm ueber den Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon):
-  // zeigt ALLE laufenden/wartenden Hintergrund-Aufgaben auf einen Blick statt nur die eine
-  // "aktive" (Umbenennen) oder eine einzelne Fahrzeug-Besatzung-Kategorie - mit Fortschritt
-  // und eigenem Abbrechen je Eintrag. Fortschritts-Balken/Text werden per ID/Klasse+data-
-  // category live nachgetragen (siehe updateBackgroundTaskProgress/setCategoryStatusText) -
-  // vorher blieb die Ansicht ein reines Schnappschuss-Rendering und "eingefroren" stehen,
-  // solange man auf diesem Bildschirm blieb (erst ein erneutes Oeffnen zeigte den aktuellen
-  // Stand). Bei tatsaechlichem Start/Abschluss (nicht nur Fortschritts-Ticks) wird komplett
-  // neu gerendert (siehe refreshTaskCenterIfVisible()), damit z.B. ein fertig gewordener
-  // Lauf sofort in den "fertig"-Block wandert, statt bis zum naechsten Oeffnen dort zu bleiben.
   function renderTaskCenterScreen() {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("FuxTools-Aufgaben");
     const body = document.getElementById("vehicle-naming-modal-body");
-
     const items = [];
-
     if (activeBackgroundTask) {
-      items.push(`
-        <div class="vn-task-center-item">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-            <b>${escapeHtml(activeBackgroundTask.title)}</b>
-            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="rename">
-              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-            </button>
-          </div>
-          <div class="progress" style="margin:6px 0 2px; height:16px;">
-            <div id="vn-tc-rename-bar" class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
-          </div>
-          <div id="vn-tc-rename-text" class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
-        </div>
-      `);
+      items.push(`\n        <div class="vn-task-center-item">\n          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">\n            <b>${escapeHtml(activeBackgroundTask.title)}</b>\n            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="rename">\n              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n            </button>\n          </div>\n          <div class="progress" style="margin:6px 0 2px; height:16px;">\n            <div id="vn-tc-rename-bar" class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>\n          </div>\n          <div id="vn-tc-rename-text" class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>\n        </div>\n      `);
     }
-
     for (const [category, state] of runningCategoryRuns) {
-      const percent = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
-      items.push(`
-        <div class="vn-task-center-item">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-            <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b>
-            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="crew" data-category="${escapeHtml(category)}">
-              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
-            </button>
-          </div>
-          <div class="progress" style="margin:6px 0 2px; height:16px;">
-            <div class="progress-bar vn-tc-crew-bar" data-category="${escapeHtml(category)}" style="width:${percent}%;"></div>
-          </div>
-          <div class="text-muted vn-tc-crew-text" data-category="${escapeHtml(category)}" style="font-size:11px;">${escapeHtml(state.statusText || "läuft ...")}</div>
-        </div>
-      `);
+      const percent = state.total > 0 ? Math.round(state.done / state.total * 100) : 0;
+      items.push(`\n        <div class="vn-task-center-item">\n          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">\n            <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b>\n            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="crew" data-category="${escapeHtml(category)}">\n              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n            </button>\n          </div>\n          <div class="progress" style="margin:6px 0 2px; height:16px;">\n            <div class="progress-bar vn-tc-crew-bar" data-category="${escapeHtml(category)}" style="width:${percent}%;"></div>\n          </div>\n          <div class="text-muted vn-tc-crew-text" data-category="${escapeHtml(category)}" style="font-size:11px;">${escapeHtml(state.statusText || "läuft ...")}</div>\n        </div>\n      `);
     }
-
     for (const queued of backgroundTaskQueue) {
-      items.push(`
-        <div class="vn-task-center-item text-muted">
-          <span class="glyphicon glyphicon-time" aria-hidden="true"></span> ${escapeHtml(queued.title)} - wartet, bis Platz frei ist ...
-        </div>
-      `);
+      items.push(`\n        <div class="vn-task-center-item text-muted">\n          <span class="glyphicon glyphicon-time" aria-hidden="true"></span> ${escapeHtml(queued.title)} - wartet, bis Platz frei ist ...\n        </div>\n      `);
     }
-
     const finishedBlocks = [];
     if (finishedBackgroundTask) {
-      finishedBlocks.push(`
-        <div class="vn-task-center-item">
-          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-          <b>${escapeHtml(finishedBackgroundTask.title)}</b> ist fertig.
-          <button type="button" id="vn-task-center-view-result" class="btn btn-primary btn-xs" style="margin-left:8px;">
-            Ergebnis ansehen
-          </button>
-        </div>
-      `);
+      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>${escapeHtml(finishedBackgroundTask.title)}</b> ist fertig.\n          <button type="button" id="vn-task-center-view-result" class="btn btn-primary btn-xs" style="margin-left:8px;">\n            Ergebnis ansehen\n          </button>\n        </div>\n      `);
     }
     for (const [category, info] of finishedCrewCategoryRuns) {
-      finishedBlocks.push(`
-        <div class="vn-task-center-item">
-          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}
-          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">
-            Gesehen
-          </button>
-        </div>
-      `);
+      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">\n            Gesehen\n          </button>\n        </div>\n      `);
     }
-
-    const emptyState =
-      !items.length && !finishedBlocks.length
-        ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>`
-        : "";
-
-    body.innerHTML = `
-      <div id="vn-task-center-marker" style="display:none;"></div>
-      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>
-      ${finishedBlocks.join("")}
-      ${items.join("")}
-      ${emptyState}
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf
-        </button>
-      </div>
-    `;
-
+    const emptyState = !items.length && !finishedBlocks.length ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
+    body.innerHTML = `\n      <div id="vn-task-center-marker" style="display:none;"></div>\n      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderHistoryScreen);
     body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -381,247 +190,209 @@
       });
     });
   }
-
-  // Bei einem echten Struktur-Wechsel (Task fertig/gestartet/aus der Warteschlange gezogen -
-  // nicht nur ein Fortschritts-Tick) muss das Task-Center komplett neu gerendert werden, DAMIT
-  // z.B. ein fertig gewordener Lauf sofort in den "fertig"-Block wandert, statt erst nach
-  // Schliessen+Wiederoeffnen. Kein Effekt, wenn gerade ein anderer Bildschirm offen ist (siehe
-  // Marker in renderTaskCenterScreen()).
   function refreshTaskCenterIfVisible() {
     if (document.getElementById("vn-task-center-marker")) renderTaskCenterScreen();
   }
-
-  // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
-  // breit fuer den Wachen-Check mit seiner Tabelle - vermeidet leere Flaechen links/
-  // rechts bei einfachen Bildschirmen, ohne die Tabelle einzuquetschen.
   const MODAL_WIDTH_COMPACT = 520;
   const MODAL_WIDTH_DEFAULT = 900;
   const MODAL_WIDTH_WIDE = 1400;
-
   function setModalWidth(px) {
     const dialog = document.getElementById("vehicle-naming-modal-dialog");
     if (!dialog) return;
     dialog.style.minWidth = `min(${px}px, 95%)`;
     dialog.style.maxWidth = `min(${px}px, 95%)`;
   }
-
-  // Zeigt im Modal-Header IMMER, in welchem Menue/Untermenue man sich gerade befindet (z.B.
-  // "› Wachen-Bauplaner › Anwenden"), statt dass man das nur am Bildschirminhalt selbst
-  // erkennen kann. Wird von jedem render*Screen zu Beginn aufgerufen; leer = nur der reine
-  // Hauptmenue-Titel (siehe renderMainMenu).
   function setScreenTitle(text) {
     const el = document.getElementById("vehicle-naming-modal-breadcrumb");
     if (el) el.textContent = text ? `› ${text}` : "";
   }
-
-  // Sichtbarer Fehler-Hinweis fuer kritische, sonst nur in der Browser-Konsole sichtbare
-  // Fehler - Beta-Tester oeffnen die Konsole normalerweise nicht, ein reines console.error()
-  // geht also spurlos unter. Erscheint bewusst IMMER direkt auf der Seite (nicht im
-  // FuxTools-Modal), da manche dieser Fehler schon vor dem Oeffnen des Modals passieren
-  // (z.B. beim Start) oder das Modal deswegen ueberhaupt nicht erreichbar ist (z.B. wenn der
-  // Navbar-Eintrag selbst fehlschlaegt - siehe addMenuEntry()). Bleibt bis zum manuellen
-  // Schliessen stehen, damit Tester Zeit haben, einen Screenshot fuer den Bug-Report zu machen.
   function showErrorBanner(message) {
     let container = document.getElementById("fuxtools-error-toasts");
     if (!container) {
       container = document.createElement("div");
       container.id = "fuxtools-error-toasts";
-      container.style.cssText =
-        "position:fixed; bottom:16px; right:16px; z-index:99999; max-width:380px; " +
-        "display:flex; flex-direction:column; gap:8px; font-family:sans-serif;";
+      container.style.cssText = "position:fixed; bottom:16px; right:16px; z-index:99999; max-width:380px; " + "display:flex; flex-direction:column; gap:8px; font-family:sans-serif;";
       document.body.appendChild(container);
     }
-
     const toast = document.createElement("div");
-    toast.style.cssText =
-      "background:#d9534f; color:#fff; padding:10px 32px 10px 14px; border-radius:4px; " +
-      "box-shadow:0 2px 10px rgba(0,0,0,0.4); font-size:13px; line-height:1.4; position:relative;";
+    toast.style.cssText = "background:#d9534f; color:#fff; padding:10px 32px 10px 14px; border-radius:4px; " + "box-shadow:0 2px 10px rgba(0,0,0,0.4); font-size:13px; line-height:1.4; position:relative;";
     toast.innerHTML = `<b>FuxTools-Fehler:</b> ${escapeHtml(message)}`;
-
     const closeBtn = document.createElement("span");
     closeBtn.textContent = "×";
     closeBtn.setAttribute("aria-label", "Schließen");
-    closeBtn.style.cssText =
-      "position:absolute; top:4px; right:10px; cursor:pointer; font-weight:bold; font-size:16px; line-height:1;";
+    closeBtn.style.cssText = "position:absolute; top:4px; right:10px; cursor:pointer; font-weight:bold; font-size:16px; line-height:1;";
     closeBtn.addEventListener("click", () => toast.remove());
     toast.appendChild(closeBtn);
-
     container.appendChild(toast);
   }
-
   function reportError(context, error) {
     const message = error?.message || String(error);
     console.error(`[FuxTools] ${context}:`, error);
     showErrorBanner(`${context} - ${message}`);
-    logErrorToStorage(context, message).catch(e =>
-      console.error("[FuxTools] Fehlerprotokoll konnte nicht gespeichert werden:", e)
-    );
+    logErrorToStorage(context, message).catch(e => console.error("[FuxTools] Fehlerprotokoll konnte nicht gespeichert werden:", e));
   }
-
   const modalId = "vehicle-naming-modal";
   const cacheKeyVehicleTypes = "vehicleTypes";
-
   let vehicleTypeCaptions = {};
-  // Roh-Katalog von api.lss-manager.de (id -> {caption, staff: {min, max, training}, ...}) -
-  // "staff.training" beschreibt je Fahrzeugtyp, welche Ausbildungs-Slugs die Besatzung
-  // braucht (siehe getVehicleTypeRequirement() bei der Fahrzeug-Besatzung).
   let vehicleTypeCatalog = {};
   let namesStore = {};
-
-  // Kategorisierung der Gebaeudetypen (building_type-ID), abgeglichen mit der
-  // offiziellen deutschen Gebaeudetypen-Liste des Spiels. Kleinwachen teilen sich
-  // die building_type-ID mit ihrem normalen Pendant (z.B. Feuerwache/Feuerwache
-  // Kleinwache sind beide 0) und werden separat ueber "small_building" erkannt -
-  // brauchen deshalb keine eigenen IDs in dieser Liste. Schulen (Ausbildungsgebaeude)
-  // stehen zusammen mit dem Krankenhaus in einer eigenen Kategorie statt bei ihrer
-  // jeweiligen Fachrichtung.
   const BUILDING_CATEGORIES = {
-    Feuerwehr: [0],
-    Rettungsdienst: [2, 5, 12, 15, 21, 25],
-    "Krankenhäuser & Schulen": [1, 3, 4, 8, 10, 27],
-    Polizei: [6, 11, 13, 17, 24, 29],
-    THW: [9],
-    Seenotrettung: [26, 28],
-    Sonstiges: [7, 14, 16, 22, 23],
+    Feuerwehr: [ 0 ],
+    Rettungsdienst: [ 2, 5, 12, 15, 21, 25 ],
+    "Krankenhäuser & Schulen": [ 1, 3, 4, 8, 10, 27 ],
+    Polizei: [ 6, 11, 13, 17, 24, 29 ],
+    THW: [ 9 ],
+    Seenotrettung: [ 26, 28 ],
+    Sonstiges: [ 7, 14, 16, 22, 23 ]
   };
   const BUILDING_TYPE_TO_CATEGORY = {};
   for (const [category, ids] of Object.entries(BUILDING_CATEGORIES)) {
     for (const id of ids) BUILDING_TYPE_TO_CATEGORY[id] = category;
   }
-  const CATEGORY_ORDER = [
-    "Feuerwehr",
-    "Rettungsdienst",
-    "Krankenhäuser & Schulen",
-    "Polizei",
-    "THW",
-    "Seenotrettung",
-    "Sonstiges",
-    "Unbekannt",
-  ];
-
+  const CATEGORY_ORDER = [ "Feuerwehr", "Rettungsdienst", "Krankenhäuser & Schulen", "Polizei", "THW", "Seenotrettung", "Sonstiges", "Unbekannt" ];
   function categoryForBuilding(building) {
     const typeId = building?.building_type ?? building?.type;
     return BUILDING_TYPE_TO_CATEGORY[typeId] ?? "Unbekannt";
   }
-
-  // "Pseudo-Gebaeudetypen": Kleinwachen teilen sich die building_type-ID mit ihrem
-  // normalen Pendant (z.B. Feuerwache/Feuerwache Kleinwache sind beide 0), haben aber
-  // teils andere empfohlene Ausbauten - deshalb eigene IDs hier. Bewusst OHNE 16 (Verbandszellen)
-  // und 22/23 (Großer/Kleiner Komplex) - laut Nutzer-Rückmeldung keine tatsächlich baubaren
-  // Gebäudetypen im Spiel, wuerden im Wachen-Bauplaner-Dropdown nur verwirren. Bleiben in
-  // BUILDING_CATEGORIES ("Sonstiges") erhalten, falls ein Account doch noch so ein
-  // (vermutlich sehr altes) Gebaeude besitzt - nur hier fuer die Bauplan-Auswahl entfernt.
-  const PSEUDO_BUILDING_TYPES = [
-    { id: "0", buildingType: 0, smallBuilding: false },
-    { id: "1", buildingType: 1, smallBuilding: false },
-    { id: "2", buildingType: 2, smallBuilding: false },
-    { id: "3", buildingType: 3, smallBuilding: false },
-    { id: "4", buildingType: 4, smallBuilding: false },
-    { id: "5", buildingType: 5, smallBuilding: false },
-    { id: "6", buildingType: 6, smallBuilding: false },
-    { id: "7", buildingType: 7, smallBuilding: false },
-    { id: "8", buildingType: 8, smallBuilding: false },
-    { id: "9", buildingType: 9, smallBuilding: false },
-    { id: "10", buildingType: 10, smallBuilding: false },
-    { id: "11", buildingType: 11, smallBuilding: false },
-    { id: "12", buildingType: 12, smallBuilding: false },
-    { id: "13", buildingType: 13, smallBuilding: false },
-    { id: "14", buildingType: 14, smallBuilding: false },
-    { id: "15", buildingType: 15, smallBuilding: false },
-    { id: "17", buildingType: 17, smallBuilding: false },
-    { id: "18", buildingType: 0, smallBuilding: true },
-    { id: "19", buildingType: 6, smallBuilding: true },
-    { id: "20", buildingType: 2, smallBuilding: true },
-    { id: "21", buildingType: 21, smallBuilding: false },
-    { id: "24", buildingType: 24, smallBuilding: false },
-    { id: "25", buildingType: 25, smallBuilding: false },
-    { id: "26", buildingType: 26, smallBuilding: false },
-    { id: "27", buildingType: 27, smallBuilding: false },
-    { id: "28", buildingType: 28, smallBuilding: false },
-    { id: "29", buildingType: 29, smallBuilding: false },
-  ];
-
+  const PSEUDO_BUILDING_TYPES = [ {
+    id: "0",
+    buildingType: 0,
+    smallBuilding: false
+  }, {
+    id: "1",
+    buildingType: 1,
+    smallBuilding: false
+  }, {
+    id: "2",
+    buildingType: 2,
+    smallBuilding: false
+  }, {
+    id: "3",
+    buildingType: 3,
+    smallBuilding: false
+  }, {
+    id: "4",
+    buildingType: 4,
+    smallBuilding: false
+  }, {
+    id: "5",
+    buildingType: 5,
+    smallBuilding: false
+  }, {
+    id: "6",
+    buildingType: 6,
+    smallBuilding: false
+  }, {
+    id: "7",
+    buildingType: 7,
+    smallBuilding: false
+  }, {
+    id: "8",
+    buildingType: 8,
+    smallBuilding: false
+  }, {
+    id: "9",
+    buildingType: 9,
+    smallBuilding: false
+  }, {
+    id: "10",
+    buildingType: 10,
+    smallBuilding: false
+  }, {
+    id: "11",
+    buildingType: 11,
+    smallBuilding: false
+  }, {
+    id: "12",
+    buildingType: 12,
+    smallBuilding: false
+  }, {
+    id: "13",
+    buildingType: 13,
+    smallBuilding: false
+  }, {
+    id: "14",
+    buildingType: 14,
+    smallBuilding: false
+  }, {
+    id: "15",
+    buildingType: 15,
+    smallBuilding: false
+  }, {
+    id: "17",
+    buildingType: 17,
+    smallBuilding: false
+  }, {
+    id: "18",
+    buildingType: 0,
+    smallBuilding: true
+  }, {
+    id: "19",
+    buildingType: 6,
+    smallBuilding: true
+  }, {
+    id: "20",
+    buildingType: 2,
+    smallBuilding: true
+  }, {
+    id: "21",
+    buildingType: 21,
+    smallBuilding: false
+  }, {
+    id: "24",
+    buildingType: 24,
+    smallBuilding: false
+  }, {
+    id: "25",
+    buildingType: 25,
+    smallBuilding: false
+  }, {
+    id: "26",
+    buildingType: 26,
+    smallBuilding: false
+  }, {
+    id: "27",
+    buildingType: 27,
+    smallBuilding: false
+  }, {
+    id: "28",
+    buildingType: 28,
+    smallBuilding: false
+  }, {
+    id: "29",
+    buildingType: 29,
+    smallBuilding: false
+  } ];
   function getPseudoBuildingTypeId(building) {
-    const entry = PSEUDO_BUILDING_TYPES.find(
-      t => t.buildingType === building.building_type && t.smallBuilding === !!building.small_building,
-    );
+    const entry = PSEUDO_BUILDING_TYPES.find(t => t.buildingType === building.building_type && t.smallBuilding === !!building.small_building);
     return entry ? entry.id : null;
   }
-
-  // Kategorisierung der Feuerwehr-Fahrzeugliste im Bauplan-Editor (siehe vehicleInputsHtml),
-  // nachgebaut von der "Fahrzeug kaufen"-Seite im Spiel - nur Feuerwehr (buildingType 0) hat
-  // eine so grosse/unuebersichtliche Fahrzeugliste, dass sich das lohnt. Bewusst eine EXAKTE
-  // Namens-Zuordnung statt Muster-Erkennung, weil sich Praefixe sonst falsch ueberschneiden
-  // wuerden (z.B. WLF vs. AB-*, LF vs. HLF vs. TLF) - Zusammenstellung von einem Tester.
-  const FIRE_VEHICLE_CATEGORY_ORDER = [
-    "Löschfahrzeuge",
-    "Tanklöschfahrzeuge",
-    "Schlauchwagen",
-    "Andere Fahrzeuge",
-    "Rettungsdienst",
-    "Wasserrettung",
-    "Werkfeuerwehr",
-    "Flughafen",
-    "Logistik-Fahrzeuge",
-    "Netzersatzanlagen",
-    "Lüfter",
-    "Drohnen",
-    "Verpflegungsdienst",
-    "Bahnrettung",
-    "Sonderlöschmittel",
-    "Abrollbehälter",
-  ];
-
+  const FIRE_VEHICLE_CATEGORY_ORDER = [ "Löschfahrzeuge", "Tanklöschfahrzeuge", "Schlauchwagen", "Andere Fahrzeuge", "Rettungsdienst", "Wasserrettung", "Werkfeuerwehr", "Flughafen", "Logistik-Fahrzeuge", "Netzersatzanlagen", "Lüfter", "Drohnen", "Verpflegungsdienst", "Bahnrettung", "Sonderlöschmittel", "Abrollbehälter" ];
   const FIRE_VEHICLE_NAME_CATEGORIES = {
-    "Löschfahrzeuge": ["HLF10", "HLF20", "LF20", "LF10", "TSF-W", "KLF", "MLF", "LF8/6", "LF20/16", "LF10/6", "LF16-TS"],
-    "Tanklöschfahrzeuge": ["PTLF4000", "GTLF"],
-    Schlauchwagen: ["GW-L2-Wasser", "SW1000", "SW2000", "SW2000-Tr", "SW-KatS", "Anh Schlauch"],
-    "Andere Fahrzeuge": [
-      "DLK23",
-      "ELW1",
-      "RW",
-      "GW-A",
-      "GW-Öl",
-      "GW-Messtechnik",
-      "GW-Gefahrgut",
-      "GW-Höhenrettung",
-      "ELW2",
-      "MTW",
-      "Dekon-P",
-      "FwK",
-      "Kleintankwagen",
-      "Tankwagen",
-    ],
-    Rettungsdienst: ["RTW", "NEF", "KTW", "GRTW", "NAW", "ITW"],
-    Wasserrettung: ["GW-Taucher", "GW-Wasserrettung", "MZB"],
-    Werkfeuerwehr: ["GW-Werkfeuerwehr", "ULF mit Löscharm", "TM50", "Turbolöscher"],
-    Flughafen: ["FLF", "Rettungstreppe"],
-    "Logistik-Fahrzeuge": ["GW-L1", "GW-L2", "MTF-L", "LF-L", "AB-L"],
-    Netzersatzanlagen: ["NEA50", "NEA200", "AB-NEA50", "AB-NEA200"],
-    "Lüfter": ["GW-Lüfter", "Anh Lüfter", "AB-Lüfter"],
-    Drohnen: ["MTF-Drohne", "ELW-Drohne", "ELW2-Drohne"],
-    Verpflegungsdienst: ["GW-Verpflegung", "GW-Küche", "MTW-Verpflegung", "FKH"],
-    Bahnrettung: ["RW-Schiene", "HLF-Schiene", "AB-Schiene"],
-    "Sonderlöschmittel": ["SLF", "Anh Sonderlöschmittel", "AB-Sonderlöschmittel", "AB-Wasser/Schaum"],
-    "Abrollbehälter": ["WLF"],
+    "Löschfahrzeuge": [ "HLF10", "HLF20", "LF20", "LF10", "TSF-W", "KLF", "MLF", "LF8/6", "LF20/16", "LF10/6", "LF16-TS" ],
+    "Tanklöschfahrzeuge": [ "PTLF4000", "GTLF" ],
+    Schlauchwagen: [ "GW-L2-Wasser", "SW1000", "SW2000", "SW2000-Tr", "SW-KatS", "Anh Schlauch" ],
+    "Andere Fahrzeuge": [ "DLK23", "ELW1", "RW", "GW-A", "GW-Öl", "GW-Messtechnik", "GW-Gefahrgut", "GW-Höhenrettung", "ELW2", "MTW", "Dekon-P", "FwK", "Kleintankwagen", "Tankwagen" ],
+    Rettungsdienst: [ "RTW", "NEF", "KTW", "GRTW", "NAW", "ITW" ],
+    Wasserrettung: [ "GW-Taucher", "GW-Wasserrettung", "MZB" ],
+    Werkfeuerwehr: [ "GW-Werkfeuerwehr", "ULF mit Löscharm", "TM50", "Turbolöscher" ],
+    Flughafen: [ "FLF", "Rettungstreppe" ],
+    "Logistik-Fahrzeuge": [ "GW-L1", "GW-L2", "MTF-L", "LF-L", "AB-L" ],
+    Netzersatzanlagen: [ "NEA50", "NEA200", "AB-NEA50", "AB-NEA200" ],
+    "Lüfter": [ "GW-Lüfter", "Anh Lüfter", "AB-Lüfter" ],
+    Drohnen: [ "MTF-Drohne", "ELW-Drohne", "ELW2-Drohne" ],
+    Verpflegungsdienst: [ "GW-Verpflegung", "GW-Küche", "MTW-Verpflegung", "FKH" ],
+    Bahnrettung: [ "RW-Schiene", "HLF-Schiene", "AB-Schiene" ],
+    "Sonderlöschmittel": [ "SLF", "Anh Sonderlöschmittel", "AB-Sonderlöschmittel", "AB-Wasser/Schaum" ],
+    "Abrollbehälter": [ "WLF" ]
   };
-
   function normalizeFireVehicleName(name) {
-    return String(name || "")
-      .toUpperCase()
-      .replace(/\s+/g, "");
+    return String(name || "").toUpperCase().replace(/\s+/g, "");
   }
-
-  const FIRE_VEHICLE_NAME_LOOKUP = new Map();
+  const FIRE_VEHICLE_NAME_LOOKUP = new Map;
   for (const [category, names] of Object.entries(FIRE_VEHICLE_NAME_CATEGORIES)) {
     for (const name of names) FIRE_VEHICLE_NAME_LOOKUP.set(normalizeFireVehicleName(name), category);
   }
-
-  // Fuer Namen, die nicht 1:1 in der Liste stehen: die beiden Sammelkategorien, die der
-  // Tester ausdruecklich als Praefix-Regel genannt hat ("alle TLF", "alle AB-") - greifen nur,
-  // wenn der Name NICHT schon exakt einer anderen Kategorie zugeordnet ist (z.B. AB-Lüfter,
-  // AB-NEA50, AB-L sind trotz "AB-"-Praefix bewusst anders einsortiert, siehe oben). Alles
-  // andere (unbekannte/neue Fahrzeugtypen) landet in "Andere Fahrzeuge".
   function categorizeFireVehicleName(name) {
     const normalized = normalizeFireVehicleName(name);
     const exact = FIRE_VEHICLE_NAME_LOOKUP.get(normalized);
@@ -630,10 +401,6 @@
     if (normalized.startsWith("AB-")) return "Abrollbehälter";
     return "Andere Fahrzeuge";
   }
-
-  // Lesbare Gebaeudetyp-Namen, unabhaengig vom (frei waehlbaren) Wachen-Namen - wichtig
-  // im Wachen-Check, damit man bei einer umbenannten Wache trotzdem sofort sieht, um
-  // welchen Gebaeudetyp es sich handelt. Schluessel wie bei EXTENSION_CATALOG etc.
   const BUILDING_TYPE_NAMES = {
     "0_normal": "Feuerwache",
     "0_small": "Feuerwache (Kleinwache)",
@@ -664,376 +431,1113 @@
     "26_normal": "Seenotrettungswache",
     "27_normal": "Schule für Seefahrt und Seenotrettung",
     "28_normal": "Hubschrauberstation (Seenotrettung)",
-    "29_normal": "Autobahnpolizei",
+    "29_normal": "Autobahnpolizei"
   };
-
-  // Empfohlene Ausbauten je Pseudo-Gebaeudetyp, uebernommen aus einem bekannten
-  // Community-Skript ("Gebaeude- & Fuhrparkverwalter") - keine offizielle Vorgabe
-  // des Spiels, nur ein Richtwert. Nur Gebaeudetypen mit Eintrag hier werden im
-  // Wachen-Check auf fehlende Ausbauten geprueft.
   const RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID = {
-    "0": [16, 18, 25], // Feuerwache
-    "1": [0, 1, 2], // Feuerwehrschule
-    "2": [], // Rettungswache
-    "3": [0, 1, 2], // Rettungsschule
-    "4": [0, 1, 2, 3, 4, 5, 6, 7, 8], // Krankenhaus
-    "5": [], // Rettungshubschrauber-Station
-    "6": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16], // Polizeiwache
-    "8": [0, 1, 2], // Polizeischule
-    "9": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15], // THW
-    "10": [0, 1, 2], // THW Bundesschule
-    "11": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], // Bereitschaftspolizei
-    "12": [0, 1, 3, 4, 5, 6], // Schnelleinsatzgruppe (SEG)
-    "13": [], // Polizeihubschrauberstation
-    "15": [], // Wasserrettung
-    "17": [], // Polizei-Sondereinheiten
-    "18": [18], // Feuerwache (Kleinwache)
-    "19": [0, 1, 12], // Polizeiwache (Kleinwache)
-    "20": [], // Rettungswache (Kleinwache)
-    "21": [], // Rettungshundestaffel
-    "24": [], // Reiterstaffel
-    "25": [0, 1, 2, 3], // Bergrettungswache
-    "26": [], // Seenotrettungswache
-    "27": [0, 1, 2], // Schule fuer Seefahrt und Seenotrettung
-    "28": [], // Hubschrauberstation (Seenotrettung)
-    "29": [], // Autobahnpolizei
+    0: [ 16, 18, 25 ],
+    1: [ 0, 1, 2 ],
+    2: [],
+    3: [ 0, 1, 2 ],
+    4: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ],
+    5: [],
+    6: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16 ],
+    8: [ 0, 1, 2 ],
+    9: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15 ],
+    10: [ 0, 1, 2 ],
+    11: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ],
+    12: [ 0, 1, 3, 4, 5, 6 ],
+    13: [],
+    15: [],
+    17: [],
+    18: [ 18 ],
+    19: [ 0, 1, 12 ],
+    20: [],
+    21: [],
+    24: [],
+    25: [ 0, 1, 2, 3 ],
+    26: [],
+    27: [ 0, 1, 2 ],
+    28: [],
+    29: []
   };
-
-  //////////////////////////////////////////////////
-  // Ausbau-Katalog: echte Namen und Kosten (Credits/Coins) fuer Ausbauten, Lagerraeume
-  // und Ausbaustufen, wie sie im Spiel angezeigt werden. Schluessel: "<building_type>_
-  // normal" oder "<building_type>_small" (Kleinwache). Ermoeglicht das direkte Bauen aus
-  // FuxTools heraus.
-  //////////////////////////////////////////////////
-
   function getBuildingKey(building) {
     return `${building.building_type}_${building.small_building ? "small" : "normal"}`;
   }
-
   const EXTENSION_CATALOG = {
-    "0_normal": [
-      { id: 0, name: "Rettungsdienst", cost: 100000, coins: 20 },
-      { id: 1, name: "1te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 2, name: "2te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 3, name: "3te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 4, name: "4te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 5, name: "5te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 6, name: "Wasserrettung", cost: 400000, coins: 25 },
-      { id: 7, name: "6te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 8, name: "Flughafenfeuerwehr", cost: 300000, coins: 25 },
-      { id: 9, name: "Großwache", cost: 1000000, coins: 50 },
-      { id: 10, name: "7te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 11, name: "8te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 12, name: "9te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 13, name: "Werkfeuerwehr", cost: 100000, coins: 20 },
-      { id: 14, name: "Netzersatzanlage 50", cost: 100000, coins: 20 },
-      { id: 15, name: "Netzersatzanlage 200", cost: 100000, coins: 20 },
-      { id: 16, name: "Großlüfter", cost: 75000, coins: 15 },
-      { id: 17, name: "10te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 18, name: "Drohneneinheit", cost: 150000, coins: 25 },
-      { id: 19, name: "Verpflegungsdienst", cost: 200000, coins: 25 },
-      { id: 20, name: "1te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 21, name: "2te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 22, name: "3te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 23, name: "4te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 24, name: "5te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 25, name: "Bahnrettung", cost: 125000, coins: 25 },
-      { id: 26, name: "11te Ab-Stellplatz", cost: 150000, coins: 20 },
-      { id: 27, name: "12te Ab-Stellplatz", cost: 150000, coins: 20 },
-    ],
-    "0_small": [
-      { id: 0, name: "Rettungsdienst", cost: 100000, coins: 20 },
-      { id: 1, name: "1te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 2, name: "2te AB-Stellplatz", cost: 100000, coins: 20 },
-      { id: 6, name: "Wasserrettung", cost: 400000, coins: 25 },
-      { id: 8, name: "Flughafenfeuerwehr", cost: 300000, coins: 25 },
-      { id: 13, name: "Werkfeuerwehr", cost: 100000, coins: 20 },
-      { id: 14, name: "Netzersatzanlage 50", cost: 100000, coins: 20 },
-      { id: 16, name: "Großlüfter", cost: 75000, coins: 25 },
-      { id: 18, name: "Drohneneinheit", cost: 150000, coins: 25 },
-      { id: 19, name: "Verpflegungsdienst", cost: 200000, coins: 25 },
-      { id: 20, name: "1te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 21, name: "2te Anhänger Stellplatz", cost: 75000, coins: 15 },
-      { id: 25, name: "Bahnrettung", cost: 125000, coins: 25 },
-    ],
-    "1_normal": [
-      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-    ],
-    "2_normal": [{ id: 0, name: "Großwache", cost: 1000000, coins: 50 }],
-    "3_normal": [
-      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-    ],
-    "4_normal": [
-      { id: 0, name: "Allgemeine Innere", cost: 10000, coins: 10 },
-      { id: 1, name: "Allgemeine Chirurgie", cost: 10000, coins: 10 },
-      { id: 2, name: "Gynäkologie", cost: 70000, coins: 15 },
-      { id: 3, name: "Urologie", cost: 70000, coins: 15 },
-      { id: 4, name: "Unfallchirurgie", cost: 70000, coins: 15 },
-      { id: 5, name: "Neurologie", cost: 70000, coins: 15 },
-      { id: 6, name: "Neurochirurgie", cost: 70000, coins: 15 },
-      { id: 7, name: "Kardiologie", cost: 70000, coins: 15 },
-      { id: 8, name: "Kardiochirurgie", cost: 70000, coins: 15 },
-      { id: 9, name: "Großkrankenhaus", cost: 200000, coins: 50 },
-    ],
-    "5_normal": [{ id: 0, name: "Windenrettung", cost: 200000, coins: 15 }],
-    "6_normal": [
-      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
-      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
-      { id: 2, name: "3te Zelle", cost: 25000, coins: 5 },
-      { id: 3, name: "4te Zelle", cost: 25000, coins: 5 },
-      { id: 4, name: "5te Zelle", cost: 25000, coins: 5 },
-      { id: 5, name: "6te Zelle", cost: 25000, coins: 5 },
-      { id: 6, name: "7te Zelle", cost: 25000, coins: 5 },
-      { id: 7, name: "8te Zelle", cost: 25000, coins: 5 },
-      { id: 8, name: "9te Zelle", cost: 25000, coins: 5 },
-      { id: 9, name: "10te Zelle", cost: 25000, coins: 5 },
-      { id: 10, name: "Diensthundestaffel", cost: 100000, coins: 10 },
-      { id: 11, name: "Kriminalpolizei", cost: 100000, coins: 20 },
-      { id: 12, name: "Dienstgruppenleitung", cost: 200000, coins: 25 },
-      { id: 13, name: "Motorradstaffel", cost: 75000, coins: 15 },
-      { id: 14, name: "Großwache", cost: 1000000, coins: 50 },
-      { id: 15, name: "Großgewahrsam", cost: 200000, coins: 50 },
-      { id: 16, name: "Autobahnpolizei", cost: 75000, coins: 15 },
-    ],
-    "6_small": [
-      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
-      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
-      { id: 10, name: "Diensthundestaffel", cost: 100000, coins: 10 },
-      { id: 11, name: "Kriminalpolizei", cost: 100000, coins: 20 },
-      { id: 12, name: "Dienstgruppenleitung", cost: 200000, coins: 25 },
-      { id: 13, name: "Motorradstaffel", cost: 75000, coins: 15 },
-      { id: 16, name: "Autobahnpolizei", cost: 75000, coins: 15 },
-    ],
-    "8_normal": [
-      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-    ],
-    "9_normal": [
-      { id: 0, name: "1. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung", cost: 25000, coins: 5 },
-      { id: 1, name: "1. Technischer Zug: Zugtrupp", cost: 25000, coins: 5 },
-      { id: 2, name: "Fachgruppe Räumen", cost: 25000, coins: 5 },
-      { id: 3, name: "Fachgruppe Wassergefahren", cost: 500000, coins: 15 },
-      { id: 4, name: "2. Technischer Zug - Bergungsgruppe", cost: 25000, coins: 5 },
-      { id: 5, name: "2. Technischer Zug: Notversorgung/Notinstandsetzung", cost: 25000, coins: 5 },
-      { id: 6, name: "2. Technischer Zug: Zugtrupp", cost: 25000, coins: 5 },
-      { id: 7, name: "Fachgruppe Ortung", cost: 450000, coins: 25 },
-      { id: 8, name: "Fachgruppe Wasserschaden/Pumpen", cost: 200000, coins: 25 },
-      { id: 9, name: "Fachgruppe Schwere Bergung", cost: 200000, coins: 25 },
-      { id: 10, name: "Fachgruppe Elektroversorgung", cost: 200000, coins: 25 },
-      { id: 11, name: "Ortsverband-Mannschaftstransportwagen", cost: 50000, coins: 15 },
-      { id: 12, name: "Trupp Unbemannte Luftfahrtsysteme", cost: 50000, coins: 15 },
-      { id: 13, name: "Fachzug Führung und Kommunikation", cost: 300000, coins: 25 },
-      { id: 14, name: "Fachgruppe Logistik-Verpflegung", cost: 50000, coins: 15 },
-      { id: 15, name: "Fachgruppe Brückenbau", cost: 50000, coins: 15 },
-    ],
-    "10_normal": [
-      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-    ],
-    "11_normal": [
-      { id: 0, name: "2. Zug der 1. Hundertschaft", cost: 25000, coins: 5 },
-      { id: 1, name: "3. Zug der 1. Hundertschaft", cost: 25000, coins: 5 },
-      { id: 2, name: "Sonderfahrzeug: Gefangenenkraftwagen", cost: 25000, coins: 5 },
-      { id: 3, name: "Technischer Zug: Wasserwerfer", cost: 25000, coins: 5 },
-      { id: 4, name: "SEK: 1. Zug", cost: 100000, coins: 10 },
-      { id: 5, name: "SEK: 2. Zug", cost: 100000, coins: 10 },
-      { id: 6, name: "MEK: 1. Zug", cost: 100000, coins: 10 },
-      { id: 7, name: "MEK: 2. Zug", cost: 100000, coins: 10 },
-      { id: 8, name: "Diensthundestaffel", cost: 100000, coins: 10 },
-      { id: 9, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 10, name: "Lautsprecherkraftwagen", cost: 100000, coins: 10 },
-    ],
-    "12_normal": [
-      { id: 0, name: "Führung", cost: 25000, coins: 5 },
-      { id: 1, name: "Sanitätsdienst", cost: 25000, coins: 5 },
-      { id: 2, name: "Wasserrettung", cost: 500000, coins: 25 },
-      { id: 3, name: "Rettungshundestaffel", cost: 350000, coins: 25 },
-      { id: 4, name: "SEG-Drohne", cost: 50000, coins: 15 },
-      { id: 5, name: "Betreuungs- und Verpflegungsdienst", cost: 200000, coins: 25 },
-      { id: 6, name: "Technik und Sicherheit", cost: 200000, coins: 25 },
-    ],
-    "13_normal": [
-      { id: 0, name: "Außenlastbehälter", cost: 200000, coins: 15 },
-      { id: 1, name: "Windenrettung", cost: 200000, coins: 15 },
-    ],
-    "17_normal": [
-      { id: 0, name: "SEK: 1. Zug", cost: 100000, coins: 10 },
-      { id: 1, name: "SEK: 2. Zug", cost: 100000, coins: 10 },
-      { id: 2, name: "MEK: 1. Zug", cost: 100000, coins: 10 },
-      { id: 3, name: "MEK: 2. Zug", cost: 100000, coins: 10 },
-      { id: 4, name: "Diensthundestaffel", cost: 100000, coins: 10 },
-    ],
-    "24_normal": [
-      { id: 0, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 1, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 2, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 3, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 4, name: "Reiterstaffel", cost: 300000, coins: 25 },
-      { id: 5, name: "Reiterstaffel", cost: 300000, coins: 25 },
-    ],
-    "25_normal": [
-      { id: 0, name: "Höhenrettung", cost: 50000, coins: 25 },
-      { id: 1, name: "Drohneneinheit", cost: 75000, coins: 25 },
-      { id: 2, name: "Rettungshundestaffel", cost: 350000, coins: 25 },
-      { id: 3, name: "Rettungsdienst", cost: 100000, coins: 20 },
-    ],
-    "27_normal": [
-      { id: 0, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 1, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-      { id: 2, name: "Weiterer Klassenraum", cost: 400000, coins: 40 },
-    ],
-    "29_normal": [
-      { id: 0, name: "1te Zelle", cost: 25000, coins: 5 },
-      { id: 1, name: "2te Zelle", cost: 25000, coins: 5 },
-      { id: 2, name: "3te Zelle", cost: 25000, coins: 5 },
-      { id: 3, name: "4te Zelle", cost: 25000, coins: 5 },
-      { id: 4, name: "5te Zelle", cost: 25000, coins: 5 },
-      { id: 5, name: "6te Zelle", cost: 25000, coins: 5 },
-      { id: 6, name: "7te Zelle", cost: 25000, coins: 5 },
-      { id: 7, name: "8te Zelle", cost: 25000, coins: 5 },
-      { id: 8, name: "9te Zelle", cost: 25000, coins: 5 },
-      { id: 9, name: "10te Zelle", cost: 25000, coins: 5 },
-    ],
+    "0_normal": [ {
+      id: 0,
+      name: "Rettungsdienst",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 1,
+      name: "1te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 2,
+      name: "2te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      name: "3te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      name: "4te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 5,
+      name: "5te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 6,
+      name: "Wasserrettung",
+      cost: 4e5,
+      coins: 25
+    }, {
+      id: 7,
+      name: "6te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 8,
+      name: "Flughafenfeuerwehr",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 9,
+      name: "Großwache",
+      cost: 1e6,
+      coins: 50
+    }, {
+      id: 10,
+      name: "7te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 11,
+      name: "8te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 12,
+      name: "9te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 13,
+      name: "Werkfeuerwehr",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 14,
+      name: "Netzersatzanlage 50",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 15,
+      name: "Netzersatzanlage 200",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 16,
+      name: "Großlüfter",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 17,
+      name: "10te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 18,
+      name: "Drohneneinheit",
+      cost: 15e4,
+      coins: 25
+    }, {
+      id: 19,
+      name: "Verpflegungsdienst",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 20,
+      name: "1te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 21,
+      name: "2te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 22,
+      name: "3te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 23,
+      name: "4te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 24,
+      name: "5te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 25,
+      name: "Bahnrettung",
+      cost: 125e3,
+      coins: 25
+    }, {
+      id: 26,
+      name: "11te Ab-Stellplatz",
+      cost: 15e4,
+      coins: 20
+    }, {
+      id: 27,
+      name: "12te Ab-Stellplatz",
+      cost: 15e4,
+      coins: 20
+    } ],
+    "0_small": [ {
+      id: 0,
+      name: "Rettungsdienst",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 1,
+      name: "1te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 2,
+      name: "2te AB-Stellplatz",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 6,
+      name: "Wasserrettung",
+      cost: 4e5,
+      coins: 25
+    }, {
+      id: 8,
+      name: "Flughafenfeuerwehr",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 13,
+      name: "Werkfeuerwehr",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 14,
+      name: "Netzersatzanlage 50",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 16,
+      name: "Großlüfter",
+      cost: 75e3,
+      coins: 25
+    }, {
+      id: 18,
+      name: "Drohneneinheit",
+      cost: 15e4,
+      coins: 25
+    }, {
+      id: 19,
+      name: "Verpflegungsdienst",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 20,
+      name: "1te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 21,
+      name: "2te Anhänger Stellplatz",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 25,
+      name: "Bahnrettung",
+      cost: 125e3,
+      coins: 25
+    } ],
+    "1_normal": [ {
+      id: 0,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 1,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 2,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    } ],
+    "2_normal": [ {
+      id: 0,
+      name: "Großwache",
+      cost: 1e6,
+      coins: 50
+    } ],
+    "3_normal": [ {
+      id: 0,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 1,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 2,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    } ],
+    "4_normal": [ {
+      id: 0,
+      name: "Allgemeine Innere",
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      name: "Allgemeine Chirurgie",
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 2,
+      name: "Gynäkologie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 3,
+      name: "Urologie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 4,
+      name: "Unfallchirurgie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 5,
+      name: "Neurologie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 6,
+      name: "Neurochirurgie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 7,
+      name: "Kardiologie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 8,
+      name: "Kardiochirurgie",
+      cost: 7e4,
+      coins: 15
+    }, {
+      id: 9,
+      name: "Großkrankenhaus",
+      cost: 2e5,
+      coins: 50
+    } ],
+    "5_normal": [ {
+      id: 0,
+      name: "Windenrettung",
+      cost: 2e5,
+      coins: 15
+    } ],
+    "6_normal": [ {
+      id: 0,
+      name: "1te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "2te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 2,
+      name: "3te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 3,
+      name: "4te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 4,
+      name: "5te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 5,
+      name: "6te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 6,
+      name: "7te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 7,
+      name: "8te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 8,
+      name: "9te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 9,
+      name: "10te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 10,
+      name: "Diensthundestaffel",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 11,
+      name: "Kriminalpolizei",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 12,
+      name: "Dienstgruppenleitung",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 13,
+      name: "Motorradstaffel",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 14,
+      name: "Großwache",
+      cost: 1e6,
+      coins: 50
+    }, {
+      id: 15,
+      name: "Großgewahrsam",
+      cost: 2e5,
+      coins: 50
+    }, {
+      id: 16,
+      name: "Autobahnpolizei",
+      cost: 75e3,
+      coins: 15
+    } ],
+    "6_small": [ {
+      id: 0,
+      name: "1te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "2te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 10,
+      name: "Diensthundestaffel",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 11,
+      name: "Kriminalpolizei",
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 12,
+      name: "Dienstgruppenleitung",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 13,
+      name: "Motorradstaffel",
+      cost: 75e3,
+      coins: 15
+    }, {
+      id: 16,
+      name: "Autobahnpolizei",
+      cost: 75e3,
+      coins: 15
+    } ],
+    "8_normal": [ {
+      id: 0,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 1,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 2,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    } ],
+    "9_normal": [ {
+      id: 0,
+      name: "1. Technischer Zug: Fachgruppe Notversorgung/Notinstandsetzung",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "1. Technischer Zug: Zugtrupp",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 2,
+      name: "Fachgruppe Räumen",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 3,
+      name: "Fachgruppe Wassergefahren",
+      cost: 5e5,
+      coins: 15
+    }, {
+      id: 4,
+      name: "2. Technischer Zug - Bergungsgruppe",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 5,
+      name: "2. Technischer Zug: Notversorgung/Notinstandsetzung",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 6,
+      name: "2. Technischer Zug: Zugtrupp",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 7,
+      name: "Fachgruppe Ortung",
+      cost: 45e4,
+      coins: 25
+    }, {
+      id: 8,
+      name: "Fachgruppe Wasserschaden/Pumpen",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 9,
+      name: "Fachgruppe Schwere Bergung",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 10,
+      name: "Fachgruppe Elektroversorgung",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 11,
+      name: "Ortsverband-Mannschaftstransportwagen",
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 12,
+      name: "Trupp Unbemannte Luftfahrtsysteme",
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 13,
+      name: "Fachzug Führung und Kommunikation",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 14,
+      name: "Fachgruppe Logistik-Verpflegung",
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 15,
+      name: "Fachgruppe Brückenbau",
+      cost: 5e4,
+      coins: 15
+    } ],
+    "10_normal": [ {
+      id: 0,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 1,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 2,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    } ],
+    "11_normal": [ {
+      id: 0,
+      name: "2. Zug der 1. Hundertschaft",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "3. Zug der 1. Hundertschaft",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 2,
+      name: "Sonderfahrzeug: Gefangenenkraftwagen",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 3,
+      name: "Technischer Zug: Wasserwerfer",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 4,
+      name: "SEK: 1. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 5,
+      name: "SEK: 2. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 6,
+      name: "MEK: 1. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 7,
+      name: "MEK: 2. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 8,
+      name: "Diensthundestaffel",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 9,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 10,
+      name: "Lautsprecherkraftwagen",
+      cost: 1e5,
+      coins: 10
+    } ],
+    "12_normal": [ {
+      id: 0,
+      name: "Führung",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "Sanitätsdienst",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 2,
+      name: "Wasserrettung",
+      cost: 5e5,
+      coins: 25
+    }, {
+      id: 3,
+      name: "Rettungshundestaffel",
+      cost: 35e4,
+      coins: 25
+    }, {
+      id: 4,
+      name: "SEG-Drohne",
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 5,
+      name: "Betreuungs- und Verpflegungsdienst",
+      cost: 2e5,
+      coins: 25
+    }, {
+      id: 6,
+      name: "Technik und Sicherheit",
+      cost: 2e5,
+      coins: 25
+    } ],
+    "13_normal": [ {
+      id: 0,
+      name: "Außenlastbehälter",
+      cost: 2e5,
+      coins: 15
+    }, {
+      id: 1,
+      name: "Windenrettung",
+      cost: 2e5,
+      coins: 15
+    } ],
+    "17_normal": [ {
+      id: 0,
+      name: "SEK: 1. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 1,
+      name: "SEK: 2. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 2,
+      name: "MEK: 1. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 3,
+      name: "MEK: 2. Zug",
+      cost: 1e5,
+      coins: 10
+    }, {
+      id: 4,
+      name: "Diensthundestaffel",
+      cost: 1e5,
+      coins: 10
+    } ],
+    "24_normal": [ {
+      id: 0,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 1,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 2,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 3,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 4,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    }, {
+      id: 5,
+      name: "Reiterstaffel",
+      cost: 3e5,
+      coins: 25
+    } ],
+    "25_normal": [ {
+      id: 0,
+      name: "Höhenrettung",
+      cost: 5e4,
+      coins: 25
+    }, {
+      id: 1,
+      name: "Drohneneinheit",
+      cost: 75e3,
+      coins: 25
+    }, {
+      id: 2,
+      name: "Rettungshundestaffel",
+      cost: 35e4,
+      coins: 25
+    }, {
+      id: 3,
+      name: "Rettungsdienst",
+      cost: 1e5,
+      coins: 20
+    } ],
+    "27_normal": [ {
+      id: 0,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 1,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    }, {
+      id: 2,
+      name: "Weiterer Klassenraum",
+      cost: 4e5,
+      coins: 40
+    } ],
+    "29_normal": [ {
+      id: 0,
+      name: "1te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 1,
+      name: "2te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 2,
+      name: "3te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 3,
+      name: "4te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 4,
+      name: "5te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 5,
+      name: "6te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 6,
+      name: "7te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 7,
+      name: "8te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 8,
+      name: "9te Zelle",
+      cost: 25e3,
+      coins: 5
+    }, {
+      id: 9,
+      name: "10te Zelle",
+      cost: 25e3,
+      coins: 5
+    } ]
   };
-
   const STORAGE_CATALOG = {
-    "0_normal": [
-      { id: "initial_containers", name: "Lagerraum", cost: 25000, coins: 10 },
-      { id: "additional_containers_1", name: "1te Zusätzlicher Lagerraum", cost: 50000, coins: 12 },
-      { id: "additional_containers_2", name: "2te Zusätzlicher Lagerraum", cost: 50000, coins: 12 },
-      { id: "additional_containers_3", name: "3te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
-      { id: "additional_containers_4", name: "4te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
-      { id: "additional_containers_5", name: "5te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
-      { id: "additional_containers_6", name: "6te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
-      { id: "additional_containers_7", name: "7te Zusätzlicher Lagerraum", cost: 100000, coins: 15 },
-    ],
-    "0_small": [
-      { id: "initial_containers", name: "Lagerraum", cost: 25000, coins: 10 },
-      { id: "additional_containers_1", name: "1te Zusätzlicher Lagerraum", cost: 50000, coins: 10 },
-      { id: "additional_containers_2", name: "2te Zusätzlicher Lagerraum", cost: 50000, coins: 10 },
-    ],
-    "5_normal": [{ id: "initial_helicopter_equipment", name: "Lagerraum", cost: 25000, coins: 10 }],
-    "13_normal": [{ id: "initial_helicopter_equipment", name: "Lagerraum", cost: 25000, coins: 10 }],
+    "0_normal": [ {
+      id: "initial_containers",
+      name: "Lagerraum",
+      cost: 25e3,
+      coins: 10
+    }, {
+      id: "additional_containers_1",
+      name: "1te Zusätzlicher Lagerraum",
+      cost: 5e4,
+      coins: 12
+    }, {
+      id: "additional_containers_2",
+      name: "2te Zusätzlicher Lagerraum",
+      cost: 5e4,
+      coins: 12
+    }, {
+      id: "additional_containers_3",
+      name: "3te Zusätzlicher Lagerraum",
+      cost: 1e5,
+      coins: 15
+    }, {
+      id: "additional_containers_4",
+      name: "4te Zusätzlicher Lagerraum",
+      cost: 1e5,
+      coins: 15
+    }, {
+      id: "additional_containers_5",
+      name: "5te Zusätzlicher Lagerraum",
+      cost: 1e5,
+      coins: 15
+    }, {
+      id: "additional_containers_6",
+      name: "6te Zusätzlicher Lagerraum",
+      cost: 1e5,
+      coins: 15
+    }, {
+      id: "additional_containers_7",
+      name: "7te Zusätzlicher Lagerraum",
+      cost: 1e5,
+      coins: 15
+    } ],
+    "0_small": [ {
+      id: "initial_containers",
+      name: "Lagerraum",
+      cost: 25e3,
+      coins: 10
+    }, {
+      id: "additional_containers_1",
+      name: "1te Zusätzlicher Lagerraum",
+      cost: 5e4,
+      coins: 10
+    }, {
+      id: "additional_containers_2",
+      name: "2te Zusätzlicher Lagerraum",
+      cost: 5e4,
+      coins: 10
+    } ],
+    "5_normal": [ {
+      id: "initial_helicopter_equipment",
+      name: "Lagerraum",
+      cost: 25e3,
+      coins: 10
+    } ],
+    "13_normal": [ {
+      id: "initial_helicopter_equipment",
+      name: "Lagerraum",
+      cost: 25e3,
+      coins: 10
+    } ]
   };
-
-  // Ausbaustufen-Kosten je Stufe (kumulativ ansteigend, direkt auf eine Zielstufe
-  // ausbaubar). Separates System von den einzelnen Ausbauten oben - "level" auf dem
-  // Gebaeude-Objekt ist die aktuell erreichte Stufe.
   function buildUniformLevels(count, cost, coins) {
-    return Array.from({ length: count }, (_, i) => ({ id: i, cost, coins }));
+    return Array.from({
+      length: count
+    }, (_, i) => ({
+      id: i,
+      cost: cost,
+      coins: coins
+    }));
   }
   const LEVEL_CATALOG = {
-    "0_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      // Bis Stufe 19 (nicht 18) - bestaetigt durch eine Wache, die im Spiel bereits auf
-      // Stufe 19 stand, waehrend der Katalog hier noch bei 18 endete.
-      ...buildUniformLevels(18, 100000, 20).map((l, i) => ({ id: i + 2, cost: l.cost, coins: l.coins })),
-    ],
-    "0_small": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      { id: 2, cost: 100000, coins: 20 },
-      { id: 3, cost: 100000, coins: 20 },
-      { id: 4, cost: 100000, coins: 20 },
-    ],
-    "2_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
-    ],
-    "2_small": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      { id: 2, cost: 100000, coins: 20 },
-      { id: 3, cost: 100000, coins: 20 },
-      { id: 4, cost: 100000, coins: 20 },
-    ],
-    "4_normal": Array.from({ length: 20 }, (_, i) => ({ id: i, cost: 19000, coins: 11 })),
-    "6_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
-    ],
-    "6_small": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      { id: 2, cost: 100000, coins: 20 },
-      { id: 3, cost: 100000, coins: 20 },
-      { id: 4, cost: 100000, coins: 20 },
-    ],
-    "15_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      { id: 2, cost: 100000, coins: 20 },
-      { id: 3, cost: 100000, coins: 20 },
-      { id: 4, cost: 100000, coins: 20 },
-    ],
-    "25_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      ...Array.from({ length: 12 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
-    ],
-    "26_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      { id: 2, cost: 100000, coins: 20 },
-      { id: 3, cost: 100000, coins: 20 },
-      { id: 4, cost: 100000, coins: 20 },
-    ],
-    "29_normal": [
-      { id: 0, cost: 10000, coins: 10 },
-      { id: 1, cost: 50000, coins: 15 },
-      ...Array.from({ length: 7 }, (_, i) => ({ id: i + 2, cost: 100000, coins: 20 })),
-    ],
+    "0_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, ...buildUniformLevels(18, 1e5, 20).map((l, i) => ({
+      id: i + 2,
+      cost: l.cost,
+      coins: l.coins
+    })) ],
+    "0_small": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 2,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      cost: 1e5,
+      coins: 20
+    } ],
+    "2_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, ...Array.from({
+      length: 12
+    }, (_, i) => ({
+      id: i + 2,
+      cost: 1e5,
+      coins: 20
+    })) ],
+    "2_small": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 2,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      cost: 1e5,
+      coins: 20
+    } ],
+    "4_normal": Array.from({
+      length: 20
+    }, (_, i) => ({
+      id: i,
+      cost: 19e3,
+      coins: 11
+    })),
+    "6_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, ...Array.from({
+      length: 12
+    }, (_, i) => ({
+      id: i + 2,
+      cost: 1e5,
+      coins: 20
+    })) ],
+    "6_small": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 2,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      cost: 1e5,
+      coins: 20
+    } ],
+    "15_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 2,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      cost: 1e5,
+      coins: 20
+    } ],
+    "25_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, ...Array.from({
+      length: 12
+    }, (_, i) => ({
+      id: i + 2,
+      cost: 1e5,
+      coins: 20
+    })) ],
+    "26_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, {
+      id: 2,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 3,
+      cost: 1e5,
+      coins: 20
+    }, {
+      id: 4,
+      cost: 1e5,
+      coins: 20
+    } ],
+    "29_normal": [ {
+      id: 0,
+      cost: 1e4,
+      coins: 10
+    }, {
+      id: 1,
+      cost: 5e4,
+      coins: 15
+    }, ...Array.from({
+      length: 7
+    }, (_, i) => ({
+      id: i + 2,
+      cost: 1e5,
+      coins: 20
+    })) ]
   };
-
-  //////////////////////////////////////////////////
-  // Speicher ueber Tampermonkey (GM.setValue/GM.getValue) statt IndexedDB.
-  // Vorteil: haengt am Script, nicht an der Website-Origin - Einstellungen/Namen
-  // bleiben so auch zwischen www.leitstellenspiel.de und polizei.leitstellenspiel.de
-  // (getrennte Origins, getrennte IndexedDBs) erhalten und ueberleben ein "Cookies/
-  // Website-Daten loeschen" im Browser.
-  //////////////////////////////////////////////////
-
   async function storeData(data, key) {
     await GM.setValue(key, data);
   }
-
   async function retrieveData(key) {
     return await GM.getValue(key, undefined);
   }
-
-  // Verlauf aller Aktionen ueber FuxTools (Ausbauten/Lagerraeume/Ausbaustufen bauen,
-  // Fahrzeuge/Wachen/Leitstellen umbenennen) - rein informativ (Hauptmenue > Sonstiges
-  // > Verlauf), hat keinen Einfluss auf die eigentliche Aktion. Umbenennungen werden
-  // bewusst NICHT pro Fahrzeug/Wache geloggt, sondern einmal zusammengefasst pro Lauf
-  // (Typ + Anzahl), sonst waere der Verlauf bei grossen Umbenennungen unlesbar voll.
-  // Die Script-Version wird mitgespeichert, um bei spaeteren Fehlermeldungen zuordnen
-  // zu koennen, mit welcher Version eine Aktion ausgefuehrt wurde.
   const HISTORY_STORAGE_KEY = "actionHistory";
   const HISTORY_MAX_ENTRIES = 300;
-
-  // Fehlerprotokoll: die letzten kritischen Fehler (siehe reportError()) werden zusaetzlich
-  // hier gespeichert, nicht nur als Toast angezeigt - ein Beta-Tester kann den Toast leicht
-  // wegklicken oder verpassen, bevor er einen Screenshot macht. Rein diagnostisch (Export in
-  // den Einstellungen), hat keinen Einfluss auf die eigentliche Funktion von FuxTools.
   const ERROR_LOG_KEY = "errorLog";
   const ERROR_LOG_MAX_ENTRIES = 20;
-
   async function getErrorLog() {
-    return (await retrieveData(ERROR_LOG_KEY)) || [];
+    return await retrieveData(ERROR_LOG_KEY) || [];
   }
-
   async function logErrorToStorage(context, message) {
     const log = await getErrorLog();
-    log.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, context, message });
+    log.unshift({
+      timestamp: Date.now(),
+      version: SCRIPT_VERSION,
+      context: context,
+      message: message
+    });
     if (log.length > ERROR_LOG_MAX_ENTRIES) log.length = ERROR_LOG_MAX_ENTRIES;
     await storeData(log, ERROR_LOG_KEY);
   }
@@ -1051,228 +1555,136 @@
     personnel_requirements_config: "Personal-Standard",
     schooling_start: "Schulung gestartet",
     crew_assignment: "Fahrzeug-Besatzung",
-    crew_unassign_all: "Besatzung abgezogen",
+    crew_unassign_all: "Besatzung abgezogen"
   };
-
   async function getHistory() {
-    return (await retrieveData(HISTORY_STORAGE_KEY)) || [];
+    return await retrieveData(HISTORY_STORAGE_KEY) || [];
   }
-
   async function logHistoryEntry(entry) {
     const history = await getHistory();
-    history.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, status: "done", ...entry });
+    history.unshift({
+      timestamp: Date.now(),
+      version: SCRIPT_VERSION,
+      status: "done",
+      ...entry
+    });
     if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
     await storeData(history, HISTORY_STORAGE_KEY);
   }
-
-  // Fuer lang laufende Aktionen (Umbenennen, Fahrzeug-Besatzung, Besatzung abziehen): Eintrag
-  // schon beim START anlegen (status "running"), nicht erst am Ende - so bleibt sichtbar, ob
-  // ein Lauf tatsaechlich normal fertig wurde oder z.B. durch F5/Schliessen mitten drin
-  // unterbrochen wurde (der Eintrag bleibt dann einfach auf "running" stehen, da niemand mehr
-  // da ist, um ihn zu aktualisieren). finishHistoryEntry() aktualisiert DENSELBEN Eintrag per
-  // id, statt einen zweiten anzulegen.
   async function startHistoryEntry(entry) {
     const history = await getHistory();
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    history.unshift({ id, timestamp: Date.now(), version: SCRIPT_VERSION, status: "running", ...entry });
+    history.unshift({
+      id: id,
+      timestamp: Date.now(),
+      version: SCRIPT_VERSION,
+      status: "running",
+      ...entry
+    });
     if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
     await storeData(history, HISTORY_STORAGE_KEY);
     return id;
   }
-
   async function updateHistoryEntry(id, updates) {
     if (!id) return;
     const history = await getHistory();
     const entry = history.find(e => e.id === id);
-    if (!entry) return; // z.B. durch HISTORY_MAX_ENTRIES schon rausgefallen - kein Fehler
+    if (!entry) return;
     Object.assign(entry, updates);
     await storeData(history, HISTORY_STORAGE_KEY);
   }
-
-  // Ordnet einen Umbenennen-/Reset-Lauf (itemNoun+verb aus executeRenamePlan) einem
-  // Verlaufs-Typ zu. itemNoun ist immer eine der drei folgenden Werte (siehe alle
-  // executeRenamePlan-Aufrufstellen).
   function renameHistoryType(itemNoun, verb) {
     if (itemNoun === "Fahrzeug(e)") return verb === "zurückgesetzt" ? "vehicle_reset" : "vehicle_rename";
     if (itemNoun === "Wache(n)") return "station_rename";
     return "leitstelle_rename";
   }
-
-  // Ueberschreibt optional, welche Ausbauten je Gebaeudetyp im Wachen-Check als
-  // "gefordert" (orange) markiert werden - Standard ist RECOMMENDED_EXTENSIONS_BY_
-  // PSEUDO_ID. Komplett fehlend (kein GM-Wert gespeichert) bedeutet "ueberall Standard
-  // verwenden"; sobald einmal in den Einstellungen gespeichert, wird die komplette
-  // Konfiguration aus dem GM-Speicher genutzt (kein Mischen von Standard + Custom).
   const CUSTOM_REQUIRED_EXTENSIONS_KEY = "customRequiredExtensions";
-
   async function getRequiredExtensionsOverrides() {
     return await retrieveData(CUSTOM_REQUIRED_EXTENSIONS_KEY);
   }
-
   function getDefaultRequiredExtensions(pseudoId) {
     return RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID[pseudoId] || [];
   }
-
-  // Personal-Check: es gibt keine JSON-API fuer Personal-Ausbildungen, nur die HTML-
-  // Seite jeder Wache (/buildings/{id}/personals). Dort traegt jede Personal-Zeile ein
-  // data-filterable-by="[...]"-Attribut mit den Ausbildungs-Slugs dieser Person (z.B.
-  // "elw2"), die "Ausbildung"-Spalte zeigt dazu den Klartext-Namen. Da das pro Wache
-  // eine eigene Anfrage braucht (keine Sammel-API wie bei Gebaeuden), scannt ein Lauf
-  // IMMER alle Kategorien zusammen (schnell genug), nicht mehr einzeln - siehe
-  // scanAllPersonnel(). Wird automatisch angestossen, wenn der letzte Scan laut
-  // PERSONNEL_SCAN_META_KEY laenger als PERSONNEL_SCAN_STALE_MS her ist (siehe
-  // ensureFreshPersonnelScan()), zusaetzlich jederzeit manuell ausloesbar.
-  const PERSONNEL_SCAN_KEY = "personnelScanData"; // { [buildingId]: { counts, names, total, ... } }
-  const PERSONNEL_SCAN_META_KEY = "personnelScanMeta"; // { lastScanAt: timestamp } - EIN Zeitstempel fuer alle Kategorien
-  const PERSONNEL_QUALIFICATIONS_KEY = "personnelQualifications"; // { [slug]: displayName }, waechst mit jedem Scan
-  // Mindest-Personalstaerke (scan.total) einer Wache, bevor Schulungen (siehe unten) ueberhaupt
-  // Personal von ihr einplant - schuetzt frisch gebaute/kleine Wachen mit wenig Personal davor,
-  // sofort leergeraeumt zu werden. 0 = Standard = keine Einschraenkung.
+  const PERSONNEL_SCAN_KEY = "personnelScanData";
+  const PERSONNEL_SCAN_META_KEY = "personnelScanMeta";
+  const PERSONNEL_QUALIFICATIONS_KEY = "personnelQualifications";
   const PERSONNEL_SCHOOLING_MIN_STAFF_KEY = "personnelSchoolingMinStaff";
-  // Bei Fahrzeugen mit Teil-Anforderung (z.B. GRTW/NAW: nur 1 von 6 mit Notarzt-Ausbildung)
-  // legt das fest, ob die Fahrzeug-Besatzung nur das echte Minimum ("min", spart Personal
-  // fuer andere Fahrzeuge) oder gleich die volle Besatzung ("full") mit Ausbildung befuellt.
   const VEHICLE_CREW_STAFFING_MODE_KEY = "vehicleCrewStaffingMode";
-
   async function getVehicleCrewStaffingMode() {
     const mode = await retrieveData(VEHICLE_CREW_STAFFING_MODE_KEY);
     return mode === "full" ? "full" : "min";
   }
-
-  // Ob die Fahrzeug-Besatzung auch normale Fahrzeuge OHNE Ausbildungsanforderung mit
-  // einbezieht (siehe getVehicleTypeCrewTarget/loadCrewCheckVehicles) - Standard AUS, damit
-  // sich am bisherigen (nur Spezialfahrzeuge) Verhalten nichts aendert, bis bewusst
-  // aktiviert.
   const VEHICLE_CREW_INCLUDE_NORMAL_KEY = "vehicleCrewIncludeNormal";
-
   async function getVehicleCrewIncludeNormal() {
-    return !!(await retrieveData(VEHICLE_CREW_INCLUDE_NORMAL_KEY));
+    return !!await retrieveData(VEHICLE_CREW_INCLUDE_NORMAL_KEY);
   }
-
-  // Ob JEDE Ausbildungsanforderung ignoriert und stattdessen fuer ALLE Fahrzeuge nur
-  // beliebiges/ungeschultes Personal zugewiesen wird (assignAnyPersonnelToVehicle statt
-  // assignQualifiedPersonnelToVehicleForSlug, siehe checkAndFixVehicleCrew) - fuer Nutzer,
-  // deren spezialisiertes Personal (z.B. BePol/THW/SEG) sich bei Alarmierung ohnehin selbst
-  // zuordnet, wodurch eine Vorbelegung mit genau diesem Personal ueberfluessig ist. Standard
-  // AUS, damit sich am bisherigen Verhalten nichts aendert, bis bewusst aktiviert.
   const VEHICLE_CREW_UNTRAINED_ONLY_KEY = "vehicleCrewUntrainedOnly";
-
   async function getVehicleCrewUntrainedOnly() {
-    return !!(await retrieveData(VEHICLE_CREW_UNTRAINED_ONLY_KEY));
+    return !!await retrieveData(VEHICLE_CREW_UNTRAINED_ONLY_KEY);
   }
-
-  // Ob ueberzaehliges/nicht mehr passendes Personal beim Pruefen wieder ENTFERNT werden darf
-  // (siehe trimVehicleCrewToStaffMin in checkAndFixVehicleCrew) - Standard AN, das entspricht
-  // dem bisherigen Verhalten (Wechsel von Voll- auf Minimum-Besatzung raeumt automatisch auf).
-  // Auf "Nur ergaenzen" gestellt, fasst ein Lauf NIE bereits zugewiesenes Personal an, egal mit
-  // welchen Einstellungen es frueher zugewiesen wurde - dafuer bleibt z.B. eine alte
-  // Ueberbesetzung nach einem Wechsel zurueck auf "Minimum" einfach stehen.
   const VEHICLE_CREW_TRIM_KEY = "vehicleCrewTrimEnabled";
-
   async function getVehicleCrewTrimEnabled() {
     const stored = await retrieveData(VEHICLE_CREW_TRIM_KEY);
     return stored === undefined ? true : !!stored;
   }
-
-  // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> {message, since}) ueber
-  // Schliessen/Wiederoeffnen des Fahrzeug-Besatzung-Screens hinweg, damit nicht nach jedem
-  // Oeffnen alle Kategorien neu geprueft werden muessen. Beim Oeffnen wird das mit der
-  // frisch geladenen Fahrzeugliste abgeglichen (siehe renderVehicleCrewScreen) - Fahrzeuge,
-  // die es nicht mehr gibt (verkauft/umgebaut), fallen dabei automatisch raus. "since" ist der
-  // Zeitpunkt, seit dem dieses Fahrzeug OHNE UNTERBRECHUNG als Problem gefuehrt wird (bleibt
-  // beim erneuten Pruefen erhalten, nur "message" wird aktualisiert) - hilft beim Aufraeumen,
-  // alte von frischen Eintraegen zu unterscheiden.
-  const VEHICLE_CREW_PROBLEMS_KEY = "vehicleCrewProblems"; // { [vehicleId]: { message, since } }
-
-  // Alte Versionen speicherten hier nur einen reinen String statt {message, since} - beim
-  // Lesen auf das neue Format hochziehen (since: null = Zeitpunkt unbekannt), statt eine
-  // Migration zu erzwingen.
+  const VEHICLE_CREW_PROBLEMS_KEY = "vehicleCrewProblems";
   async function getVehicleCrewProblems() {
-    const raw = (await retrieveData(VEHICLE_CREW_PROBLEMS_KEY)) || {};
+    const raw = await retrieveData(VEHICLE_CREW_PROBLEMS_KEY) || {};
     const result = {};
     for (const [id, value] of Object.entries(raw)) {
-      result[id] = typeof value === "string" ? { message: value, since: null } : value;
+      result[id] = typeof value === "string" ? {
+        message: value,
+        since: null
+      } : value;
     }
     return result;
   }
-
   async function saveVehicleCrewProblems(problemsById) {
     const plain = {};
-    for (const [id, { message, since }] of problemsById) plain[id] = { message, since };
+    for (const [id, {message: message, since: since}] of problemsById) plain[id] = {
+      message: message,
+      since: since
+    };
     await storeData(plain, VEHICLE_CREW_PROBLEMS_KEY);
   }
-
   async function getPersonnelScanData() {
-    return (await retrieveData(PERSONNEL_SCAN_KEY)) || {};
+    return await retrieveData(PERSONNEL_SCAN_KEY) || {};
   }
-
   async function getPersonnelScanMeta() {
-    return (await retrieveData(PERSONNEL_SCAN_META_KEY)) || {};
+    return await retrieveData(PERSONNEL_SCAN_META_KEY) || {};
   }
-
   async function getPersonnelQualifications() {
-    return (await retrieveData(PERSONNEL_QUALIFICATIONS_KEY)) || {};
+    return await retrieveData(PERSONNEL_QUALIFICATIONS_KEY) || {};
   }
-
   async function getPersonnelSchoolingMinStaff() {
-    return (await retrieveData(PERSONNEL_SCHOOLING_MIN_STAFF_KEY)) || 0;
+    return await retrieveData(PERSONNEL_SCHOOLING_MIN_STAFF_KEY) || 0;
   }
-
-  // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
-  // sein soll (Ausbauten, Fahrzeuge+Anzahl) - siehe renderStationBlueprints*.
-  const STATION_BLUEPRINTS_KEY = "stationBlueprints"; // { [id]: Blueprint }
-
+  const STATION_BLUEPRINTS_KEY = "stationBlueprints";
   async function getStationBlueprints() {
-    return (await retrieveData(STATION_BLUEPRINTS_KEY)) || {};
+    return await retrieveData(STATION_BLUEPRINTS_KEY) || {};
   }
-
   async function saveStationBlueprints(blueprints) {
     await storeData(blueprints, STATION_BLUEPRINTS_KEY);
   }
-
-  // Alle von FuxTools angelegten GM-Speicher-Eintraege - EINZIGE Quelle dieser Liste,
-  // genutzt fuer "Speicher loeschen" UND fuer Einstellungen exportieren/importieren
-  // (siehe renderSettingsScreen). vehicleTypes bewusst NICHT enthalten: reiner, jederzeit
-  // neu ladbarer API-Cache, keine echte Einstellung.
-  const ALL_SETTINGS_KEYS = [
-    "names",
-    HISTORY_STORAGE_KEY,
-    CUSTOM_REQUIRED_EXTENSIONS_KEY,
-    PERSONNEL_SCAN_KEY,
-    PERSONNEL_SCAN_META_KEY,
-    PERSONNEL_QUALIFICATIONS_KEY,
-    PERSONNEL_SCHOOLING_MIN_STAFF_KEY,
-    STATION_BLUEPRINTS_KEY,
-    VEHICLE_CREW_STAFFING_MODE_KEY,
-    VEHICLE_CREW_PROBLEMS_KEY,
-    VEHICLE_CREW_INCLUDE_NORMAL_KEY,
-    VEHICLE_CREW_UNTRAINED_ONLY_KEY,
-    VEHICLE_CREW_TRIM_KEY,
-  ];
-
-  // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
-  // Einstellungen, Fahrzeugtyp-Cache, Verlauf, geforderte-Ausbauten-/Personal-
-  // Konfiguration inkl. Scan-Daten) - fuer den "Speicher loeschen"-Button in den
-  // Einstellungen, simuliert damit den Zustand einer Neuinstallation.
+  const ALL_SETTINGS_KEYS = [ "names", HISTORY_STORAGE_KEY, CUSTOM_REQUIRED_EXTENSIONS_KEY, PERSONNEL_SCAN_KEY, PERSONNEL_SCAN_META_KEY, PERSONNEL_QUALIFICATIONS_KEY, PERSONNEL_SCHOOLING_MIN_STAFF_KEY, STATION_BLUEPRINTS_KEY, VEHICLE_CREW_STAFFING_MODE_KEY, VEHICLE_CREW_PROBLEMS_KEY, VEHICLE_CREW_INCLUDE_NORMAL_KEY, VEHICLE_CREW_UNTRAINED_ONLY_KEY, VEHICLE_CREW_TRIM_KEY ];
   async function clearAllStoredData() {
     await GM.deleteValue(cacheKeyVehicleTypes);
     await GM.deleteValue(ERROR_LOG_KEY);
     for (const key of ALL_SETTINGS_KEYS) await GM.deleteValue(key);
   }
-
-  // Buendelt alle Einstellungen (siehe ALL_SETTINGS_KEYS) in ein JSON-Objekt, fuer den
-  // "Herunterladen"-Button in den Einstellungen (Backup vor Neuinstallation o.ae.).
   async function exportAllSettings() {
     const data = {};
     for (const key of ALL_SETTINGS_KEYS) {
       const value = await GM.getValue(key, undefined);
       if (value !== undefined) data[key] = value;
     }
-    return { fuxtools: true, version: SCRIPT_VERSION, exportedAt: Date.now(), data };
+    return {
+      fuxtools: true,
+      version: SCRIPT_VERSION,
+      exportedAt: Date.now(),
+      data: data
+    };
   }
-
-  // Gegenstueck zu exportAllSettings(): schreibt nur bekannte Schluessel (ALL_SETTINGS_KEYS)
-  // zurueck - ignoriert alles andere in der Datei, statt beliebige Schluessel zu uebernehmen.
   async function importAllSettings(parsed) {
     if (!parsed || typeof parsed !== "object" || !parsed.data || typeof parsed.data !== "object") {
       throw new Error("Datei hat kein gültiges FuxTools-Einstellungen-Format.");
@@ -1283,26 +1695,18 @@
       }
     }
   }
-
-  // Ersetzt ueberall im Script das native fetch() - kein einziger Aufruf hatte bisher ein
-  // Zeitlimit. Haengt eine Verbindung (Anfrage raus, aber nie eine Antwort, kein Fehler),
-  // wuerde das den gesamten Ablauf unbegrenzt blockieren, UND "Abbrechen" wuerde nicht mehr
-  // greifen, weil die Abbruch-Pruefung in den Warteschlangen (siehe Fahrzeug-Besatzung) nur
-  // VOR einer neuen Anfrage steht, nicht waehrend einer bereits haengenden. Bricht daher nach
-  // FETCH_TIMEOUT_MS selbst ab (AbortController) - wird danach wie ein normaler Netzwerkfehler
-  // an der jeweiligen Stelle abgefangen (z.B. ein Fahrzeug als "Fehler" markiert, der Rest
-  // laeuft weiter) und zusaetzlich ins Fehlerprotokoll geloggt, damit haeufige Timeouts bei
-  // einem grossen Durchlauf im Nachhinein nachvollziehbar bleiben (ohne bei JEDEM einzelnen
-  // Timeout ein Banner zu zeigen wie reportError() es sonst tut).
-  const FETCH_TIMEOUT_MS = 20000;
+  const FETCH_TIMEOUT_MS = 2e4;
   async function fetchWithTimeout(url, options = {}) {
-    const controller = new AbortController();
+    const controller = new AbortController;
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
     } catch (e) {
       if (e.name === "AbortError") {
-        const message = `Zeitüberschreitung nach ${FETCH_TIMEOUT_MS / 1000}s: ${url}`;
+        const message = `Zeitüberschreitung nach ${FETCH_TIMEOUT_MS / 1e3}s: ${url}`;
         logErrorToStorage("Netzwerk-Timeout", message).catch(() => {});
         throw new Error(message);
       }
@@ -1311,33 +1715,28 @@
       clearTimeout(timeoutId);
     }
   }
-
   async function fetchJson(url) {
     const response = await fetchWithTimeout(url);
     if (!response.ok) throw new Error("Network response was not ok");
     return response.json();
   }
-
   async function storeVehicleTypes(data, expiresInMs) {
     const expirationDate = new Date(Date.now() + expiresInMs);
-    await storeData({ data, expirationDate }, cacheKeyVehicleTypes);
+    await storeData({
+      data: data,
+      expirationDate: expirationDate
+    }, cacheKeyVehicleTypes);
   }
-
-  // Holt den Fahrzeug-Katalog primaer von api.lss-manager.de. Schlaegt das fehl (Seite down,
-  // Netzwerkfehler, Adblocker), wird als Notfall-Ersatz die eigene, im FuxTools-Repo gepflegte
-  // Kopie (VEHICLE_TYPES_FALLBACK_URL, siehe data/vehicle-types-fallback.json) geladen - die ist
-  // zwangslaeufig irgendwann veraltet, deshalb nur 1 Stunde statt 1 Tag gecacht, damit beim
-  // naechsten Laden gleich wieder die echte, aktuelle Quelle versucht wird.
   async function fetchVehicleTypeCatalog() {
     try {
       const data = await fetchJson("https://api.lss-manager.de/de_DE/vehicles");
-      await storeVehicleTypes(data, 24 * 60 * 60 * 1000);
+      await storeVehicleTypes(data, 24 * 60 * 60 * 1e3);
       return data;
     } catch (primaryError) {
       console.error("[FuxTools] Fahrzeug-Katalog von api.lss-manager.de nicht erreichbar, versuche Fallback:", primaryError);
       try {
         const data = await fetchJson(VEHICLE_TYPES_FALLBACK_URL);
-        await storeVehicleTypes(data, 60 * 60 * 1000);
+        await storeVehicleTypes(data, 60 * 60 * 1e3);
         return data;
       } catch (fallbackError) {
         console.error("[FuxTools] Auch Fallback-Fahrzeug-Katalog nicht erreichbar:", fallbackError);
@@ -1345,59 +1744,45 @@
       }
     }
   }
-
   async function initVehicleTypeCaptions() {
     const cached = await retrieveData(cacheKeyVehicleTypes);
     let types = cached?.data;
     const expirationDate = cached?.expirationDate;
-
-    if (!types || !expirationDate || new Date(expirationDate) < new Date()) {
+    if (!types || !expirationDate || new Date(expirationDate) < new Date) {
       try {
         types = await fetchVehicleTypeCatalog();
       } catch (error) {
-        // Beide Quellen down: lieber mit den alten (evtl. abgelaufenen) Cache-Daten
-        // weiterarbeiten als mit gar keinen, falls welche vorhanden sind.
         if (!types) throw error;
       }
     }
-
     vehicleTypeCaptions = {};
     vehicleTypeCatalog = types || {};
     for (const [id, vehicle] of Object.entries(types || {})) {
       vehicleTypeCaptions[id] = vehicle.caption;
     }
   }
-
   async function initNamesStore() {
-    namesStore = (await retrieveData("names")) || {};
+    namesStore = await retrieveData("names") || {};
   }
-
   async function saveNamesStore() {
     await storeData(namesStore, "names");
   }
-
-  //////////////////////////////////////////////////
-  // Spiel-eigene Daten lesen (Session-basiert, kein API-Key)
-  //////////////////////////////////////////////////
-
   async function fetchJSON(path) {
-    const res = await fetchWithTimeout(path, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(path, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Fehler beim Laden von ${path}: ${res.status}`);
     const data = await res.json();
     const result = data.result || data;
     return Array.isArray(result) ? result : Object.values(result);
   }
-
-  // Seitenweises Laden ueber /api/v2/vehicles statt /api/vehicles - bei sehr grossen
-  // Accounts (mehrere Tausend Fahrzeuge) kann eine einzelne /api/vehicles-Anfrage in
-  // das 15-Sekunden-Timeout des Servers laufen. Mehrere kleinere Seiten sind schneller
-  // und zuverlaessiger. Feldnamen sind identisch zu v1 (id, caption, building_id,
-  // vehicle_type, ...), das bestehende Umbenennen funktioniert unveraendert.
   async function fetchAllVehiclesV2() {
     let vehicles = [];
     let nextPage = "/api/v2/vehicles?limit=2000";
     while (nextPage) {
-      const res = await fetchWithTimeout(nextPage, { credentials: "same-origin" });
+      const res = await fetchWithTimeout(nextPage, {
+        credentials: "same-origin"
+      });
       if (!res.ok) throw new Error(`Fehler beim Laden der Fahrzeuge: ${res.status}`);
       const data = await res.json();
       vehicles = vehicles.concat(data.result || []);
@@ -1405,111 +1790,67 @@
     }
     return vehicles;
   }
-
   async function loadGameData() {
-    const [vehicles, buildings] = await Promise.all([
-      fetchAllVehiclesV2(),
-      fetchJSON("/api/buildings"),
-    ]);
-    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
-    return { vehicles, buildingsById };
+    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
+    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    return {
+      vehicles: vehicles,
+      buildingsById: buildingsById
+    };
   }
-
-  //////////////////////////////////////////////////
-  // Umbenennen: Low-Level-Requests fuer Fahrzeuge und Gebaeude (Wachen/Leitstellen)
-  //////////////////////////////////////////////////
-
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
   }
-
   async function renameVehicle(vehicleId, newName) {
-    // Schritt 1: das interne Formular-Fragment holen (enthaelt authenticity_token,
-    // _method-Feld fuer PATCH/PUT, Formular-Action etc.)
-    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/editName`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/editName`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Formular für Fahrzeug ${vehicleId} nicht ladbar (${res.status})`);
     const html = await res.text();
-
-    // Wichtig: NICHT ins Dokument einhaengen und NICHT per form.submit()/trigger('submit')
-    // abschicken - das fuehrt zu einer echten Seiten-Navigation und bricht die
-    // restliche Umbenennungs-Schleife ab.
     const container = document.createElement("div");
     container.innerHTML = html;
-
-    const input =
-      container.querySelector(`#vehicle_new_name_${vehicleId}`) ||
-      container.querySelector('input[type="text"]');
-    const form =
-      container.querySelector(`#vehicle_form_${vehicleId}`) ||
-      container.querySelector("form");
+    const input = container.querySelector(`#vehicle_new_name_${vehicleId}`) || container.querySelector('input[type="text"]');
+    const form = container.querySelector(`#vehicle_form_${vehicleId}`) || container.querySelector("form");
     if (!input || !form) throw new Error(`Formular-Elemente für Fahrzeug ${vehicleId} nicht gefunden.`);
-
     input.value = newName;
-
-    // Schritt 2: den AJAX-Request, den die Seite normalerweise selbst schicken wuerde,
-    // manuell per fetch() nachbauen. FormData funktioniert auch mit einem Formular,
-    // das nicht im Dokument haengt.
     const action = form.getAttribute("action") || form.action;
     const formData = new FormData(form);
-
-    const res2 = await fetchWithTimeout(action, {
-      method: "POST", // die tatsaechliche Methode (PATCH/PUT) steckt im _method-Feld von FormData
-      body: formData,
-      credentials: "same-origin",
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "text/javascript, application/json, */*; q=0.01",
-      },
-    });
-
-    if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
-  }
-
-  // Gleiches Formular-Muster wie renameVehicle: echtes Bearbeiten-Formular holen statt
-  // Feldnamen zu raten. Das Namensfeld heisst bei Gebaeuden "building[name]" (Input-ID
-  // "building_name"), nicht "caption" - "caption" ist nur der Name in der /api-Antwort.
-  async function renameBuilding(buildingId, newName) {
-    const res = await fetchWithTimeout(`/buildings/${buildingId}/edit`, { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
-    const html = await res.text();
-
-    const container = document.createElement("div");
-    container.innerHTML = html;
-
-    const input =
-      container.querySelector("#building_name") ||
-      container.querySelector('input[type="text"]');
-    const form =
-      container.querySelector(`#edit_building_${buildingId}`) ||
-      container.querySelector("form");
-    if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
-
-    input.value = newName;
-
-    const action = form.getAttribute("action") || form.action;
-    const formData = new FormData(form);
-
     const res2 = await fetchWithTimeout(action, {
       method: "POST",
       body: formData,
       credentials: "same-origin",
       headers: {
         "X-Requested-With": "XMLHttpRequest",
-        Accept: "text/javascript, application/json, */*; q=0.01",
-      },
+        Accept: "text/javascript, application/json, */*; q=0.01"
+      }
     });
-
+    if (!res2.ok) throw new Error(`Speichern für Fahrzeug ${vehicleId} fehlgeschlagen (${res2.status})`);
+  }
+  async function renameBuilding(buildingId, newName) {
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/edit`, {
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error(`Formular für Gebäude ${buildingId} nicht ladbar (${res.status})`);
+    const html = await res.text();
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const input = container.querySelector("#building_name") || container.querySelector('input[type="text"]');
+    const form = container.querySelector(`#edit_building_${buildingId}`) || container.querySelector("form");
+    if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
+    input.value = newName;
+    const action = form.getAttribute("action") || form.action;
+    const formData = new FormData(form);
+    const res2 = await fetchWithTimeout(action, {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+      headers: {
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "text/javascript, application/json, */*; q=0.01"
+      }
+    });
     if (!res2.ok) throw new Error(`Speichern für Gebäude ${buildingId} fehlgeschlagen (${res2.status})`);
   }
-
-  //////////////////////////////////////////////////
-  // Umbenennen-Engine (gemeinsam fuer Fahrzeuge, Wachen und Leitstellen -
-  // arbeitet ueber renameVehicle/renameBuilding, unabhaengig vom Item-Typ)
-  //////////////////////////////////////////////////
-
-  // Versucht ein Umbenennen, mit einem automatischen zweiten Versuch bei Fehlern
-  // (z.B. kurzer Lag/Verbindungsaussetzer). renameFn ist renameVehicle oder
-  // renameBuilding - dieselbe Retry-Logik fuer beide.
   async function renameItemWithRetry(renameFn, id, newName, maxAttempts = 2) {
     let lastError;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1518,64 +1859,36 @@
         return;
       } catch (e) {
         lastError = e;
-        if (attempt < maxAttempts) await sleep(1000);
+        if (attempt < maxAttempts) await sleep(1e3);
       }
     }
     throw lastError;
   }
-
-  // Wie viele Umbenennungen gleichzeitig laufen duerfen - moderat gewaehlt, um bei
-  // sehr grossen Mengen (mehrere Tausend Fahrzeuge) deutlich schneller zu sein als
-  // rein sequentiell, ohne den Server mit zu vielen Anfragen auf einmal zu fluten.
   const RENAME_CONCURRENCY = 5;
-
-  // Fuehrt einen Umbenennungs-/Reset-Plan aus (mit Fortschrittsbalken und Abbrechen-
-  // Button) und zeigt am Ende die Abschluss-Ansicht. Wird auch fuer den "erneut
-  // versuchen"-Button mit nur den zuvor fehlgeschlagenen Eintraegen wiederverwendet.
-  // renameFn/itemNoun erlauben die Wiederverwendung fuer Fahrzeuge, Wachen und
-  // Leitstellen (alle drei sind technisch dasselbe Formular-Umbenennen-Muster).
-  // Startet sofort, oder haengt sich an die Hintergrund-Task-Warteschlange, falls schon ein
-  // anderer Task (Umbenennen oder Fahrzeug-Besatzung) laeuft - siehe runOrQueueBackgroundTask().
   function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
     const title = `${itemNoun} ${verb === "umbenannt" ? "umbenennen" : "zurücksetzen"}`;
-    const queued = runOrQueueBackgroundTask(title, viaQueue =>
-      runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue),
-    );
+    const queued = runOrQueueBackgroundTask(title, viaQueue => runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue));
     if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
   }
-
-  // viaQueue: true, wenn dieser Lauf automatisch aus der Warteschlange gestartet wurde
-  // (nicht durch einen direkten Klick gerade eben) - dann NICHT ungefragt auf den
-  // Fortschritts-/Ergebnis-Bildschirm umschalten, falls der Nutzer laengst woanders im Menue
-  // ist (siehe runOrQueueBackgroundTask/finishBackgroundTask). Sichtbarkeit laeuft in dem
-  // Fall nur ueber den Navbar-Badge und das Task-Center.
   async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue) {
     renameCancelled = false;
-    // Verlaufs-Eintrag schon JETZT anlegen (status "running"), nicht erst am Ende - bleibt er
-    // so stehen (z.B. durch F5/Schliessen mitten im Lauf unterbrochen), sieht man das im
-    // Verlauf direkt statt eines fehlenden Eintrags. Der Abbrechen-Klick selbst schreibt
-    // sofort "wird abgebrochen" rein (siehe cancel-Callback unten), falls die Seite danach
-    // ebenfalls verlassen wird, bevor der Lauf sein eigenes Ende protokollieren kann.
     const historyId = await startHistoryEntry({
       type: renameHistoryType(itemNoun, verb),
-      label: `0/${plan.length} gestartet ...`,
+      label: `0/${plan.length} gestartet ...`
     });
     beginBackgroundTask(title, () => {
       renameCancelled = true;
-      updateHistoryEntry(historyId, { status: "cancelled", label: "Abbruch angefordert ..." });
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
     });
     if (!viaQueue) renderBackgroundTaskProgressScreen();
-
     let done = 0;
     let finished = 0;
     const failedItems = [];
     const errors = [];
     let cancelled = false;
-
-    // Mehrere Eintraege gleichzeitig statt strikt nacheinander - bei sehr grossen
-    // Mengen (mehrere Tausend Fahrzeuge) waere rein sequentiell viel zu langsam.
-    // RENAME_CONCURRENCY begrenzt das bewusst auf einen moderaten Wert statt
-    // unbegrenzt zu parallelisieren, um den Server nicht zu ueberlasten.
     let nextIndex = 0;
     async function worker() {
       while (nextIndex < plan.length) {
@@ -1594,89 +1907,47 @@
           if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
         }
         finished++;
-        updateBackgroundTaskProgress(
-          Math.round((finished / plan.length) * 100),
-          `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`,
-        );
+        updateBackgroundTaskProgress(Math.round(finished / plan.length * 100), `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`);
       }
     }
-
     const workerCount = Math.min(RENAME_CONCURRENCY, plan.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-    // Denselben beim Start angelegten Eintrag jetzt mit dem echten Ergebnis abschliessen
-    // (siehe startHistoryEntry oben) statt einen zweiten Eintrag anzulegen.
+    await Promise.all(Array.from({
+      length: workerCount
+    }, () => worker()));
     await updateHistoryEntry(historyId, {
       label: `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`,
-      status: cancelled ? "cancelled" : "done",
+      status: cancelled ? "cancelled" : "done"
     });
-
-    const renderResult = () =>
-      renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
-    // Nur automatisch zur Ergebnis-Ansicht wechseln, wenn der Nutzer JETZT GERADE noch auf der
-    // eigenen Fortschritts-Ansicht dieses Laufs ist (erkennbar am Progress-Bar-Element) - ist
-    // er inzwischen woanders (Task-Center, Hauptmenue, Fenster zu), NICHT ungefragt dorthin
-    // umschalten (egal ob der Lauf direkt oder ueber die Warteschlange gestartet wurde - das
-    // kann sich waehrend der Laufzeit aendern). Sichtbarkeit dann nur ueber Badge/Task-Center
-    // (siehe finishBackgroundTask). Laeuft danach sofort der naechste Warteschlangen-Task,
-    // ueberschreibt dessen eigener Start die Ansicht ohnehin erneut (gewollter Uebergang).
+    const renderResult = () => renderCompletionScreen({
+      verb: verb,
+      done: done,
+      failed: failedItems.length,
+      plan: plan,
+      errors: errors,
+      failedItems: failedItems,
+      goBack: goBack,
+      cancelled: cancelled,
+      itemNoun: itemNoun,
+      renameFn: renameFn
+    });
     const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
     if (stillOnOwnProgressScreen) renderResult();
     finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
   }
-
-  function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
+  function renderCompletionScreen({verb: verb, done: done, failed: failed, plan: plan, errors: errors, failedItems: failedItems, goBack: goBack, cancelled: cancelled, itemNoun: itemNoun = "Fahrzeug(e)", renameFn: renameFn = renameVehicle}) {
     const body = document.getElementById("vehicle-naming-modal-body");
-
-    // Pro Wache/Kategorie zusammenfassen, statt jedes einzelne Element aufzulisten
-    const perStation = new Map();
+    const perStation = new Map;
     for (const item of plan) {
       perStation.set(item.station, (perStation.get(item.station) || 0) + 1);
     }
-    const stationRows = [...perStation.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`)
-      .join("");
-
+    const stationRows = [ ...perStation.entries() ].sort((a, b) => a[0].localeCompare(b[0])).map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`).join("");
     let errorBlock = "";
     if (errors.length) {
-      errorBlock = `
-        <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>
-        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>
-      `;
+      errorBlock = `\n        <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>\n        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>\n      `;
     }
-
-    const cancelledNote = cancelled
-      ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>`
-      : "";
-
-    const retryButton =
-      failedItems && failedItems.length
-        ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">
-             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>
-             Fehlgeschlagene erneut versuchen (${failedItems.length})
-           </button>`
-        : "";
-
-    body.innerHTML = `
-      ${cancelledNote}
-      <p>
-        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}
-        (von ${plan.length} geplant).
-      </p>
-      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>
-      ${errorBlock}
-      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>
-      <div class="vn-sticky-footer">
-        ${retryButton}
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-      </div>
-    `;
-
+    const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>` : "";
+    const retryButton = failedItems && failedItems.length ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">\n             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>\n             Fehlgeschlagene erneut versuchen (${failedItems.length})\n           </button>` : "";
+    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}\n        (von ${plan.length} geplant).\n      </p>\n      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>\n      ${errorBlock}\n      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        ${retryButton}\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
     if (failedItems && failedItems.length) {
@@ -1685,31 +1956,26 @@
       });
     }
   }
-
-  //////////////////////////////////////////////////
-  // Modal-Markup (Bootstrap-Modal, Grundgeruest fuer alle Bildschirme)
-  //////////////////////////////////////////////////
-
   function escapeHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, c => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
     }[c]));
   }
-
-  // Sehr einfacher Markdown->HTML-Renderer NUR fuer den "Changelog anzeigen"-Bildschirm - kein
-  // Anspruch auf vollstaendiges Markdown, deckt bewusst nur ab, was CHANGELOG.md tatsaechlich
-  // nutzt: #/##-Ueberschriften, "- "-Listen (inkl. eingerueckter Folgezeilen als Fortsetzung
-  // desselben Punkts) und **fett**. Alles wird escaped, bevor **fett** angewendet wird - kein
-  // XSS-Risiko, auch wenn der Inhalt von einer fremden Quelle (GitHub) kommt.
   function inlineMarkdown(text) {
     return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   }
-
   function renderMarkdownLite(markdown) {
     let html = "";
     let inList = false;
     const closeList = () => {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
     };
     for (const rawLine of markdown.split("\n")) {
       const line = rawLine.trimEnd();
@@ -1724,10 +1990,12 @@
         closeList();
         html += `<h3>${inlineMarkdown(line.slice(2))}</h3>`;
       } else if (/^-\s+/.test(line)) {
-        if (!inList) { html += "<ul>"; inList = true; }
+        if (!inList) {
+          html += "<ul>";
+          inList = true;
+        }
         html += `<li>${inlineMarkdown(line.replace(/^-\s+/, ""))}</li>`;
       } else if (/^\s+\S/.test(rawLine) && inList) {
-        // Eingerueckte Fortsetzungszeile eines Listenpunkts (Zeilenumbruch in CHANGELOG.md).
         html = html.replace(/<\/li>$/, ` ${inlineMarkdown(line.trim())}</li>`);
       } else {
         closeList();
@@ -1737,12 +2005,7 @@
     closeList();
     return html;
   }
-
-  // Gemeinsame Such-/Typ-Filter-Logik fuer die Tabellen-Bildschirme (Verlauf, Wachen-
-  // Check, Personal-Check): blendet Zeilen anhand von Sucheingabe und Typ-Dropdown ein/
-  // aus, ohne die Tabelle neu aufzubauen. rowSelector matcht die Zeilen, deren
-  // data-[searchField]- und data-type-Attribute verglichen werden.
-  function makeRowVisibilityFilter({ container, searchInputId, typeFilterId, rowSelector, searchField }) {
+  function makeRowVisibilityFilter({container: container, searchInputId: searchInputId, typeFilterId: typeFilterId, rowSelector: rowSelector, searchField: searchField}) {
     return function applyRowVisibility() {
       const query = document.getElementById(searchInputId)?.value.trim().toLowerCase() || "";
       const typeFilter = document.getElementById(typeFilterId)?.value || "";
@@ -1753,133 +2016,21 @@
       });
     };
   }
-
-  // Eigene Styles fuer Elemente, die vom dunklen Theme der Seite nicht abgedeckt sind
-  // (z.B. Bootstraps list-group-item ist standardmaessig weiss) - schmal auf unser
-  // Modal begrenzt, um den Rest der Seite nicht zu beeinflussen.
   function addCustomStyles() {
     if (document.getElementById("fuxtools-custom-styles")) return;
     const style = document.createElement("style");
     style.id = "fuxtools-custom-styles";
-    style.textContent = `
-      #vehicle-naming-modal-body .vn-menu-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 14px;
-        background-color: rgba(255, 255, 255, 0.06);
-        color: inherit;
-        border-color: rgba(255, 255, 255, 0.15);
-      }
-      #vehicle-naming-modal-body .vn-menu-item:hover,
-      #vehicle-naming-modal-body .vn-menu-item:focus {
-        background-color: rgba(255, 255, 255, 0.14);
-        color: inherit;
-      }
-      #vehicle-naming-modal-body .vn-menu-item .glyphicon {
-        font-size: 16px;
-        width: 18px;
-        text-align: center;
-      }
-      #vehicle-naming-modal-body .vn-settings-card {
-        padding: 12px 14px;
-        background-color: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 4px;
-      }
-      #vehicle-naming-modal-body .vn-btn-max-level {
-        background-color: #7a2020;
-        border-color: #6b1c1c;
-        color: #fff;
-      }
-      #vehicle-naming-modal-body .vn-btn-max-level:hover,
-      #vehicle-naming-modal-body .vn-btn-max-level:focus {
-        background-color: #8f2626;
-        border-color: #7a2020;
-        color: #fff;
-      }
-      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme
-         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,
-         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */
-      #vehicle-naming-modal-body .text-danger {
-        color: #ff6b6b;
-      }
-      #vehicle-naming-modal-body .vn-changelog h3 {
-        margin-top: 0;
-      }
-      #vehicle-naming-modal-body .vn-changelog h4 {
-        margin: 18px 0 8px;
-      }
-      #vehicle-naming-modal-body .vn-changelog ul {
-        padding-left: 20px;
-      }
-      #vehicle-naming-modal-body .vn-changelog li {
-        margin-bottom: 6px;
-      }
-      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-
-         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter
-         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange
-         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */
-      .vn-sticky-footer {
-        margin-top: 10px;
-        padding: 10px 0 2px;
-        background: var(--vn-modal-bg, #333);
-        border-top: 1px solid rgba(255, 255, 255, 0.15);
-      }
-      #vehicle-naming-modal-actions {
-        flex-shrink: 0;
-        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf
-           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier
-           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit
-           Abstand zum Rand. */
-        padding: 0 15px;
-      }
-      #vehicle-naming-modal-actions:empty {
-        display: none;
-      }
-      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei
-         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-
-         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher
-         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am
-         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe
-         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf
-         JEDEM Screen gleich.
-       */
-      #vehicle-naming-modal-dialog .modal-content {
-        display: flex;
-        flex-direction: column;
-        max-height: 90vh;
-      }
-      #vehicle-naming-modal-dialog .modal-header,
-      #vehicle-naming-modal-dialog .modal-footer {
-        flex-shrink: 0;
-      }
-      #vehicle-naming-modal-body {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein
-           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die
-           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height
-           hinaus wachsen lassen). */
-        min-height: 0;
-      }
-    `;
+    style.textContent = `\n      #vehicle-naming-modal-body .vn-menu-item {\n        display: flex;\n        align-items: center;\n        gap: 8px;\n        padding: 8px 14px;\n        background-color: rgba(255, 255, 255, 0.06);\n        color: inherit;\n        border-color: rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-body .vn-menu-item:hover,\n      #vehicle-naming-modal-body .vn-menu-item:focus {\n        background-color: rgba(255, 255, 255, 0.14);\n        color: inherit;\n      }\n      #vehicle-naming-modal-body .vn-menu-item .glyphicon {\n        font-size: 16px;\n        width: 18px;\n        text-align: center;\n      }\n      #vehicle-naming-modal-body .vn-settings-card {\n        padding: 12px 14px;\n        background-color: rgba(255, 255, 255, 0.04);\n        border: 1px solid rgba(255, 255, 255, 0.12);\n        border-radius: 4px;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level {\n        background-color: #7a2020;\n        border-color: #6b1c1c;\n        color: #fff;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level:hover,\n      #vehicle-naming-modal-body .vn-btn-max-level:focus {\n        background-color: #8f2626;\n        border-color: #7a2020;\n        color: #fff;\n      }\n      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme\n         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,\n         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */\n      #vehicle-naming-modal-body .text-danger {\n        color: #ff6b6b;\n      }\n      #vehicle-naming-modal-body .vn-changelog h3 {\n        margin-top: 0;\n      }\n      #vehicle-naming-modal-body .vn-changelog h4 {\n        margin: 18px 0 8px;\n      }\n      #vehicle-naming-modal-body .vn-changelog ul {\n        padding-left: 20px;\n      }\n      #vehicle-naming-modal-body .vn-changelog li {\n        margin-bottom: 6px;\n      }\n      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-\n         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter\n         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange\n         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */\n      .vn-sticky-footer {\n        margin-top: 10px;\n        padding: 10px 0 2px;\n        background: var(--vn-modal-bg, #333);\n        border-top: 1px solid rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-actions {\n        flex-shrink: 0;\n        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf\n           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier\n           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit\n           Abstand zum Rand. */\n        padding: 0 15px;\n      }\n      #vehicle-naming-modal-actions:empty {\n        display: none;\n      }\n      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei\n         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-\n         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher\n         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am\n         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe\n         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf\n         JEDEM Screen gleich.\n       */\n      #vehicle-naming-modal-dialog .modal-content {\n        display: flex;\n        flex-direction: column;\n        max-height: 90vh;\n      }\n      #vehicle-naming-modal-dialog .modal-header,\n      #vehicle-naming-modal-dialog .modal-footer {\n        flex-shrink: 0;\n      }\n      #vehicle-naming-modal-body {\n        flex: 1 1 auto;\n        overflow-y: auto;\n        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein\n           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die\n           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height\n           hinaus wachsen lassen). */\n        min-height: 0;\n      }\n    `;
     document.head.appendChild(style);
   }
-
   async function initModal() {
     if (document.getElementById(modalId)) return;
-
     addCustomStyles();
-
     const logoImg = document.createElement("img");
     logoImg.src = LOGO_URL;
     logoImg.alt = "";
     logoImg.style.cssText = "height:28px; width:28px; vertical-align:middle; margin-right:8px; border-radius:4px;";
-    // Fehlt das Logo mal (z.B. Netzwerkfehler) soll es einfach verschwinden statt als
-    // kaputtes Bild-Icon angezeigt zu werden.
     logoImg.addEventListener("error", () => logoImg.remove());
-
     const modalTitle = document.createElement("h4");
     modalTitle.id = "vehicle-naming-modal-title";
     modalTitle.className = "modal-title";
@@ -1887,42 +2038,20 @@
     modalTitle.style.alignItems = "center";
     modalTitle.appendChild(logoImg);
     modalTitle.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
-
     const breadcrumb = document.createElement("span");
     breadcrumb.id = "vehicle-naming-modal-breadcrumb";
     breadcrumb.className = "text-muted";
     breadcrumb.style.cssText = "margin-left:8px; font-size:13px; font-weight:normal;";
     modalTitle.appendChild(breadcrumb);
-
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
     modalHeader.appendChild(modalTitle);
-
     const modalBody = document.createElement("div");
     modalBody.className = "modal-body";
     modalBody.id = "vehicle-naming-modal-body";
-    // Hoehe/Scrollverhalten kommt jetzt komplett aus addCustomStyles() (Flexbox-Layout auf
-    // .modal-content) - Kopf- und Fusszeile bleiben so immer an Ort und Stelle sichtbar,
-    // auch wenn eine Liste (z.B. viele Fahrzeugtypen) laenger ist als der Bildschirm - dann
-    // scrollt nur dieser Bereich, nicht das ganze Fenster/Modal.
     modalBody.innerHTML = `<p><em>Lade Wachen &amp; Fahrzeuge ...</em></p>`;
-
     const modalActions = document.createElement("div");
     modalActions.id = "vehicle-naming-modal-actions";
-
-    // Jede render*Screen()-Funktion schreibt ihre Aktions-Buttons als ".vn-sticky-footer"
-    // einfach MIT in modalBody.innerHTML (unveraendert, keine Anpassung an jedem der 30+
-    // Aufrufe noetig). Frueher hielt CSS position:sticky diesen Block am unteren Rand des
-    // SCROLLENDEN Bereichs fest - bei langen Listen (z.B. viele Fahrzeugtypen bei "Fahrzeuge
-    // umbenennen") rutschten aber noch nicht gescrollte Zeilen sichtbar darunter durch,
-    // weil sie im DOM VOR dem Footer stehen und der Scrollbereich weiterlaeuft. Hier wird
-    // der Footer deshalb bei JEDER Vollersetzung von modalBody automatisch in eine EIGENE,
-    // nicht scrollende Zeile (Sibling von modalBody, wie Kopf-/Fusszeile) verschoben - dort
-    // kann nichts mehr dahinter durchscrollen. Ein gezielter Override von .innerHTML NUR auf
-    // diesem einen Element (nicht am Element.prototype!) reicht dafuer aus und faengt auch
-    // Screens ohne eigene Anpassung automatisch mit ab; Teil-Updates einzelner Kind-Elemente
-    // (z.B. nur die Problem-Liste) loesen das bewusst NICHT aus, weil sie nicht ueber
-    // modalBody.innerHTML laufen.
     const nativeBodyInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
     Object.defineProperty(modalBody, "innerHTML", {
       configurable: true,
@@ -1934,32 +2063,26 @@
         modalActions.innerHTML = "";
         const footer = this.querySelector(".vn-sticky-footer");
         if (footer) modalActions.appendChild(footer);
-      },
+      }
     });
-
     const modalFooter = document.createElement("div");
     modalFooter.className = "modal-footer";
     modalFooter.style.cssText = "display:flex; align-items:center; font-size:11px; color:#888; padding:6px 12px;";
     modalFooterEl = modalFooter;
     renderFooter();
-
     const modalContent = document.createElement("div");
     modalContent.className = "modal-content";
     modalContent.appendChild(modalHeader);
     modalContent.appendChild(modalBody);
     modalContent.appendChild(modalActions);
     modalContent.appendChild(modalFooter);
-
     const modalDialog = document.createElement("div");
     modalDialog.id = "vehicle-naming-modal-dialog";
     modalDialog.className = "modal-dialog";
     modalDialog.role = "document";
     modalDialog.appendChild(modalContent);
-    // Startbreite direkt am Element setzen (noch nicht im DOM - setModalWidth()
-    // findet es ueber getElementById erst, sobald es angehaengt ist).
     modalDialog.style.minWidth = `min(${MODAL_WIDTH_COMPACT}px, 95%)`;
     modalDialog.style.maxWidth = `min(${MODAL_WIDTH_COMPACT}px, 95%)`;
-
     const modal = document.createElement("div");
     modal.className = "modal fade";
     modal.id = modalId;
@@ -1968,74 +2091,33 @@
     modal.setAttribute("aria-labelledby", "vehicle-naming-modal-title");
     modal.appendChild(modalDialog);
     modal.style.zIndex = "5000";
-
     document.body.appendChild(modal);
-
-    // Nach einem Klick behaelt ein <button> den Browser-Fokus - zusammen mit Bootstraps
-    // eigenem ".btn:active:focus"-Schatten (dunkler oberer Rand) sieht der Button dann "halb"
-    // gefaerbt aus, bis man woanders hinklickt (genau das gemeldete Symptom, betrifft JEDEN
-    // Button im Modal). Ein Blur direkt nach dem Klick behebt das pauschal fuer alle Buttons,
-    // ohne jeden einzelnen Click-Handler anzufassen.
     modal.addEventListener("click", e => {
       const btn = e.target.closest("button");
       if (btn) setTimeout(() => btn.blur(), 0);
     });
-
-    // Aktionsleiste (siehe .vn-sticky-footer) braucht einen deckenden Hintergrund - liest
-    // dafuer die TATSAECHLICHE Hintergrundfarbe des Modals aus (Seiten-Theme, kein von uns
-    // geratener Farbwert), statt einen festen Hex-Wert zu hinterlegen, der bei einem anderen
-    // Theme/Subdomain nicht mehr passt. Auf modalContent gesetzt (nicht modalBody), weil die
-    // Aktionsleiste jetzt in #vehicle-naming-modal-actions liegt - einem Sibling von
-    // modalBody, das die Custom Property sonst nicht erben wuerde.
     modalContent.style.setProperty("--vn-modal-bg", getComputedStyle(modalContent).backgroundColor);
-
-    // show.bs.modal feuert SOFORT beim Oeffnen, noch bevor die Fade-in-Animation
-    // startet - so wird das Hauptmenue gesetzt, bevor ueberhaupt etwas sichtbar ist.
-    // (shown.bs.modal wuerde erst NACH der Animation feuern und kurz den alten
-    // Inhalt vom letzten Mal aufblitzen lassen.)
-    // Seiten-jQuery ueber unsafeWindow: seit @grant nicht mehr "none" ist, laeuft das
-    // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
     pageJQuery(modal).on("show.bs.modal", e => {
-      // Falls seit dem letzten Oeffnen ein Update-Tab geoeffnet wurde (siehe
-      // pendingReloadAfterUpdate), bleibt der Neuladen-Bildschirm bestehen statt des
-      // Hauptmenues - kein automatischer Reload, der Nutzer klickt bewusst selbst.
       if (pendingReloadAfterUpdate) {
         renderUpdateRequiredScreen();
         return;
       }
-      // Ueber den eigenen Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon) geoeffnet?
-      // e.relatedTarget ist bei Bootstraps data-toggle="modal" das tatsaechlich angeklickte
-      // Element - so bleibt der NORMALE FuxTools-Eintrag immer beim gewohnten Hauptmenue,
-      // waehrend der Task-Center-Eintrag gezielt die laufenden/wartenden Aufgaben zeigt.
       if (e.relatedTarget?.closest?.("#vn-task-center-entry")) {
         renderTaskCenterScreen();
         return;
       }
       renderMainMenu();
     });
-
-    // Schliessen (X oben, Klick daneben, Escape) laesst einen laufenden Hintergrund-Task
-    // (Umbenennen, Fahrzeug-Besatzung) bewusst weiterlaufen (siehe Hintergrund-Task-System
-    // oben) statt ihn abzubrechen - Fortschritt/Ergebnis zeigt der Navbar-Badge, echtes
-    // Abbrechen geht weiterhin nur ueber den expliziten "Abbrechen"-Button.
   }
-
   function closeModal() {
     const modal = document.getElementById(modalId);
     if (!modal) return;
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
     pageJQuery(modal).modal("hide");
   }
-
   function getCurrentUsername() {
-    // Versucht den eingeloggten Namen automatisch aus der Seite zu lesen,
-    // damit das Script fuer jeden Spieler funktioniert (kein hartkodierter Name).
-    const candidates = [
-      'a[href="/profile"]',
-      'a[href^="/profile"]',
-      '.dropdown-toggle[href^="/profile"]',
-    ];
+    const candidates = [ 'a[href="/profile"]', 'a[href^="/profile"]', '.dropdown-toggle[href^="/profile"]' ];
     for (const selector of candidates) {
       const el = document.querySelector(selector);
       const text = el?.textContent?.trim();
@@ -2043,92 +2125,16 @@
     }
     return null;
   }
-
-  let currentMode = "rename"; // "rename" oder "reset"
-
+  let currentMode = "rename";
   function renderMainMenu() {
-    checkForUpdateInBackground(); // gedrosselt, blockiert das Rendern nicht (kein await)
+    checkForUpdateInBackground();
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("");
     const body = document.getElementById("vehicle-naming-modal-body");
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
-    const sectionLabelStyle =
-      "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
-
-    body.innerHTML = `
-      <div style="max-width:420px; margin:0 auto;">
-        <p>${greeting}</p>
-
-        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>
-        <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
-            Wachen-Bauplaner
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">
-            <span class="glyphicon glyphicon-user" aria-hidden="true"></span>
-            Personal-Check
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">
-            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>
-            Schulungen
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">
-            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>
-            Statistik
-          </button>
-        </div>
-
-        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>
-        <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">
-            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>
-            Fahrzeug-Besatzung
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">
-            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-            Wachenausbau
-          </button>
-        </div>
-
-        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>
-        <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">
-            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>
-            Fahrzeuge umbenennen
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">
-            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-            Fahrzeugnamen zurücksetzen
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">
-            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>
-            Wachen umbenennen
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">
-            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>
-            Leitstellen umbenennen
-          </button>
-        </div>
-
-        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>
-        <div class="list-group">
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">
-            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>
-            So funktioniert's
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>
-            Verlauf
-          </button>
-          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">
-            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>
-            Einstellungen
-          </button>
-        </div>
-      </div>
-    `;
+    const sectionLabelStyle = "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
+    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-personnel-check">\n            <span class="glyphicon glyphicon-user" aria-hidden="true"></span>\n            Personal-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Schulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
       currentMode = "rename";
       renderLeitstelleSelection();
@@ -2149,125 +2155,42 @@
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
     document.getElementById("vn-menu-how-it-works").addEventListener("click", () => renderHowItWorksScreen(renderMainMenu));
   }
-
-  // Kurze Einstiegs-Anleitung fuer neue (Beta-)Nutzer: Wachen-Bauplaner, Personal-Check und
-  // Schulungen haengen zusammen (Bauplan -> Personalbedarf -> Schulungen), Fahrzeug-Besatzung
-  // und Wachenausbau (Sektion "Helfer") funktionieren dagegen unabhaengig davon - das ist ohne
-  // Kontext nicht unbedingt selbsterklaerend. Rein statischer Text, kein Netzwerk-Aufruf noetig
-  // (anders als renderChangelogScreen).
   function renderHowItWorksScreen(goBack) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("So funktioniert's");
     const body = document.getElementById("vehicle-naming-modal-body");
-
-    body.innerHTML = `
-      <p>Empfohlene Reihenfolge:</p>
-
-      <ol style="padding-left:20px;">
-        <li style="margin-bottom:8px;">
-          <b>Wachen-Bauplaner</b>: Bauplan je Gebäudetyp anlegen (Ausbauten, Fahrzeuge) - Personal
-          wird automatisch berechnet. Nur ein Bauplan je Typ aktiv.
-        </li>
-        <li style="margin-bottom:8px;">
-          <b>Bauplan "Anwenden"</b>: Soll/Ist je Wache, direkt bauen/kaufen/verkaufen.
-        </li>
-        <li style="margin-bottom:8px;">
-          <b>Personal-Check &amp; Schulungen</b>: fehlendes Ausbildungspersonal, Lehrgänge starten.
-        </li>
-        <li style="margin-bottom:8px;">
-          <b>Fahrzeug-Besatzung</b>: weist passendes Personal automatisch zu.
-        </li>
-        <li>
-          <b>Wachenausbau</b> und <b>Schnellumbenennung</b> funktionieren unabhängig davon.
-        </li>
-      </ol>
-
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
+    body.innerHTML = `\n      <p>Empfohlene Reihenfolge:</p>\n\n      <ol style="padding-left:20px;">\n        <li style="margin-bottom:8px;">\n          <b>Wachen-Bauplaner</b>: Bauplan je Gebäudetyp anlegen (Ausbauten, Fahrzeuge) - Personal\n          wird automatisch berechnet. Nur ein Bauplan je Typ aktiv.\n        </li>\n        <li style="margin-bottom:8px;">\n          <b>Bauplan "Anwenden"</b>: Soll/Ist je Wache, direkt bauen/kaufen/verkaufen.\n        </li>\n        <li style="margin-bottom:8px;">\n          <b>Personal-Check &amp; Schulungen</b>: fehlendes Ausbildungspersonal, Lehrgänge starten.\n        </li>\n        <li style="margin-bottom:8px;">\n          <b>Fahrzeug-Besatzung</b>: weist passendes Personal automatisch zu.\n        </li>\n        <li>\n          <b>Wachenausbau</b> und <b>Schnellumbenennung</b> funktionieren unabhängig davon.\n        </li>\n      </ol>\n\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
-
-  //////////////////////////////////////////////////
-  // Einstellungen: Kanal-Info + Update-Check (manuell und im Hintergrund)
-  //////////////////////////////////////////////////
-
   function renderFooter() {
     if (!modalFooterEl) return;
     const channelSuffix = CHANNEL === "beta" ? " (Beta)" : "";
-    // Bewusst ein Button statt eines Links: das Update selbst wird ausschliesslich in
-    // den Einstellungen ausgeloest (siehe openUpdateTab) - der Badge hier soll nur
-    // dorthin fuehren, nicht selbst schon einen Tab oeffnen.
-    const updateBadge = availableUpdateVersion
-      ? `<button type="button" id="vn-footer-update-badge" class="btn btn-link"
-                 style="padding:0; border:0; color:#d9534f; font-weight:bold; font-size:inherit;">
-           Update verfügbar (v${escapeHtml(availableUpdateVersion)})
-         </button>`
-      : "";
-    // margin-left:auto auf der Versions-Span schiebt sie an den rechten Rand, egal ob
-    // der Update-Hinweis davor existiert oder nicht (robuster als space-between mit
-    // einem Platzhalter-Element, das je nach Inhalt/Whitespace die Verteilung kippt).
-    modalFooterEl.innerHTML = `
-      ${updateBadge}
-      <span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>
-      <button type="button" id="vn-footer-close" class="btn btn-default btn-xs" style="margin-left:10px;">
-        <span class="glyphicon glyphicon-remove" aria-hidden="true"></span> Beenden
-      </button>
-    `;
-    // Ueber modalFooterEl.querySelector statt document.getElementById: renderFooter() wird
-    // beim allerersten Aufruf (initModal()) VOR dem Anhaengen ans Dokument ausgefuehrt -
-    // document.getElementById wuerde die Buttons dann noch nicht finden (null).
+    const updateBadge = availableUpdateVersion ? `<button type="button" id="vn-footer-update-badge" class="btn btn-link"\n                 style="padding:0; border:0; color:#d9534f; font-weight:bold; font-size:inherit;">\n           Update verfügbar (v${escapeHtml(availableUpdateVersion)})\n         </button>` : "";
+    modalFooterEl.innerHTML = `\n      ${updateBadge}\n      <span style="margin-left:auto;">FuxTools v${escapeHtml(SCRIPT_VERSION)}${channelSuffix} · © Fuxaro · CC BY-NC-SA 4.0</span>\n      <button type="button" id="vn-footer-close" class="btn btn-default btn-xs" style="margin-left:10px;">\n        <span class="glyphicon glyphicon-remove" aria-hidden="true"></span> Beenden\n      </button>\n    `;
     modalFooterEl.querySelector("#vn-footer-update-badge")?.addEventListener("click", renderSettingsScreen);
     modalFooterEl.querySelector("#vn-footer-close").addEventListener("click", closeModal);
   }
-
   async function fetchRemoteVersion() {
-    const res = await fetchWithTimeout(`${UPDATE_CHECK_URL}?_=${Date.now()}`, { cache: "no-store" });
+    const res = await fetchWithTimeout(`${UPDATE_CHECK_URL}?_=${Date.now()}`, {
+      cache: "no-store"
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     const match = text.match(/@version\s+([\d.]+)/);
     if (!match) throw new Error("Version im Remote-Script nicht gefunden.");
     return match[1];
   }
-
-  // Einzige Stelle, die tatsaechlich einen Update-Tab oeffnet - sowohl "Jetzt
-  // aktualisieren" als auch "Neuinstallation erzwingen" nutzen diese eine Funktion,
-  // statt das Oeffnen+Reload-Merken jeweils selbst zu duplizieren. Sperrt das Script HIER
-  // (nicht erst beim naechsten Oeffnen) auf einen Neuladen-Bildschirm, damit garantiert
-  // nicht mit der alten Version weitergearbeitet wird, waehrend im anderen Tab schon eine
-  // neue Version installiert wird.
   function openUpdateTab() {
     pendingReloadAfterUpdate = true;
     window.open(`${UPDATE_CHECK_URL}?_=${Date.now()}`, "_blank", "noopener");
     renderUpdateRequiredScreen();
   }
-
-  // Blockierender Bildschirm nach dem Oeffnen eines Update-Tabs: absichtlich ohne
-  // "Zurück"/Navigation zu anderen Bildschirmen - einzige Aktion ist der Neuladen-Button,
-  // damit nicht versehentlich mit der alten Version weiter agiert wird.
   function renderUpdateRequiredScreen() {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p><span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> <b>Update-Tab geöffnet</b></p>
-      <p class="text-muted" style="font-size:12px;">
-        Bitte im geöffneten Tab die neue Version in Tampermonkey bestätigen. FuxTools ist hier
-        erst nach einem Neuladen der Seite wieder bedienbar - so wird garantiert nicht
-        versehentlich mit der alten Version weitergearbeitet.
-      </p>
-      <button id="vn-btn-reload-now" type="button" class="btn btn-primary">
-        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden
-      </button>
-    `;
+    body.innerHTML = `\n      <p><span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> <b>Update-Tab geöffnet</b></p>\n      <p class="text-muted" style="font-size:12px;">\n        Bitte im geöffneten Tab die neue Version in Tampermonkey bestätigen. FuxTools ist hier\n        erst nach einem Neuladen der Seite wieder bedienbar - so wird garantiert nicht\n        versehentlich mit der alten Version weitergearbeitet.\n      </p>\n      <button id="vn-btn-reload-now" type="button" class="btn btn-primary">\n        <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Seite neu laden\n      </button>\n    `;
     document.getElementById("vn-btn-reload-now").addEventListener("click", () => location.reload());
   }
-
-  // Gedrosselter Hintergrund-Check (max. alle UPDATE_CHECK_INTERVAL_MS), wird beim
-  // Start und bei jedem Oeffnen des Hauptmenues angestossen. Fehler bleiben still
-  // (kein Popup) - der Footer-Hinweis ist nur ein Bonus, kein kritischer Pfad.
   async function checkForUpdateInBackground() {
     const now = Date.now();
     if (now - lastUpdateCheckAt < UPDATE_CHECK_INTERVAL_MS) return;
@@ -2280,9 +2203,6 @@
     }
     renderFooter();
   }
-
-  // Einfacher numerischer Vergleich fuer Versionsnummern wie "0.1.4" (kein Semver mit
-  // Vorabversionen, reicht fuer unser X.Y.Z-Schema).
   function isNewerVersion(remote, local) {
     const r = remote.split(".").map(n => parseInt(n, 10) || 0);
     const l = local.split(".").map(n => parseInt(n, 10) || 0);
@@ -2294,141 +2214,27 @@
     }
     return false;
   }
-
   function renderSettingsScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Einstellungen");
     const body = document.getElementById("vehicle-naming-modal-body");
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
-
-    body.innerHTML = `
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">
-        <div class="vn-settings-card">
-          <p style="margin-top:0;">
-            Version <b>${escapeHtml(SCRIPT_VERSION)}</b>
-            <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>
-          </p>
-          <p class="text-muted" style="font-size:12px;">
-            ${
-              CHANNEL === "beta"
-                ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)."
-                : "Du nutzt den Stable-Kanal (main-Branch)."
-            }
-          </p>
-          <div class="form-group">
-            <button id="vn-btn-check-update" type="button" class="btn btn-primary">
-              <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen
-            </button>
-            <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">
-              <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen
-            </button>
-            <button id="vn-btn-show-changelog" type="button" class="btn btn-default">
-              <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Changelog anzeigen
-            </button>
-          </div>
-          <p class="text-muted" style="font-size:11px;">
-            Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich
-            die Versionsnummer nicht geändert hat.
-          </p>
-          <div id="vn-update-status"></div>
-        </div>
-
-        <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Kanal wechseln</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            ${
-              CHANNEL === "beta"
-                ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten."
-                : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."
-            }
-          </p>
-          <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">
-            <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>
-            ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}
-          </a>
-          <p class="text-muted" style="font-size:11px; margin-top:6px; margin-bottom:0;">
-            Öffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als
-            Update dieses Scripts und fragt einmal um Bestätigung.
-          </p>
-        </div>
-
-        <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachenausbau)</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Legt fest, welche Ausbauten im Wachenausbau je Gebäudetyp orange als "gefordert"
-            markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.
-          </p>
-          <button id="vn-btn-required-extensions" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
-          </button>
-        </div>
-
-        <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Einstellungen sichern</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Wachen-Bauplaner, geforderte
-            Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder
-            her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.
-          </p>
-          <button id="vn-btn-export-settings" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Herunterladen
-          </button>
-          <button id="vn-btn-import-settings" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-upload" aria-hidden="true"></span> Hochladen
-          </button>
-          <input type="file" id="vn-import-settings-file" accept="application/json" style="display:none;">
-          <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>
-        </div>
-
-        <div class="vn-settings-card">
-          <p style="margin-top:0;"><b>Fehlerprotokoll</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Speichert die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler (mit Zeitstempel
-            und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird
-            nirgendwo automatisch hochgeladen.
-          </p>
-          <button id="vn-btn-show-errorlog" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Anzeigen
-          </button>
-          <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren
-          </button>
-          <div id="vn-errorlog-status" style="margin-top:10px;"></div>
-        </div>
-
-        <div class="vn-settings-card" style="border-color:#a94442;">
-          <p style="margin-top:0;"><b>Speicher löschen</b></p>
-          <p class="text-muted" style="font-size:12px;">
-            Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten
-            Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.
-          </p>
-          <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">
-            <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen
-          </button>
-        </div>
-      </div>
-
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">\n        <div class="vn-settings-card">\n          <p style="margin-top:0;">\n            Version <b>${escapeHtml(SCRIPT_VERSION)}</b>\n            <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>\n          </p>\n          <p class="text-muted" style="font-size:12px;">\n            ${CHANNEL === "beta" ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)." : "Du nutzt den Stable-Kanal (main-Branch)."}\n          </p>\n          <div class="form-group">\n            <button id="vn-btn-check-update" type="button" class="btn btn-primary">\n              <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen\n            </button>\n            <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen\n            </button>\n            <button id="vn-btn-show-changelog" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Changelog anzeigen\n            </button>\n          </div>\n          <p class="text-muted" style="font-size:11px;">\n            Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich\n            die Versionsnummer nicht geändert hat.\n          </p>\n          <div id="vn-update-status"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Kanal wechseln</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            ${CHANNEL === "beta" ? "Zurück zum stabilen Kanal wechseln. Der Beta-Kanal kann Vorab-Versionen mit neuen, noch nicht final getesteten Funktionen enthalten." : "Zum Beta-Kanal wechseln, um neue Funktionen vorab zu testen, bevor sie im Stable-Kanal landen. Kann instabiler sein."}\n          </p>\n          <a id="vn-switch-channel" class="btn btn-default" href="${CHANNEL === "beta" ? STABLE_URL : BETA_URL}" target="_blank" rel="noopener">\n            <span class="glyphicon glyphicon-transfer" aria-hidden="true"></span>\n            ${CHANNEL === "beta" ? "Zu Stable wechseln" : "Zu Beta wechseln"}\n          </a>\n          <p class="text-muted" style="font-size:11px; margin-top:6px; margin-bottom:0;">\n            Öffnet den Script-Code des anderen Kanals in einem neuen Tab. Tampermonkey erkennt es als\n            Update dieses Scripts und fragt einmal um Bestätigung.\n          </p>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachenausbau)</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Legt fest, welche Ausbauten im Wachenausbau je Gebäudetyp orange als "gefordert"\n            markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.\n          </p>\n          <button id="vn-btn-required-extensions" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen\n          </button>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Einstellungen sichern</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Wachen-Bauplaner, geforderte\n            Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder\n            her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.\n          </p>\n          <button id="vn-btn-export-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Herunterladen\n          </button>\n          <button id="vn-btn-import-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-upload" aria-hidden="true"></span> Hochladen\n          </button>\n          <input type="file" id="vn-import-settings-file" accept="application/json" style="display:none;">\n          <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Fehlerprotokoll</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Speichert die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler (mit Zeitstempel\n            und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird\n            nirgendwo automatisch hochgeladen.\n          </p>\n          <button id="vn-btn-show-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Anzeigen\n          </button>\n          <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren\n          </button>\n          <div id="vn-errorlog-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card" style="border-color:#a94442;">\n          <p style="margin-top:0;"><b>Speicher löschen</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten\n            Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.\n          </p>\n          <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">\n            <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen\n          </button>\n        </div>\n      </div>\n\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", () => renderRequiredExtensionsSettingsScreen());
     document.getElementById("vn-btn-show-changelog").addEventListener("click", () => renderChangelogScreen(renderSettingsScreen));
-
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-settings-transfer-status");
       statusEl.innerHTML = `<em>Einstellungen werden zusammengestellt ...</em>`;
       try {
         const bundle = await exportAllSettings();
-        const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+        const blob = new Blob([ JSON.stringify(bundle, null, 2) ], {
+          type: "application/json"
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `fuxtools-einstellungen-${new Date().toISOString().slice(0, 10)}.json`;
+        a.download = `fuxtools-einstellungen-${(new Date).toISOString().slice(0, 10)}.json`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -2438,7 +2244,6 @@
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
       }
     });
-
     document.getElementById("vn-btn-show-errorlog").addEventListener("click", () => renderErrorLogScreen(renderSettingsScreen));
     document.getElementById("vn-btn-export-errorlog").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-errorlog-status");
@@ -2447,35 +2252,35 @@
         statusEl.innerHTML = `<span class="text-muted">Keine protokollierten Fehler vorhanden.</span>`;
         return;
       }
-      const bundle = { fuxtools: true, version: SCRIPT_VERSION, exportedAt: Date.now(), errors: log };
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const bundle = {
+        fuxtools: true,
+        version: SCRIPT_VERSION,
+        exportedAt: Date.now(),
+        errors: log
+      };
+      const blob = new Blob([ JSON.stringify(bundle, null, 2) ], {
+        type: "application/json"
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `fuxtools-fehlerprotokoll-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `fuxtools-fehlerprotokoll-${(new Date).toISOString().slice(0, 10)}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
       statusEl.innerHTML = `<span class="text-success">Herunterladen gestartet (${log.length} Einträge).</span>`;
     });
-
     document.getElementById("vn-btn-import-settings").addEventListener("click", () => {
       document.getElementById("vn-import-settings-file").click();
     });
-
     document.getElementById("vn-import-settings-file").addEventListener("change", async e => {
       const file = e.target.files?.[0];
       e.target.value = "";
       if (!file) return;
-
       const statusEl = document.getElementById("vn-settings-transfer-status");
-      const confirmed = confirm(
-        "Achtung: Dadurch werden die aktuellen FuxTools-Einstellungen mit dem Inhalt der " +
-          "Datei überschrieben. Fortfahren?"
-      );
+      const confirmed = confirm("Achtung: Dadurch werden die aktuellen FuxTools-Einstellungen mit dem Inhalt der " + "Datei überschrieben. Fortfahren?");
       if (!confirmed) return;
-
       statusEl.innerHTML = `<em>Einstellungen werden importiert ...</em>`;
       try {
         const parsed = JSON.parse(await file.text());
@@ -2486,21 +2291,17 @@
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Importieren: ${escapeHtml(e.message)}</span>`;
       }
     });
-
     document.getElementById("vn-btn-clear-storage").addEventListener("click", () => {
       renderClearStorageConfirmScreen(renderSettingsScreen);
     });
-
     document.getElementById("vn-btn-force-reinstall").addEventListener("click", () => {
       openUpdateTab();
     });
-
     document.getElementById("vn-btn-check-update").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-update-status");
       statusEl.innerHTML = `<em>Suche nach Updates ...</em>`;
       try {
         const remoteVersion = await fetchRemoteVersion();
-
         if (isNewerVersion(remoteVersion, SCRIPT_VERSION)) {
           availableUpdateVersion = remoteVersion;
           renderUpdateAvailableStatus(statusEl, remoteVersion);
@@ -2513,149 +2314,65 @@
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Suchen nach Updates: ${escapeHtml(e.message)}</span>`;
       }
     });
-
-    // Falls schon von einem frueheren (Hintergrund-)Check bekannt, direkt anzeigen -
-    // man muss dann nicht erst nochmal manuell auf "Nach Updates suchen" klicken.
     if (availableUpdateVersion) {
       renderUpdateAvailableStatus(document.getElementById("vn-update-status"), availableUpdateVersion);
     }
   }
-
-  // Laedt CHANGELOG.md live vom aktuellen Kanal-Branch (siehe CHANGELOG_URL) und zeigt es im
-  // FuxTools-eigenen Design an, statt dass Tester dafuer extra auf GitHub nachschauen muessen.
-  // cache:"no-store" + Cachebuster-Query wie bei fetchRemoteVersion(), damit nicht versehentlich
-  // eine alte, vom Browser gecachte Version angezeigt wird.
   async function renderChangelogScreen(goBack) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Einstellungen › Changelog");
     const body = document.getElementById("vehicle-naming-modal-body");
-
-    body.innerHTML = `
-      <div class="vn-changelog"><p><em>Changelog wird geladen ...</em></p></div>
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
+    body.innerHTML = `\n      <div class="vn-changelog"><p><em>Changelog wird geladen ...</em></p></div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-
     try {
-      const res = await fetchWithTimeout(`${CHANGELOG_URL}?_=${Date.now()}`, { cache: "no-store" });
+      const res = await fetchWithTimeout(`${CHANGELOG_URL}?_=${Date.now()}`, {
+        cache: "no-store"
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const markdown = await res.text();
       body.querySelector(".vn-changelog").innerHTML = renderMarkdownLite(markdown);
     } catch (e) {
-      body.querySelector(".vn-changelog").innerHTML =
-        `<p class="text-danger">Changelog konnte nicht geladen werden: ${escapeHtml(e.message)}</p>`;
+      body.querySelector(".vn-changelog").innerHTML = `<p class="text-danger">Changelog konnte nicht geladen werden: ${escapeHtml(e.message)}</p>`;
     }
   }
-
-  // Zeigt "Update verfuegbar" mit einem einzigen "Jetzt aktualisieren"-Button, der
-  // ueber openUpdateTab() den Tab oeffnet - gemeinsam genutzt vom manuellen Update-
-  // Check und vom initialen Zustand (wenn schon ein Hintergrund-Check ein Update kannte).
   function renderUpdateAvailableStatus(statusEl, version) {
-    statusEl.innerHTML = `
-      <span class="text-success"><b>Update verfügbar: v${escapeHtml(version)}</b></span>
-      <div style="margin-top:6px;">
-        <button id="vn-btn-do-update" type="button" class="btn btn-success btn-sm">
-          <span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> Jetzt aktualisieren
-        </button>
-      </div>
-    `;
+    statusEl.innerHTML = `\n      <span class="text-success"><b>Update verfügbar: v${escapeHtml(version)}</b></span>\n      <div style="margin-top:6px;">\n        <button id="vn-btn-do-update" type="button" class="btn btn-success btn-sm">\n          <span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> Jetzt aktualisieren\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-do-update").addEventListener("click", openUpdateTab);
   }
-
-  // Gebaeudetypen, die im "Geforderte Ausbauten anpassen"-Bildschirm ueberhaupt gezeigt
-  // werden - nur Typen mit echten, benannten Ausbauten (EXTENSION_CATALOG), da man ohne
-  // Namen nichts sinnvoll anhaken koennte.
   function requiredExtensionsConfigurableTypes() {
     return PSEUDO_BUILDING_TYPES.map(t => {
-      const buildingKey = getBuildingKey({ building_type: t.buildingType, small_building: t.smallBuilding });
+      const buildingKey = getBuildingKey({
+        building_type: t.buildingType,
+        small_building: t.smallBuilding
+      });
       return {
         pseudoId: t.id,
-        buildingKey,
+        buildingKey: buildingKey,
         typeName: BUILDING_TYPE_NAMES[buildingKey] || `Typ ${buildingKey}`,
-        extensions: EXTENSION_CATALOG[buildingKey] || [],
+        extensions: EXTENSION_CATALOG[buildingKey] || []
       };
     }).filter(t => t.extensions.length > 0);
   }
-
-  // Einstellungen > "Geforderte Ausbauten anpassen": pro Gebaeudetyp ankreuzbare Liste
-  // aller bekannten Ausbauten. Ohne eigene Speicherung (kein Klick auf "Speichern") gilt
-  // weiterhin die feste Standard-Liste (RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID) - "Speichern"
-  // schreibt die komplette angezeigte Konfiguration, "Zurücksetzen" loescht sie wieder.
   async function renderRequiredExtensionsSettingsScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Einstellungen › Geforderte Ausbauten");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
-
     const overrides = await getRequiredExtensionsOverrides();
     const types = requiredExtensionsConfigurableTypes();
-
     function isChecked(pseudoId, extensionId) {
       const list = overrides ? overrides[pseudoId] || [] : getDefaultRequiredExtensions(pseudoId);
       return list.includes(extensionId);
     }
-
-    const groupsHtml = types
-      .map(
-        t => `
-          <div style="margin-bottom:14px;">
-            <p style="font-weight:bold; margin:0 0 4px;">${escapeHtml(t.typeName)}</p>
-            <div>
-              ${t.extensions
-                .map(
-                  ext => `
-                    <label style="display:inline-flex; align-items:center; gap:4px; margin:2px 10px 2px 0; font-weight:normal;">
-                      <input type="checkbox" class="vn-required-ext-checkbox" data-pseudo-id="${t.pseudoId}"
-                             data-extension-id="${ext.id}" ${isChecked(t.pseudoId, ext.id) ? "checked" : ""}>
-                      ${escapeHtml(ext.name)}
-                    </label>
-                  `,
-                )
-                .join("")}
-            </div>
-          </div>
-        `,
-      )
-      .join("");
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Angehakte Ausbauten werden im Wachenausbau orange als "gefordert" markiert.
-        Änderungen gelten erst nach "Speichern".
-        ${overrides ? "" : "Aktuell aktiv: die Standard-Empfehlungen."}
-      </p>
-      <div style="max-height:55vh; overflow:auto; padding-right:4px;">
-        ${groupsHtml}
-      </div>
-      <div id="vn-required-ext-status" style="margin-top:6px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-save-required" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern
-        </button>
-        <button id="vn-btn-reset-required" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Zurücksetzen auf Standard
-        </button>
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
+    const groupsHtml = types.map(t => `\n          <div style="margin-bottom:14px;">\n            <p style="font-weight:bold; margin:0 0 4px;">${escapeHtml(t.typeName)}</p>\n            <div>\n              ${t.extensions.map(ext => `\n                    <label style="display:inline-flex; align-items:center; gap:4px; margin:2px 10px 2px 0; font-weight:normal;">\n                      <input type="checkbox" class="vn-required-ext-checkbox" data-pseudo-id="${t.pseudoId}"\n                             data-extension-id="${ext.id}" ${isChecked(t.pseudoId, ext.id) ? "checked" : ""}>\n                      ${escapeHtml(ext.name)}\n                    </label>\n                  `).join("")}\n            </div>\n          </div>\n        `).join("");
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Angehakte Ausbauten werden im Wachenausbau orange als "gefordert" markiert.\n        Änderungen gelten erst nach "Speichern".\n        ${overrides ? "" : "Aktuell aktiv: die Standard-Empfehlungen."}\n      </p>\n      <div style="max-height:55vh; overflow:auto; padding-right:4px;">\n        ${groupsHtml}\n      </div>\n      <div id="vn-required-ext-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-save-required" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Speichern\n        </button>\n        <button id="vn-btn-reset-required" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Zurücksetzen auf Standard\n        </button>\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-
     document.getElementById("vn-btn-save-required").addEventListener("click", async () => {
       const newOverrides = {};
       for (const t of types) newOverrides[t.pseudoId] = [];
       body.querySelectorAll(".vn-required-ext-checkbox:checked").forEach(cb => {
         newOverrides[cb.dataset.pseudoId].push(Number(cb.dataset.extensionId));
       });
-
-      // Diff gegen den Stand beim Oeffnen dieses Bildschirms, fuer einen lesbaren
-      // Verlaufs-Eintrag (welche Ausbauten je Gebaeudetyp neu/nicht mehr gefordert sind).
       const changes = [];
       for (const t of types) {
         const before = new Set(t.extensions.filter(ext => isChecked(t.pseudoId, ext.id)).map(ext => ext.id));
@@ -2668,15 +2385,15 @@
         if (removed.length) parts.push(`-${removed.join(", ")}`);
         changes.push(`${t.typeName}: ${parts.join(", ")}`);
       }
-
       await storeData(newOverrides, CUSTOM_REQUIRED_EXTENSIONS_KEY);
       if (changes.length) {
-        await logHistoryEntry({ type: "required_extensions_config", label: changes.join(" · ") });
+        await logHistoryEntry({
+          type: "required_extensions_config",
+          label: changes.join(" · ")
+        });
       }
-      document.getElementById("vn-required-ext-status").innerHTML =
-        '<span class="text-success">Gespeichert.</span>';
+      document.getElementById("vn-required-ext-status").innerHTML = '<span class="text-success">Gespeichert.</span>';
     });
-
     document.getElementById("vn-btn-reset-required").addEventListener("click", () => {
       renderSimpleConfirmScreen({
         title: "Einstellungen › Geforderte Ausbauten › Zurücksetzen",
@@ -2690,114 +2407,85 @@
           if (hadOverrides) {
             await logHistoryEntry({
               type: "required_extensions_config",
-              label: "Zurückgesetzt auf Standard-Empfehlungen",
+              label: "Zurückgesetzt auf Standard-Empfehlungen"
             });
           }
           renderRequiredExtensionsSettingsScreen(goBack);
-        },
+        }
       });
     });
   }
-
-  // Verlauf: zeigt alle ueber FuxTools durchgefuehrten Aktionen (Ausbauten, Lagerraeume,
-  // Ausbaustufen, Umbenennen/Zuruecksetzen von Fahrzeugen/Wachen/Leitstellen) mit Datum,
-  // Uhrzeit und Kosten - rein informativ, nur lokal gespeichert (kein Bezug zum
-  // Spielserver). Gleiches Grundprinzip wie der Wachen-Check: Suchfeld + Dropdown-Filter.
   async function renderHistoryScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Verlauf");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Verlauf ...</p>`;
-
     const history = await getHistory();
-
     const applyRowVisibility = makeRowVisibilityFilter({
       container: body,
       searchInputId: "vn-history-search",
       typeFilterId: "vn-history-type-filter",
       rowSelector: ".vn-history-row",
-      searchField: "search",
+      searchField: "search"
     });
-
-    // Sortierung per Klick auf die Spaltenueberschrift (gleiches Prinzip wie bei "Wachen
-    // umbenennen"/Fahrzeug-Besatzung-Fehlerliste) - erneuter Klick auf dieselbe Spalte dreht
-    // die Richtung um. Datum/Uhrzeit sortieren beide nach dem echten Zeitstempel (nicht dem
-    // formatierten Text), Status nach Dringlichkeit (laeuft/unterbrochen zuerst).
-    const historySort = { column: "date", asc: false };
-    const STATUS_RANK = { running: 0, cancelled: 1 };
+    const historySort = {
+      column: "date",
+      asc: false
+    };
+    const STATUS_RANK = {
+      running: 0,
+      cancelled: 1
+    };
     const STATUS_LABEL = {
       running: "läuft/unterbrochen ...",
-      cancelled: "abgebrochen",
+      cancelled: "abgebrochen"
     };
-
     function historySortKey(column, entry) {
       switch (column) {
-        case "status":
-          return STATUS_RANK[entry.status] ?? 2;
-        case "function":
-          return `${HISTORY_TYPE_LABELS[entry.type] || entry.type || ""}: ${entry.label || ""}`.toLowerCase();
-        case "cost":
-          return entry.cost == null ? -1 : entry.cost;
-        case "date":
-        default:
-          return entry.timestamp;
+       case "status":
+        return STATUS_RANK[entry.status] ?? 2;
+
+       case "function":
+        return `${HISTORY_TYPE_LABELS[entry.type] || entry.type || ""}: ${entry.label || ""}`.toLowerCase();
+
+       case "cost":
+        return entry.cost == null ? -1 : entry.cost;
+
+       case "date":
+       default:
+        return entry.timestamp;
       }
     }
-
     function renderHistoryRows() {
       const dir = historySort.asc ? 1 : -1;
-      const sorted = [...history].sort((a, b) => {
+      const sorted = [ ...history ].sort((a, b) => {
         const ka = historySortKey(historySort.column, a);
         const kb = historySortKey(historySort.column, b);
         if (typeof ka === "number" && typeof kb === "number") return dir * (ka - kb);
         return dir * String(ka).localeCompare(String(kb), "de");
       });
-      return sorted
-        .map(entry => {
-          const date = new Date(entry.timestamp);
-          const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
-          const costLabel =
-            entry.cost == null
-              ? "-"
-              : entry.currency === "coins"
-                ? `${entry.cost.toLocaleString("de-DE")} Coins`
-                : `${entry.cost.toLocaleString("de-DE")} Credits`;
-          const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
-          const statusBadge = STATUS_LABEL[entry.status]
-            ? `<span class="label ${entry.status === "running" ? "label-warning" : "label-default"}">${STATUS_LABEL[entry.status]}</span>`
-            : `<span class="label label-success">abgeschlossen</span>`;
-          return `
-            <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
-              <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
-              <td>${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
-              <td>${statusBadge}</td>
-              <td>
-                ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}
-                <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>
-              </td>
-              <td>${escapeHtml(costLabel)}</td>
-            </tr>
-          `;
-        })
-        .join("");
+      return sorted.map(entry => {
+        const date = new Date(entry.timestamp);
+        const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
+        const costLabel = entry.cost == null ? "-" : entry.currency === "coins" ? `${entry.cost.toLocaleString("de-DE")} Coins` : `${entry.cost.toLocaleString("de-DE")} Credits`;
+        const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
+        const statusBadge = STATUS_LABEL[entry.status] ? `<span class="label ${entry.status === "running" ? "label-warning" : "label-default"}">${STATUS_LABEL[entry.status]}</span>` : `<span class="label label-success">abgeschlossen</span>`;
+        return `\n            <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">\n              <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>\n              <td>${escapeHtml(date.toLocaleTimeString("de-DE", {
+          hour: "2-digit",
+          minute: "2-digit"
+        }))}</td>\n              <td>${statusBadge}</td>\n              <td>\n                ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}\n                <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>\n              </td>\n              <td>${escapeHtml(costLabel)}</td>\n            </tr>\n          `;
+      }).join("");
     }
-
     function historyHeaderHtml() {
-      const arrow = col =>
-        historySort.column === col
-          ? `<span class="glyphicon glyphicon-triangle-${historySort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>`
-          : "";
-      const th = (col, label) =>
-        `<th class="vn-history-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
+      const arrow = col => historySort.column === col ? `<span class="glyphicon glyphicon-triangle-${historySort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>` : "";
+      const th = (col, label) => `<th class="vn-history-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
       return `${th("date", "Datum")}${th("date", "Uhrzeit")}${th("status", "Status")}${th("function", "Funktion")}${th("cost", "Kosten")}`;
     }
-
     function bindHistorySortHeaders() {
       body.querySelectorAll(".vn-history-sort-th").forEach(th => {
         th.addEventListener("click", () => {
           const col = th.dataset.sort;
-          if (historySort.column === col) historySort.asc = !historySort.asc;
-          else {
+          if (historySort.column === col) historySort.asc = !historySort.asc; else {
             historySort.column = col;
             historySort.asc = true;
           }
@@ -2805,213 +2493,62 @@
         });
       });
     }
-
     function updateHistoryTable() {
       const headRow = document.getElementById("vn-history-head");
       if (headRow) headRow.innerHTML = historyHeaderHtml();
-      document.getElementById("vn-history-body").innerHTML =
-        renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>';
+      document.getElementById("vn-history-body").innerHTML = renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>';
       bindHistorySortHeaders();
       applyRowVisibility();
     }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Zeigt Ausbauten, Lagerräume, Ausbaustufen sowie Umbenennen/Zurücksetzen von
-        Fahrzeugen, Wachen und Leitstellen, die über FuxTools durchgeführt wurden - nur
-        auf diesem Gerät gespeichert.
-      </p>
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">
-          <option value="">Alle Aktionen</option>
-          <option value="extension">Ausbau</option>
-          <option value="storage">Lagerraum</option>
-          <option value="level">Ausbaustufe</option>
-          <option value="vehicle_rename">Fahrzeuge umbenennen</option>
-          <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>
-          <option value="station_rename">Wachen umbenennen</option>
-          <option value="leitstelle_rename">Leitstellen umbenennen</option>
-          <option value="required_extensions_config">Geforderte Ausbauten</option>
-          <option value="personnel_requirements_config">Personal-Standard</option>
-          <option value="schooling_start">Schulung gestartet</option>
-          <option value="crew_assignment">Fahrzeug-Besatzung</option>
-          <option value="crew_unassign_all">Besatzung abgezogen</option>
-        </select>
-        <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
-      </div>
-      <div style="max-height:55vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
-          <colgroup>
-            <col style="width:12%;">
-            <col style="width:10%;">
-            <col style="width:14%;">
-            <col style="width:44%;">
-            <col style="width:20%;">
-          </colgroup>
-          <thead>
-            <tr id="vn-history-head">${historyHeaderHtml()}</tr>
-          </thead>
-          <tbody id="vn-history-body">
-            ${renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Zeigt Ausbauten, Lagerräume, Ausbaustufen sowie Umbenennen/Zurücksetzen von\n        Fahrzeugen, Wachen und Leitstellen, die über FuxTools durchgeführt wurden - nur\n        auf diesem Gerät gespeichert.\n      </p>\n      <div style="display:flex; gap:8px; margin-bottom:8px;">\n        <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">\n          <option value="">Alle Aktionen</option>\n          <option value="extension">Ausbau</option>\n          <option value="storage">Lagerraum</option>\n          <option value="level">Ausbaustufe</option>\n          <option value="vehicle_rename">Fahrzeuge umbenennen</option>\n          <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>\n          <option value="station_rename">Wachen umbenennen</option>\n          <option value="leitstelle_rename">Leitstellen umbenennen</option>\n          <option value="required_extensions_config">Geforderte Ausbauten</option>\n          <option value="personnel_requirements_config">Personal-Standard</option>\n          <option value="schooling_start">Schulung gestartet</option>\n          <option value="crew_assignment">Fahrzeug-Besatzung</option>\n          <option value="crew_unassign_all">Besatzung abgezogen</option>\n        </select>\n        <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">\n      </div>\n      <div style="max-height:55vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:12%;">\n            <col style="width:10%;">\n            <col style="width:14%;">\n            <col style="width:44%;">\n            <col style="width:20%;">\n          </colgroup>\n          <thead>\n            <tr id="vn-history-head">${historyHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-history-body">\n            ${renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}\n          </tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-history-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-history-type-filter").addEventListener("change", applyRowVisibility);
     bindHistorySortHeaders();
   }
-
-  // Fehlerprotokoll direkt im Script anzeigen, statt es nur als Datei herunterladen zu
-  // koennen - fuer einen schnellen Blick reicht das meistens, ohne extra eine JSON-Datei
-  // oeffnen zu muessen. Export bleibt zusaetzlich bestehen (z.B. fuer Bug-Reports an uns).
   async function renderErrorLogScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Fehlerprotokoll");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Fehlerprotokoll ...</p>`;
-
     const log = await getErrorLog();
-
-    const rows = log
-      .map(entry => {
-        const date = new Date(entry.timestamp);
-        return `
-          <tr>
-            <td>${escapeHtml(date.toLocaleDateString("de-DE"))} ${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
-            <td>${escapeHtml(entry.context || "-")}</td>
-            <td>${escapeHtml(entry.message || "-")}</td>
-            <td>v${escapeHtml(entry.version || "?")}</td>
-          </tr>
-        `;
-      })
-      .join("");
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler - nur auf diesem Gerät gespeichert.
-      </p>
-      <div style="max-height:55vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
-          <colgroup>
-            <col style="width:18%;">
-            <col style="width:22%;">
-            <col style="width:50%;">
-            <col style="width:10%;">
-          </colgroup>
-          <thead>
-            <tr>
-              <th>Zeitpunkt</th>
-              <th>Kontext</th>
-              <th>Meldung</th>
-              <th>Version</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="4" class="text-muted">Keine protokollierten Fehler vorhanden.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
+    const rows = log.map(entry => {
+      const date = new Date(entry.timestamp);
+      return `\n          <tr>\n            <td>${escapeHtml(date.toLocaleDateString("de-DE"))} ${escapeHtml(date.toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }))}</td>\n            <td>${escapeHtml(entry.context || "-")}</td>\n            <td>${escapeHtml(entry.message || "-")}</td>\n            <td>v${escapeHtml(entry.version || "?")}</td>\n          </tr>\n        `;
+    }).join("");
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler - nur auf diesem Gerät gespeichert.\n      </p>\n      <div style="max-height:55vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:18%;">\n            <col style="width:22%;">\n            <col style="width:50%;">\n            <col style="width:10%;">\n          </colgroup>\n          <thead>\n            <tr>\n              <th>Zeitpunkt</th>\n              <th>Kontext</th>\n              <th>Meldung</th>\n              <th>Version</th>\n            </tr>\n          </thead>\n          <tbody>\n            ${rows || '<tr><td colspan="4" class="text-muted">Keine protokollierten Fehler vorhanden.</td></tr>'}\n          </tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
-
   function injectCustomStyles() {
     const style = document.createElement("style");
-    style.textContent = `
-      .vn-task-spin {
-        display:inline-block;
-        animation: vn-task-spin 1s linear infinite;
-      }
-      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-
-         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -
-         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */
-      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei
-         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge
-         gewinnen kann. */
-      .vn-category-heading {
-        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;
-        border-left:3px solid #337ab7 !important; border-radius:3px !important;
-        padding:6px 10px !important; margin-bottom:2px !important;
-      }
-      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }
-      .vn-category-heading .glyphicon-chevron-right,
-      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }
-      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }
-      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */
-      summary.vn-category-heading { list-style:none; }
-      summary.vn-category-heading::-webkit-details-marker { display:none; }
-      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }
-      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle
-         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche
-         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */
-      .vn-btn-group-box {
-        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;
-        border:1px solid rgba(128,128,128,0.4); border-radius:4px;
-        padding:5px 8px; background:rgba(128,128,128,0.08);
-      }
-      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }
-      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/
-         wartender Aufgabe. */
-      .vn-task-center-item {
-        border:1px solid rgba(128,128,128,0.3); border-radius:4px;
-        padding:8px 10px; margin-bottom:8px;
-      }
-    `;
+    style.textContent = `\n      .vn-task-spin {\n        display:inline-block;\n        animation: vn-task-spin 1s linear infinite;\n      }\n      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-\n         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -\n         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */\n      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei\n         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge\n         gewinnen kann. */\n      .vn-category-heading {\n        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;\n        border-left:3px solid #337ab7 !important; border-radius:3px !important;\n        padding:6px 10px !important; margin-bottom:2px !important;\n      }\n      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }\n      .vn-category-heading .glyphicon-chevron-right,\n      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }\n      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }\n      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */\n      summary.vn-category-heading { list-style:none; }\n      summary.vn-category-heading::-webkit-details-marker { display:none; }\n      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }\n      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle\n         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche\n         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */\n      .vn-btn-group-box {\n        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;\n        border:1px solid rgba(128,128,128,0.4); border-radius:4px;\n        padding:5px 8px; background:rgba(128,128,128,0.08);\n      }\n      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }\n      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/\n         wartender Aufgabe. */\n      .vn-task-center-item {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:8px 10px; margin-bottom:8px;\n      }\n    `;
     document.head.appendChild(style);
   }
-
   function addMenuEntry() {
     injectCustomStyles();
     const logoImg = document.createElement("img");
     logoImg.src = LOGO_URL;
     logoImg.alt = "";
     logoImg.style.cssText = "height:24px; width:24px; border-radius:3px; vertical-align:middle; margin-right:6px;";
-    // Fehlt das Logo mal (z.B. Netzwerkfehler), auf das alte Schraubenschluessel-Icon
-    // zurueckfallen statt eines kaputten Bild-Icons.
     logoImg.addEventListener("error", () => {
-      logoImg.replaceWith(
-        Object.assign(document.createElement("span"), {
-          className: "glyphicon glyphicon-wrench",
-          style: "margin-right:6px;",
-        }),
-      );
+      logoImg.replaceWith(Object.assign(document.createElement("span"), {
+        className: "glyphicon glyphicon-wrench",
+        style: "margin-right:6px;"
+      }));
     });
-
     const a = document.createElement("a");
     a.href = "#";
     a.style.cssText = "display:flex; align-items:center; height:100%; padding:15px;";
     a.appendChild(logoImg);
     a.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
-
     const li = document.createElement("li");
     li.role = "presentation";
     li.setAttribute("data-toggle", "modal");
     li.setAttribute("data-target", `#${modalId}`);
     li.appendChild(a);
-
-    // Eigener Punkt DIREKT in der Navigationsleiste, links neben dem gruen hervorgehobenen
-    // Profil-Menue - nicht mehr versteckt in dessen Dropdown. Klassen des Profil-<li> werden
-    // uebernommen, damit Hoehe/Hover-Optik zu den Nachbar-Eintraegen passt. Kein stiller
-    // Rueckfall auf die alte Position mehr (bewusst) - aber ein fehlendes #menu_profile darf
-    // trotzdem nicht den kompletten Start abbrechen (main() wuerde sonst auch
-    // checkForUpdateInBackground() nie erreichen) - deshalb hier nur ein sichtbarer Hinweis
-    // statt eines uncaught TypeError. Ohne diesen Menuepunkt ist das Modal fuer den Nutzer gar
-    // nicht erreichbar, deshalb reportError() (Seiten-Banner) statt nur console.error().
     const profileLi = document.querySelector("#menu_profile")?.closest("li");
     if (!profileLi) {
       reportError("Navbar-Eintrag konnte nicht eingefügt werden", new Error("#menu_profile nicht gefunden - FuxTools ist über das Menü nicht erreichbar."));
@@ -3019,14 +2556,6 @@
     }
     li.className = profileLi.className;
     profileLi.parentNode.insertBefore(li, profileLi);
-
-    // Eigener, SEPARATER Navbar-Eintrag nur fuer Hintergrund-Tasks (siehe Hintergrund-Task-
-    // System oben) - bewusst NICHT derselbe Klick-Ziel wie der normale FuxTools-Eintrag, damit
-    // man ohne Umweg direkt ins normale Menue kommt, waehrend im Hintergrund etwas laeuft.
-    // Fox-Logo bleibt voll sichtbar, das drehende Icon sitzt als kleines Abzeichen an der
-    // Ecke (NICHT mittig ueberlagert - sonst verdeckt es das Logo komplett) - so bleibt der
-    // Zusammenhang zu FuxTools erkennbar. Immer sichtbar (auch im Leerlauf), siehe
-    // updateBackgroundTaskBadge().
     const taskCenterIconWrap = document.createElement("span");
     taskCenterIconWrap.style.cssText = "position:relative; display:inline-block; width:22px; height:22px;";
     const taskCenterLogo = document.createElement("img");
@@ -3035,21 +2564,14 @@
     taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px;";
     taskCenterLogo.addEventListener("error", () => taskCenterLogo.remove());
     taskCenterIconWrap.appendChild(taskCenterLogo);
-    // Bewusst KEIN farbiger Kreis mehr dahinter (siehe updateBackgroundTaskBadge()) - der
-    // machte ein Zentrierungs-/Rasterungs-Artefakt der drehenden Glyphe erst sichtbar
-    // ("eiern"). Drehen (laeuft) vs. Stillstehen (fertig/Leerlauf) reicht als Signal.
     backgroundTaskBadgeEl = document.createElement("span");
-    backgroundTaskBadgeEl.style.cssText =
-      "position:absolute; bottom:-4px; right:-6px; font-size:12px; line-height:1; color:#fff; " +
-      "text-shadow:0 0 2px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);";
+    backgroundTaskBadgeEl.style.cssText = "position:absolute; bottom:-4px; right:-6px; font-size:12px; line-height:1; color:#fff; " + "text-shadow:0 0 2px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);";
     taskCenterIconWrap.appendChild(backgroundTaskBadgeEl);
-
     const taskCenterLink = document.createElement("a");
     taskCenterLink.href = "#";
     taskCenterLink.title = "FuxTools - laufende Aufgaben";
     taskCenterLink.style.cssText = "display:flex; align-items:center; height:100%; padding:15px 12px;";
     taskCenterLink.appendChild(taskCenterIconWrap);
-
     const taskCenterLi = document.createElement("li");
     taskCenterLi.id = "vn-task-center-entry";
     taskCenterLi.role = "presentation";
@@ -3059,24 +2581,17 @@
     taskCenterLi.appendChild(taskCenterLink);
     profileLi.parentNode.insertBefore(taskCenterLi, profileLi);
     taskCenterEntryEl = taskCenterLi;
-    updateBackgroundTaskBadge(); // sofort in den (jetzt immer sichtbaren) Leerlauf-Zustand setzen
+    updateBackgroundTaskBadge();
   }
-
-  //////////////////////////////////////////////////
-  // Fahrzeuge umbenennen - Schritt 1: Leitstelle(n) auswaehlen
-  //////////////////////////////////////////////////
-
   let gameVehicles = [];
-  let gameBuildingsById = new Map();
-  let allStations = []; // alle Wachen mit Fahrzeugen, inkl. Leitstellen-Zuordnung
+  let gameBuildingsById = new Map;
+  let allStations = [];
   let selectedLeitstelleIds = [];
-
   async function renderLeitstelleSelection() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle(currentMode === "reset" ? "Fahrzeugnamen zurücksetzen" : "Fahrzeuge umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen, Wachen &amp; Fahrzeuge ...</em></p>`;
-
     try {
       const data = await loadGameData();
       gameVehicles = data.vehicles;
@@ -3085,75 +2600,43 @@
       body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
       return;
     }
-
-    const byBuilding = new Map();
+    const byBuilding = new Map;
     for (const v of gameVehicles) {
       const bId = String(v.building_id ?? v.building);
       if (!byBuilding.has(bId)) byBuilding.set(bId, []);
       byBuilding.get(bId).push(v);
     }
-
-    allStations = [...byBuilding.entries()]
-      .map(([id, list]) => {
-        const building = gameBuildingsById.get(id) || {};
-        const leitstelleId =
-          building.leitstelle_building_id != null ? String(building.leitstelle_building_id) : null;
-        const leitstelleBuilding = leitstelleId ? gameBuildingsById.get(leitstelleId) : null;
-        return {
-          id,
-          name: building.caption || `Wache ${id}`,
-          category: categoryForBuilding(building),
-          leitstelleId: leitstelleId || "none",
-          leitstelleName: leitstelleId
-            ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}`
-            : "Ohne Leitstelle",
-          vehicles: list,
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    // Nach Leitstelle gruppieren
-    const byLeitstelle = new Map();
+    allStations = [ ...byBuilding.entries() ].map(([id, list]) => {
+      const building = gameBuildingsById.get(id) || {};
+      const leitstelleId = building.leitstelle_building_id != null ? String(building.leitstelle_building_id) : null;
+      const leitstelleBuilding = leitstelleId ? gameBuildingsById.get(leitstelleId) : null;
+      return {
+        id: id,
+        name: building.caption || `Wache ${id}`,
+        category: categoryForBuilding(building),
+        leitstelleId: leitstelleId || "none",
+        leitstelleName: leitstelleId ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
+        vehicles: list
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    const byLeitstelle = new Map;
     for (const s of allStations) {
       if (!byLeitstelle.has(s.leitstelleId)) {
-        byLeitstelle.set(s.leitstelleId, { name: s.leitstelleName, stations: [] });
+        byLeitstelle.set(s.leitstelleId, {
+          name: s.leitstelleName,
+          stations: []
+        });
       }
       byLeitstelle.get(s.leitstelleId).stations.push(s);
     }
-
-    const rows = [...byLeitstelle.entries()]
-      .sort((a, b) => a[1].name.localeCompare(b[1].name))
-      .map(([id, info]) => {
-        const vehicleCount = info.stations.reduce((sum, s) => sum + s.vehicles.length, 0);
-        return `
-        <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">
-          <label>
-            <input type="checkbox" class="vn-leitstelle-check" value="${id}">
-            ${escapeHtml(info.name)} <span class="text-muted">(${info.stations.length} Wachen, ${vehicleCount} Fahrzeuge)</span>
-          </label>
-        </div>`;
-      })
-      .join("");
-
-    body.innerHTML = `
-      <p>Wähle die Leitstelle(n) aus:</p>
-      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
-        ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
-      </div>
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">
-          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
-        </button>
-      </div>
-    `;
-
+    const rows = [ ...byLeitstelle.entries() ].sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, info]) => {
+      const vehicleCount = info.stations.reduce((sum, s) => sum + s.vehicles.length, 0);
+      return `\n        <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">\n          <label>\n            <input type="checkbox" class="vn-leitstelle-check" value="${id}">\n            ${escapeHtml(info.name)} <span class="text-muted">(${info.stations.length} Wachen, ${vehicleCount} Fahrzeuge)</span>\n          </label>\n        </div>`;
+    }).join("");
+    body.innerHTML = `\n      <p>Wähle die Leitstelle(n) aus:</p>\n      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">\n        ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
-
     document.getElementById("vn-btn-next-leitstelle").addEventListener("click", () => {
-      const ids = [...body.querySelectorAll(".vn-leitstelle-check:checked")].map(el => el.value);
+      const ids = [ ...body.querySelectorAll(".vn-leitstelle-check:checked") ].map(el => el.value);
       if (!ids.length) {
         alert("Bitte mindestens eine Leitstelle auswählen.");
         return;
@@ -3162,111 +2645,44 @@
       renderStationSelection();
     });
   }
-
-  //////////////////////////////////////////////////
-  // Fahrzeuge umbenennen - Schritt 2: Wachen auswaehlen (gefiltert auf die
-  // zuvor gewaehlten Leitstellen, nach Kategorie sortiert)
-  //////////////////////////////////////////////////
-
   function renderStationSelection() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
-
     const stations = allStations.filter(s => selectedLeitstelleIds.includes(s.leitstelleId));
-
-    // Nach Kategorie gruppieren (Feuerwehr, Rettungsdienst, Polizei, ...)
-    const byCategory = new Map();
+    const byCategory = new Map;
     for (const s of stations) {
       if (!byCategory.has(s.category)) byCategory.set(s.category, []);
       byCategory.get(s.category).push(s);
     }
-
-    const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-      .map((cat, idx) => {
-        const catStations = byCategory.get(cat);
-        const collapseId = `vn-cat-collapse-${idx}`;
-        const stationRows = catStations
-          .map(
-            s => `
-          <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">
-            <label>
-              <input type="checkbox" class="vn-station-check" value="${s.id}">
-              ${escapeHtml(s.name)} <span class="text-muted">(${s.vehicles.length} Fahrzeuge)</span>
-            </label>
-          </div>`
-          )
-          .join("");
-        return `
-        <div class="panel panel-default" style="margin-bottom: 8px;">
-          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">
-            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
-            <b>${escapeHtml(cat)}</b>
-            <span class="text-muted">(${catStations.length} Wachen)</span>
-            <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">
-              <input type="checkbox" class="vn-category-master" data-category="${escapeHtml(cat)}">
-              alle auswählen
-            </label>
-          </div>
-          <div id="${collapseId}" class="panel-collapse collapse">
-            <div class="panel-body" style="column-count: 2; column-gap: 20px;">
-              ${stationRows}
-            </div>
-          </div>
-        </div>`;
-      })
-      .join("");
-
-    body.innerHTML = `
-      <p>Wähle die Wachen aus, deren Fahrzeuge du umbenennen möchtest (Kategorie anklicken zum Auf-/Zuklappen):</p>
-      <div style="max-height: 460px; overflow-y: auto; padding: 4px;">
-        ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}
-      </div>
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-next" type="button" class="btn btn-primary">
-          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
-        </button>
-      </div>
-    `;
-
+    const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map((cat, idx) => {
+      const catStations = byCategory.get(cat);
+      const collapseId = `vn-cat-collapse-${idx}`;
+      const stationRows = catStations.map(s => `\n          <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">\n            <label>\n              <input type="checkbox" class="vn-station-check" value="${s.id}">\n              ${escapeHtml(s.name)} <span class="text-muted">(${s.vehicles.length} Fahrzeuge)</span>\n            </label>\n          </div>`).join("");
+      return `\n        <div class="panel panel-default" style="margin-bottom: 8px;">\n          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">\n            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>\n            <b>${escapeHtml(cat)}</b>\n            <span class="text-muted">(${catStations.length} Wachen)</span>\n            <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">\n              <input type="checkbox" class="vn-category-master" data-category="${escapeHtml(cat)}">\n              alle auswählen\n            </label>\n          </div>\n          <div id="${collapseId}" class="panel-collapse collapse">\n            <div class="panel-body" style="column-count: 2; column-gap: 20px;">\n              ${stationRows}\n            </div>\n          </div>\n        </div>`;
+    }).join("");
+    body.innerHTML = `\n      <p>Wähle die Wachen aus, deren Fahrzeuge du umbenennen möchtest (Kategorie anklicken zum Auf-/Zuklappen):</p>\n      <div style="max-height: 460px; overflow-y: auto; padding: 4px;">\n        ${categoryBlocks || '<p class="text-muted"><em>Keine Fahrzeuge gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-next" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderLeitstelleSelection);
-
-    // Pfeil-Symbol dreht sich beim Auf-/Zuklappen (Bootstrap-Collapse aendert selbst keine
-    // Klasse am Header, daher optimistisch bei jedem Klick umschalten statt auf ein
-    // shown/hidden.bs.collapse-Event zu warten).
     body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
       icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
     });
-
-    // "alle auswaehlen" Checkbox pro Kategorie
     body.querySelectorAll(".vn-category-master").forEach(master => {
-      // Klick soll NICHT das Auf-/Zuklappen der Kategorie ausloesen
       master.addEventListener("click", e => e.stopPropagation());
       master.closest("label").addEventListener("click", e => e.stopPropagation());
-
       const cat = master.dataset.category;
-      const childCheckboxes = byCategory
-        .get(cat)
-        .map(s => body.querySelector(`.vn-station-check[value="${s.id}"]`));
-
+      const childCheckboxes = byCategory.get(cat).map(s => body.querySelector(`.vn-station-check[value="${s.id}"]`));
       master.addEventListener("change", () => {
-        childCheckboxes.forEach(cb => (cb.checked = master.checked));
+        childCheckboxes.forEach(cb => cb.checked = master.checked);
       });
-
       function updateMasterState() {
         const checkedCount = childCheckboxes.filter(cb => cb.checked).length;
         master.checked = checkedCount === childCheckboxes.length;
         master.indeterminate = checkedCount > 0 && checkedCount < childCheckboxes.length;
       }
-
       childCheckboxes.forEach(cb => cb.addEventListener("change", updateMasterState));
       updateMasterState();
     });
-
     document.getElementById("vn-btn-next").addEventListener("click", () => {
-      const selectedIds = [...body.querySelectorAll(".vn-station-check:checked")].map(el => el.value);
+      const selectedIds = [ ...body.querySelectorAll(".vn-station-check:checked") ].map(el => el.value);
       if (!selectedIds.length) {
         alert("Bitte mindestens eine Wache auswählen.");
         return;
@@ -3279,30 +2695,17 @@
       }
     });
   }
-
-  //////////////////////////////////////////////////
-  // Fahrzeuge umbenennen - Schritt 3: Namen pro Wache + Fahrzeugtyp vergeben
-  //////////////////////////////////////////////////
-
-  // Text1/Text2 kommen mit einem Beispielwert vorausgefuellt, sind aber standardmaessig
-  // deaktiviert - so sieht man sofort, wie die Bausteine funktionieren, ohne dass beim
-  // ersten Ausfuehren versehentlich "DE"/"-SH-" mit umbenannt wird.
   const defaultTemplate = {
     useText1: false,
     text1: "DE",
     useType: true,
     useText2: false,
     text2: "-SH-",
-    useNumber: true,
+    useNumber: true
   };
-
   function getTemplate() {
     return Object.assign({}, defaultTemplate, namesStore.__template || {});
   }
-
-  // Setzt einen Namen aus den Bausteinen zusammen - gemeinsam genutzt von der
-  // Live-Vorschau und dem eigentlichen Umbenennen, damit beide immer exakt
-  // dasselbe Ergebnis anzeigen/erzeugen.
   function composeName(tpl, enteredName, caption, nr, padding) {
     const segments = [];
     if (tpl.useText1 && tpl.text1) segments.push(tpl.text1);
@@ -3311,128 +2714,35 @@
     if (tpl.useNumber) segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
     return segments.join(" ") || enteredName || caption;
   }
-
   function renderNameForm(selectedStations) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const tpl = getTemplate();
-
-    // Fahrzeugtypen UEBER ALLE ausgewaehlten Wachen hinweg zusammenfassen,
-    // damit der Name pro Typ nur einmal eingegeben werden muss.
-    const byType = new Map();
+    const byType = new Map;
     for (const station of selectedStations) {
       for (const v of station.vehicles) {
         const typeId = String(v.vehicle_type ?? v.type);
         if (!byType.has(typeId)) {
           const caption = vehicleTypeCaptions[typeId] || v.vehicle_type_caption || `Typ ${typeId}`;
-          byType.set(typeId, { caption, count: 0 });
+          byType.set(typeId, {
+            caption: caption,
+            count: 0
+          });
         }
         byType.get(typeId).count++;
       }
     }
-
-    // Checkbox pro Zeile waehlt aus, ob der Typ ueberhaupt umbenannt wird. Das
-    // Textfeld ist immer optional (leer = offizieller Fahrzeugtypname) - fuer rein
-    // manuelle volle Namen (z.B. "STW -SH-") einfach Text 1/Text 2 unten deaktivieren
-    // und den gewuenschten Namen direkt hier eintragen.
-    const typeRows = [...byType.entries()]
-      .sort((a, b) => a[1].caption.localeCompare(b[1].caption))
-      .map(([typeId, info]) => {
-        const savedName = namesStore[typeId] || "";
-        return `
-        <div class="form-group vn-type-row" data-type="${typeId}" data-caption="${escapeHtml(info.caption)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-          <label style="flex: 0 0 24px; margin: 0;">
-            <input type="checkbox" class="vn-type-include" checked>
-          </label>
-          <label style="flex: 0 0 196px; margin: 0;">${escapeHtml(info.caption)} <span class="text-muted">(${info.count}x insgesamt)</span></label>
-          <input type="text" class="form-control vn-name-input" placeholder="eigenes Kürzel (optional), sonst Fahrzeugtypname" value="${escapeHtml(savedName)}" style="flex:1;">
-        </div>`;
-      })
-      .join("");
-
-    body.innerHTML = `
-      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>
-
-      <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
-        <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>
-        <div style="display:grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap:4px 10px; align-items:end;">
-          <div>
-            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
-              <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1
-            </label>
-            <input type="text" id="vn-text1" class="form-control input-sm" style="width:100%;" placeholder="z.B. DE" value="${escapeHtml(tpl.text1)}">
-          </div>
-          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
-          <div>
-            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
-              <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name
-            </label>
-          </div>
-          <div style="color:#999; padding-bottom:6px;">&rarr;</div>
-          <div>
-            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">
-              <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2
-            </label>
-            <input type="text" id="vn-text2" class="form-control input-sm" style="width:100%;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">
-          </div>
-        </div>
-        <p class="text-muted" style="font-size:11px; margin:10px 0 0;">
-          Deaktivierte oder leere Bausteine werden übersprungen, die Nummer kommt immer ans Ende.
-          Text 1/Text 2 gelten global für alle ausgewählten Fahrzeugtypen.
-        </p>
-        <p class="text-muted" style="font-size:11px; margin:4px 0 0;">
-          Für einen komplett manuellen, freien Namen: Text 1 und Text 2 hier deaktivieren und den
-          gewünschten Namen direkt ins Kürzel-Feld pro Fahrzeugtyp unten eintragen.
-        </p>
-      </fieldset>
-
-      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
-        Vorschau: <b id="vn-preview-text">-</b>
-      </div>
-
-      <p class="text-muted" style="font-size:11px;">
-        Häkchen pro Zeile wählt aus, welche Fahrzeugtypen überhaupt umbenannt werden. Das
-        Kürzel-Textfeld ist nur relevant, wenn "Fahrzeugtyp-Name" oben aktiv ist (leer = offizieller
-        Fahrzeugtypname) - sonst ist es ausgegraut und wirkungslos.
-      </p>
-      <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">
-        ${typeRows}
-      </fieldset>
-      <div class="form-inline" style="margin: 10px 0;">
-        <label style="margin-right: 16px; display:inline-flex; align-items:center; gap:4px;" id="vn-number-toggle-wrap">
-          <input type="checkbox" id="vn-use-number" ${tpl.useNumber ? "checked" : ""}> Nummer anhängen
-        </label>
-        <label style="margin-right: 16px;">Start-Nummer
-          <input type="number" id="vn-start-nr" class="form-control input-sm" value="1" style="width:70px; margin-left:6px;">
-        </label>
-        <label>
-          <input type="checkbox" id="vn-padding" checked> Führende Nullen (01, 02, ...)
-        </label>
-      </div>
-      <p class="text-muted" style="font-size:11px;">Nummeriert wird <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer).</p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-run" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Fahrzeuge umbenennen
-        </button>
-        <button id="vn-btn-reset-template" type="button" class="btn btn-default"
-                title="Setzt Text 1, Fahrzeugtyp-Name, Text 2 und Nummer auf die Standardeinstellung zurück">
-          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Bausteine zurücksetzen
-        </button>
-      </div>
-      <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>
-    `;
-
+    const typeRows = [ ...byType.entries() ].sort((a, b) => a[1].caption.localeCompare(b[1].caption)).map(([typeId, info]) => {
+      const savedName = namesStore[typeId] || "";
+      return `\n        <div class="form-group vn-type-row" data-type="${typeId}" data-caption="${escapeHtml(info.caption)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">\n          <label style="flex: 0 0 24px; margin: 0;">\n            <input type="checkbox" class="vn-type-include" checked>\n          </label>\n          <label style="flex: 0 0 196px; margin: 0;">${escapeHtml(info.caption)} <span class="text-muted">(${info.count}x insgesamt)</span></label>\n          <input type="text" class="form-control vn-name-input" placeholder="eigenes Kürzel (optional), sonst Fahrzeugtypname" value="${escapeHtml(savedName)}" style="flex:1;">\n        </div>`;
+    }).join("");
+    body.innerHTML = `\n      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>\n\n      <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">\n        <legend style="font-size:13px; font-weight:bold; width:auto; padding:0 6px; margin-bottom:8px; border:none;">Namens-Bausteine</legend>\n        <div style="display:grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap:4px 10px; align-items:end;">\n          <div>\n            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">\n              <input type="checkbox" id="vn-use-text1" ${tpl.useText1 ? "checked" : ""}> Text 1\n            </label>\n            <input type="text" id="vn-text1" class="form-control input-sm" style="width:100%;" placeholder="z.B. DE" value="${escapeHtml(tpl.text1)}">\n          </div>\n          <div style="color:#999; padding-bottom:6px;">&rarr;</div>\n          <div>\n            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">\n              <input type="checkbox" id="vn-use-type" ${tpl.useType ? "checked" : ""}> Fahrzeugtyp-Name\n            </label>\n          </div>\n          <div style="color:#999; padding-bottom:6px;">&rarr;</div>\n          <div>\n            <label style="display:flex; align-items:center; gap:4px; margin:0 0 4px;">\n              <input type="checkbox" id="vn-use-text2" ${tpl.useText2 ? "checked" : ""}> Text 2\n            </label>\n            <input type="text" id="vn-text2" class="form-control input-sm" style="width:100%;" placeholder="z.B. -SH-" value="${escapeHtml(tpl.text2)}">\n          </div>\n        </div>\n        <p class="text-muted" style="font-size:11px; margin:10px 0 0;">\n          Deaktivierte oder leere Bausteine werden übersprungen, die Nummer kommt immer ans Ende.\n          Text 1/Text 2 gelten global für alle ausgewählten Fahrzeugtypen.\n        </p>\n        <p class="text-muted" style="font-size:11px; margin:4px 0 0;">\n          Für einen komplett manuellen, freien Namen: Text 1 und Text 2 hier deaktivieren und den\n          gewünschten Namen direkt ins Kürzel-Feld pro Fahrzeugtyp unten eintragen.\n        </p>\n      </fieldset>\n\n      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">\n        Vorschau: <b id="vn-preview-text">-</b>\n      </div>\n\n      <p class="text-muted" style="font-size:11px;">\n        Häkchen pro Zeile wählt aus, welche Fahrzeugtypen überhaupt umbenannt werden. Das\n        Kürzel-Textfeld ist nur relevant, wenn "Fahrzeugtyp-Name" oben aktiv ist (leer = offizieller\n        Fahrzeugtypname) - sonst ist es ausgegraut und wirkungslos.\n      </p>\n      <fieldset style="border:1px solid #ddd; border-radius:4px; padding:10px; margin-bottom:12px;">\n        ${typeRows}\n      </fieldset>\n      <div class="form-inline" style="margin: 10px 0;">\n        <label style="margin-right: 16px; display:inline-flex; align-items:center; gap:4px;" id="vn-number-toggle-wrap">\n          <input type="checkbox" id="vn-use-number" ${tpl.useNumber ? "checked" : ""}> Nummer anhängen\n        </label>\n        <label style="margin-right: 16px;">Start-Nummer\n          <input type="number" id="vn-start-nr" class="form-control input-sm" value="1" style="width:70px; margin-left:6px;">\n        </label>\n        <label>\n          <input type="checkbox" id="vn-padding" checked> Führende Nullen (01, 02, ...)\n        </label>\n      </div>\n      <p class="text-muted" style="font-size:11px;">Nummeriert wird <b>pro Wache separat</b> (jede Wache startet wieder bei der Start-Nummer).</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-run" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Fahrzeuge umbenennen\n        </button>\n        <button id="vn-btn-reset-template" type="button" class="btn btn-default"\n                title="Setzt Text 1, Fahrzeugtyp-Name, Text 2 und Nummer auf die Standardeinstellung zurück">\n          <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Bausteine zurücksetzen\n        </button>\n      </div>\n      <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderStationSelection);
     document.getElementById("vn-btn-run").addEventListener("click", () => runRenaming(selectedStations));
     document.getElementById("vn-btn-reset-template").addEventListener("click", () => {
       renderSimpleConfirmScreen({
         title: "Fahrzeuge umbenennen › Bausteine zurücksetzen",
-        message:
-          "Die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2, Nummer) wieder auf " +
-          "die Standardeinstellung zurücksetzen?",
+        message: "Die Namens-Bausteine-Vorlage (Text 1, Fahrzeugtyp-Name, Text 2, Nummer) wieder auf " + "die Standardeinstellung zurücksetzen?",
         confirmLabel: "Zurücksetzen",
         confirmIcon: "glyphicon-repeat",
         goBack: () => renderNameForm(selectedStations),
@@ -3440,11 +2750,9 @@
           delete namesStore.__template;
           await saveNamesStore();
           renderNameForm(selectedStations);
-        },
+        }
       });
     });
-
-    // Bausteine sofort dauerhaft speichern, sobald sie geaendert werden - nicht erst beim Umbenennen
     function persistTemplate() {
       namesStore.__template = {
         useText1: document.getElementById("vn-use-text1").checked,
@@ -3452,15 +2760,13 @@
         useType: document.getElementById("vn-use-type").checked,
         useText2: document.getElementById("vn-use-text2").checked,
         text2: document.getElementById("vn-text2").value.trim(),
-        useNumber: document.getElementById("vn-use-number").checked,
+        useNumber: document.getElementById("vn-use-number").checked
       };
       saveNamesStore();
     }
-    ["vn-use-text1", "vn-text1", "vn-use-type", "vn-use-text2", "vn-text2", "vn-use-number"].forEach(id => {
+    [ "vn-use-text1", "vn-text1", "vn-use-type", "vn-use-text2", "vn-text2", "vn-use-number" ].forEach(id => {
       document.getElementById(id).addEventListener("change", persistTemplate);
     });
-
-    // Nummer-Felder ausgrauen, wenn "Nummer anhaengen" deaktiviert ist
     const useNumberCheckbox = document.getElementById("vn-use-number");
     const startNrInput = document.getElementById("vn-start-nr");
     const paddingCheckbox = document.getElementById("vn-padding");
@@ -3471,16 +2777,11 @@
     }
     useNumberCheckbox.addEventListener("change", syncNumberControls);
     syncNumberControls();
-
-    // Kuerzel-Felder pro Typ ausgrauen, wenn "Fahrzeugtyp-Name" oben deaktiviert ist -
-    // sie wirken sich dann auf den Namen nicht aus, sollen also auch nicht aktiv aussehen.
     const useTypeCheckbox = document.getElementById("vn-use-type");
     function syncTypeNameInputs() {
       const enabled = useTypeCheckbox.checked;
       body.querySelectorAll(".vn-name-input").forEach(input => {
         input.disabled = !enabled;
-        // explizite Inline-Styles statt uns auf CSS von der Seite zu verlassen -
-        // so ist der ausgegraute Zustand immer sichtbar, egal welches Theme aktiv ist.
         input.style.backgroundColor = enabled ? "" : "#eee";
         input.style.color = enabled ? "" : "#999";
         input.style.cursor = enabled ? "" : "not-allowed";
@@ -3489,9 +2790,6 @@
     }
     useTypeCheckbox.addEventListener("change", syncTypeNameInputs);
     syncTypeNameInputs();
-
-    // Live-Vorschau: zeigt anhand des ersten Fahrzeugtyps in der Liste, wie ein Name
-    // mit den aktuell gewaehlten Bausteinen/Einstellungen aussehen wuerde.
     const previewEl = document.getElementById("vn-preview-text");
     function updatePreview() {
       const previewTpl = {
@@ -3500,22 +2798,18 @@
         useType: document.getElementById("vn-use-type").checked,
         useText2: document.getElementById("vn-use-text2").checked,
         text2: document.getElementById("vn-text2").value.trim(),
-        useNumber: document.getElementById("vn-use-number").checked,
+        useNumber: document.getElementById("vn-use-number").checked
       };
       const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
       const padding = document.getElementById("vn-padding").checked;
-
       const firstRow = body.querySelector(".vn-type-row");
       const enteredName = firstRow ? firstRow.querySelector(".vn-name-input").value.trim() : "";
       const caption = firstRow ? firstRow.dataset.caption : "Fahrzeugtyp";
-
       previewEl.textContent = composeName(previewTpl, enteredName, caption, startNr, padding);
     }
     body.addEventListener("input", updatePreview);
     body.addEventListener("change", updatePreview);
     updatePreview();
-
-    // Namen sofort dauerhaft speichern, sobald sie eingegeben werden - nicht erst beim Umbenennen
     body.querySelectorAll(".vn-name-input").forEach(input => {
       input.addEventListener("change", () => {
         const typeId = input.closest(".vn-type-row").dataset.type;
@@ -3529,241 +2823,143 @@
       });
     });
   }
-
   async function runRenaming(selectedStations) {
     const body = document.getElementById("vehicle-naming-modal-body");
     const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
     const padding = document.getElementById("vn-padding").checked;
     const statusEl = document.getElementById("vn-status");
-
     const tpl = {
       useText1: document.getElementById("vn-use-text1").checked,
       text1: document.getElementById("vn-text1").value.trim(),
       useType: document.getElementById("vn-use-type").checked,
       useText2: document.getElementById("vn-use-text2").checked,
       text2: document.getElementById("vn-text2").value.trim(),
-      useNumber: document.getElementById("vn-use-number").checked,
+      useNumber: document.getElementById("vn-use-number").checked
     };
     namesStore.__template = tpl;
-
     const plan = [];
-
     body.querySelectorAll(".vn-type-row").forEach(row => {
       const input = row.querySelector(".vn-name-input");
       const enteredName = input.value.trim();
       const typeId = row.dataset.type;
       const caption = row.dataset.caption || `Typ ${typeId}`;
-
-      // Checkbox pro Zeile entscheidet ueber die Auswahl, das Textfeld ist nur ein
-      // optionales Kuerzel (leer = offizieller Typname).
       if (!row.querySelector(".vn-type-include").checked) return;
-
       if (enteredName) {
         namesStore[typeId] = enteredName;
       } else {
         delete namesStore[typeId];
       }
-
-      // Nummerierung laeuft pro Wache separat, auch wenn der Name global gilt.
-      // Wir benennen der Einfachheit halber immer um, unabhaengig vom aktuellen Namen.
       for (const station of selectedStations) {
-        const vList = station.vehicles
-          .filter(v => String(v.vehicle_type ?? v.type) === typeId)
-          .sort((a, b) => a.id - b.id);
-
+        const vList = station.vehicles.filter(v => String(v.vehicle_type ?? v.type) === typeId).sort((a, b) => a.id - b.id);
         vList.forEach((v, idx) => {
           const newName = composeName(tpl, enteredName, caption, startNr + idx, padding);
-          plan.push({ id: v.id, oldName: v.caption, newName, station: station.name });
+          plan.push({
+            id: v.id,
+            oldName: v.caption,
+            newName: newName,
+            station: station.name
+          });
         });
       }
     });
-
     await saveNamesStore();
-
     if (!plan.length) {
       statusEl.textContent = "Keine Fahrzeugtypen ausgewählt (Häkchen prüfen).";
       return;
     }
-
     renderRenameConfirmation(selectedStations, plan);
   }
-
-  // Letzter Bestaetigungsschritt vor dem eigentlichen Umbenennen: zeigt nochmal ein
-  // Beispiel aus dem fertigen Plan und laesst zwischen Umbenennen/Zurueck waehlen,
-  // bevor irgendetwas im Spiel geaendert wird.
   function renderRenameConfirmation(selectedStations, plan) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const exampleName = plan.length ? plan[0].newName : "-";
-
-    body.innerHTML = `
-      <p>Bereit zum Umbenennen von <b>${plan.length}</b> Fahrzeug(en) in <b>${selectedStations.length}</b> Wache(n).</p>
-      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">
-        Vorschau: <b>${escapeHtml(exampleName)}</b>
-      </div>
-      <p class="text-muted" style="font-size:12px;">Wirklich umbenennen, oder nochmal zurück zu den Einstellungen?</p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p>Bereit zum Umbenennen von <b>${plan.length}</b> Fahrzeug(en) in <b>${selectedStations.length}</b> Wache(n).</p>\n      <div class="alert alert-info" style="padding:8px 12px; margin-bottom:12px;">\n        Vorschau: <b>${escapeHtml(exampleName)}</b>\n      </div>\n      <p class="text-muted" style="font-size:12px;">Wirklich umbenennen, oder nochmal zurück zu den Einstellungen?</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", () => renderNameForm(selectedStations));
     document.getElementById("vn-btn-confirm-run").addEventListener("click", () => {
       executeRenamePlan(plan, "umbenannt", () => renderNameForm(selectedStations));
     });
   }
-
-  //////////////////////////////////////////////////
-  // Zuruecksetzen: alle Fahrzeuge der ausgewaehlten
-  // Wachen auf ihren reinen Fahrzeugtyp-Namen zuruecksetzen
-  //////////////////////////////////////////////////
-
   function renderResetScreen(selectedStations) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const totalVehicles = selectedStations.reduce((sum, s) => sum + s.vehicles.length, 0);
-
-    body.innerHTML = `
-      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>
-      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurückgesetzt (keine Nummer, kein Präfix).</p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-reset" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zurücksetzen
-        </button>
-      </div>
-      <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted">${selectedStations.length} Wache(n) ausgewählt.</p>\n      <p>Alle <b>${totalVehicles}</b> Fahrzeuge in diesen Wachen werden auf ihren reinen Fahrzeugtyp-Namen zurückgesetzt (keine Nummer, kein Präfix).</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-reset" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Auf Standard zurücksetzen\n        </button>\n      </div>\n      <div id="vn-status" style="margin-top: 10px; font-weight: bold; white-space: pre-wrap;"></div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderStationSelection);
     document.getElementById("vn-btn-reset").addEventListener("click", () => runReset(selectedStations));
   }
-
   async function runReset(selectedStations) {
     const statusEl = document.getElementById("vn-status");
-
     const plan = [];
     for (const station of selectedStations) {
       for (const v of station.vehicles) {
         const typeId = String(v.vehicle_type ?? v.type);
         const typeName = vehicleTypeCaptions[typeId] || v.vehicle_type_caption || `Typ ${typeId}`;
-        plan.push({ id: v.id, oldName: v.caption, newName: typeName, station: station.name });
+        plan.push({
+          id: v.id,
+          oldName: v.caption,
+          newName: typeName,
+          station: station.name
+        });
       }
     }
-
     if (!plan.length) {
       statusEl.textContent = "Keine Fahrzeuge gefunden.";
       return;
     }
-
     executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
-
-  //////////////////////////////////////////////////
-  // Wachen umbenennen (nach Kategorie sortiert) und
-  // Leitstellen umbenennen (flache Liste, keine Kategorien)
-  //////////////////////////////////////////////////
-
-  // Ermittelt Leitstellen ueber die leitstelle_building_id-Verweise anderer Gebaeude
-  // (dieselbe Methode wie in renderLeitstelleSelection) - eigenstaendig von den
-  // Fahrzeug-Screens, da hier auch Wachen ohne Fahrzeuge auftauchen sollen.
   async function loadAllBuildings() {
     const buildings = await fetchJSON("/api/buildings");
-    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
-
-    const leitstelleIds = new Set();
+    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
-
-    const leitstellen = buildings
-      .filter(b => leitstelleIds.has(String(b.id)))
-      .map(b => ({ id: String(b.id), name: b.caption || `Leitstelle ${b.id}` }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    const stations = buildings
-      .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
-      .map(b => {
-        const leitstelleId = b.leitstelle_building_id != null ? String(b.leitstelle_building_id) : null;
-        const leitstelleBuilding = leitstelleId ? buildingsById.get(leitstelleId) : null;
-        return {
-          id: String(b.id),
-          name: b.caption || `Wache ${b.id}`,
-          category: categoryForBuilding(b),
-          leitstelleId: leitstelleId || "none",
-          leitstelleName: leitstelleId ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
-        };
-      })
-      // Nach Wachen-ID statt Name sortiert (auf Tester-Wunsch): wer seine Wachen mit
-      // eigenen Praefixen/Nummern durchbenennt, braucht eine vom aktuellen Namen
-      // unabhaengige, stabile Reihenfolge.
-      .sort((a, b) => Number(a.id) - Number(b.id));
-
-    return { leitstellen, stations };
+    const leitstellen = buildings.filter(b => leitstelleIds.has(String(b.id))).map(b => ({
+      id: String(b.id),
+      name: b.caption || `Leitstelle ${b.id}`
+    })).sort((a, b) => a.name.localeCompare(b.name));
+    const stations = buildings.filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt").map(b => {
+      const leitstelleId = b.leitstelle_building_id != null ? String(b.leitstelle_building_id) : null;
+      const leitstelleBuilding = leitstelleId ? buildingsById.get(leitstelleId) : null;
+      return {
+        id: String(b.id),
+        name: b.caption || `Wache ${b.id}`,
+        category: categoryForBuilding(b),
+        leitstelleId: leitstelleId || "none",
+        leitstelleName: leitstelleId ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle"
+      };
+    }).sort((a, b) => Number(a.id) - Number(b.id));
+    return {
+      leitstellen: leitstellen,
+      stations: stations
+    };
   }
-
-  //////////////////////////////////////////////////
-  // Wachen umbenennen - Schritt 0: Leitstelle(n) auswaehlen (analog zu "Fahrzeuge
-  // umbenennen" - dieselbe Filterung, damit man sich bei vielen Leitstellen auf einen Teil
-  // beschraenken kann, statt immer ALLE Wachen im Account angezeigt zu bekommen).
-  //////////////////////////////////////////////////
-
   async function renderStationRenameLeitstelleSelection() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen umbenennen › Leitstelle wählen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen &amp; Wachen ...</em></p>`;
-
     let stations;
     try {
-      ({ stations } = await loadAllBuildings());
+      ({stations: stations} = await loadAllBuildings());
     } catch (e) {
       body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
       return;
     }
-
-    const byLeitstelle = new Map();
+    const byLeitstelle = new Map;
     for (const s of stations) {
-      if (!byLeitstelle.has(s.leitstelleId)) byLeitstelle.set(s.leitstelleId, { name: s.leitstelleName, stations: [] });
+      if (!byLeitstelle.has(s.leitstelleId)) byLeitstelle.set(s.leitstelleId, {
+        name: s.leitstelleName,
+        stations: []
+      });
       byLeitstelle.get(s.leitstelleId).stations.push(s);
     }
-
-    const rows = [...byLeitstelle.entries()]
-      .sort((a, b) => a[1].name.localeCompare(b[1].name))
-      .map(([id, info]) => `
-        <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">
-          <label>
-            <input type="checkbox" class="vn-leitstelle-check" value="${id}">
-            ${escapeHtml(info.name)} <span class="text-muted">(${info.stations.length} Wachen)</span>
-          </label>
-        </div>`)
-      .join("");
-
-    body.innerHTML = `
-      <p>Wähle die Leitstelle(n) aus:</p>
-      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">
-        ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
-      </div>
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">
-          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
-        </button>
-      </div>
-    `;
-
+    const rows = [ ...byLeitstelle.entries() ].sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, info]) => `\n        <div class="checkbox" style="margin: 2px 0; break-inside: avoid;">\n          <label>\n            <input type="checkbox" class="vn-leitstelle-check" value="${id}">\n            ${escapeHtml(info.name)} <span class="text-muted">(${info.stations.length} Wachen)</span>\n          </label>\n        </div>`).join("");
+    body.innerHTML = `\n      <p>Wähle die Leitstelle(n) aus:</p>\n      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px; column-count: 2; column-gap: 20px;">\n        ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-next-leitstelle" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-next-leitstelle").addEventListener("click", () => {
-      const ids = [...body.querySelectorAll(".vn-leitstelle-check:checked")].map(el => el.value);
+      const ids = [ ...body.querySelectorAll(".vn-leitstelle-check:checked") ].map(el => el.value);
       if (!ids.length) {
         alert("Bitte mindestens eine Leitstelle auswählen.");
         return;
@@ -3771,39 +2967,23 @@
       renderStationRenameScreen(ids);
     });
   }
-
-  // Letzter Bestaetigungsschritt vor dem Umbenennen von Wachen/Leitstellen - zeigt
-  // nur die Anzahl, da hier (anders als bei Fahrzeugen) kein Namens-Baustein-System
-  // existiert, das eine Vorschau bräuchte.
   function renderBuildingRenameConfirm(plan, verb, goBack, itemNoun) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>Bereit, <b>${plan.length} ${escapeHtml(itemNoun)}</b> umzubenennen.</p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen
-        </button>
-      </div>
-    `;
+    body.innerHTML = `\n      <p>Bereit, <b>${plan.length} ${escapeHtml(itemNoun)}</b> umzubenennen.</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-confirm-run" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Umbenennen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-confirm-run").addEventListener("click", () => {
       executeRenamePlan(plan, verb, goBack, renameBuilding, itemNoun);
     });
   }
-
   async function renderStationRenameScreen(selectedLeitstelleIds) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Wachen ...</em></p>`;
-
     let stations;
     try {
-      ({ stations } = await loadAllBuildings());
+      ({stations: stations} = await loadAllBuildings());
     } catch (e) {
       body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
       return;
@@ -3811,96 +2991,32 @@
     if (selectedLeitstelleIds) {
       stations = stations.filter(s => selectedLeitstelleIds.includes(s.leitstelleId));
     }
-
-    // Sortierung INNERHALB jeder Kategorie waehlbar - "id" behaelt die Reihenfolge aus
-    // loadAllBuildings() (bereits nach Wachen-ID), "name" sortiert clientseitig um, ohne
-    // erneut vom Server zu laden.
     let sortMode = "id";
-
-    // Welche Kategorien gerade aufgeklappt sind - render() baut bei jedem Sortieren das
-    // komplette HTML neu auf, ohne dieses Set wuerden dabei alle Panels wieder zuklappen.
-    const openCategories = new Set();
-
-    // Spaltenkopf ueber der gesamten Liste (nicht pro Kategorie wiederholt) - Klick auf
-    // "Wachen-ID"/"Name" sortiert wie bei einer echten Tabelle, ein Pfeil zeigt die aktive
-    // Spalte + Richtung an. Die Breiten muessen exakt zu den <col>-Elementen der Tabellen
-    // je Kategorie passen (siehe unten), damit Kopf und Zeilen sich nicht verschieben.
+    const openCategories = new Set;
     function sortHeaderHtml() {
-      const arrow = col => (sortMode === col ? '<span class="glyphicon glyphicon-triangle-bottom" aria-hidden="true"></span>' : "");
-      return `
-        <div style="display:flex; font-size:12px; font-weight:bold; padding:4px 10px; border-bottom:2px solid rgba(128,128,128,0.4);">
-          <div class="vn-wache-sort-th" data-sort="id" style="flex:0 0 18%; cursor:pointer;">Wachen-ID ${arrow("id")}</div>
-          <div class="vn-wache-sort-th" data-sort="name" style="flex:1; cursor:pointer;">Name ${arrow("name")}</div>
-          <div style="flex:1;">Neuer Name</div>
-        </div>
-      `;
+      const arrow = col => sortMode === col ? '<span class="glyphicon glyphicon-triangle-bottom" aria-hidden="true"></span>' : "";
+      return `\n        <div style="display:flex; font-size:12px; font-weight:bold; padding:4px 10px; border-bottom:2px solid rgba(128,128,128,0.4);">\n          <div class="vn-wache-sort-th" data-sort="id" style="flex:0 0 18%; cursor:pointer;">Wachen-ID ${arrow("id")}</div>\n          <div class="vn-wache-sort-th" data-sort="name" style="flex:1; cursor:pointer;">Name ${arrow("name")}</div>\n          <div style="flex:1;">Neuer Name</div>\n        </div>\n      `;
     }
-
     function render() {
-      // Bereits eingetippte neue Namen retten - render() baut beim Sortieren das komplette
-      // HTML neu auf, ohne das wuerden unbestaetigte Eingaben stillschweigend verloren gehen.
-      const previousValues = new Map();
+      const previousValues = new Map;
       body.querySelectorAll(".vn-building-row").forEach(row => {
         const val = row.querySelector(".vn-building-name-input")?.value;
         if (val) previousValues.set(row.dataset.id, val);
       });
-
-      const byCategory = new Map();
+      const byCategory = new Map;
       for (const s of stations) {
         if (!byCategory.has(s.category)) byCategory.set(s.category, []);
         byCategory.get(s.category).push(s);
       }
-      const comparator =
-        sortMode === "name" ? (a, b) => a.name.localeCompare(b.name, "de") : (a, b) => Number(a.id) - Number(b.id);
-
-      const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map((cat, idx) => {
-          const catStations = [...byCategory.get(cat)].sort(comparator);
-          const collapseId = `vn-wache-cat-collapse-${idx}`;
-          const isOpen = openCategories.has(cat);
-          const rows = catStations
-            .map(
-              s => `
-            <tr class="vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" data-name="${escapeHtml(s.name)}">
-              <td class="text-muted">${escapeHtml(s.id)}</td>
-              <td>${escapeHtml(s.name)}</td>
-              <td>
-                <input type="text" class="form-control input-sm vn-building-name-input" placeholder="leer = keine Änderung"
-                       value="${escapeHtml(previousValues.get(s.id) || "")}">
-              </td>
-            </tr>`
-            )
-            .join("");
-          return `
-          <div class="panel panel-default" style="margin-bottom: 8px;">
-            <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}" data-category="${escapeHtml(cat)}">
-              <span class="glyphicon glyphicon-triangle-right ${isOpen ? "vn-rotated" : ""}" aria-hidden="true"></span>
-              <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
-            </div>
-            <div id="${collapseId}" class="panel-collapse collapse${isOpen ? " in" : ""}">
-              <table class="table table-condensed" style="font-size:12px; margin-bottom:0;">
-                <colgroup><col style="width:18%;"><col><col></colgroup>
-                <tbody>${rows}</tbody>
-              </table>
-            </div>
-          </div>`;
-        })
-        .join("");
-
-      body.innerHTML = `
-        <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung.</p>
-        ${categoryBlocks ? sortHeaderHtml() : ""}
-        ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-          <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
-            <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
-          </button>
-        </div>
-      `;
-
+      const comparator = sortMode === "name" ? (a, b) => a.name.localeCompare(b.name, "de") : (a, b) => Number(a.id) - Number(b.id);
+      const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map((cat, idx) => {
+        const catStations = [ ...byCategory.get(cat) ].sort(comparator);
+        const collapseId = `vn-wache-cat-collapse-${idx}`;
+        const isOpen = openCategories.has(cat);
+        const rows = catStations.map(s => `\n            <tr class="vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" data-name="${escapeHtml(s.name)}">\n              <td class="text-muted">${escapeHtml(s.id)}</td>\n              <td>${escapeHtml(s.name)}</td>\n              <td>\n                <input type="text" class="form-control input-sm vn-building-name-input" placeholder="leer = keine Änderung"\n                       value="${escapeHtml(previousValues.get(s.id) || "")}">\n              </td>\n            </tr>`).join("");
+        return `\n          <div class="panel panel-default" style="margin-bottom: 8px;">\n            <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}" data-category="${escapeHtml(cat)}">\n              <span class="glyphicon glyphicon-triangle-right ${isOpen ? "vn-rotated" : ""}" aria-hidden="true"></span>\n              <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>\n            </div>\n            <div id="${collapseId}" class="panel-collapse collapse${isOpen ? " in" : ""}">\n              <table class="table table-condensed" style="font-size:12px; margin-bottom:0;">\n                <colgroup><col style="width:18%;"><col><col></colgroup>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          </div>`;
+      }).join("");
+      body.innerHTML = `\n        <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung.</p>\n        ${categoryBlocks ? sortHeaderHtml() : ""}\n        ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button id="vn-btn-save-buildings" type="button" class="btn btn-success">\n            <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern\n          </button>\n        </div>\n      `;
       body.querySelectorAll(".vn-wache-sort-th").forEach(th => {
         th.addEventListener("click", () => {
           sortMode = th.dataset.sort;
@@ -3912,11 +3028,9 @@
         heading.addEventListener("click", () => {
           icon.classList.toggle("vn-rotated");
           const cat = heading.dataset.category;
-          if (openCategories.has(cat)) openCategories.delete(cat);
-          else openCategories.add(cat);
+          if (openCategories.has(cat)) openCategories.delete(cat); else openCategories.add(cat);
         });
       });
-
       document.getElementById("vn-btn-back").addEventListener("click", renderStationRenameLeitstelleSelection);
       document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
         const plan = [];
@@ -3926,8 +3040,8 @@
           plan.push({
             id: row.dataset.id,
             oldName: row.dataset.name,
-            newName,
-            station: row.dataset.category,
+            newName: newName,
+            station: row.dataset.category
           });
         });
         if (!plan.length) {
@@ -3937,48 +3051,22 @@
         renderBuildingRenameConfirm(plan, "umbenannt", () => renderStationRenameScreen(selectedLeitstelleIds), "Wache(n)");
       });
     }
-
     render();
   }
-
   async function renderLeitstelleRenameScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Leitstellen umbenennen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Leitstellen ...</em></p>`;
-
     let leitstellen;
     try {
-      ({ leitstellen } = await loadAllBuildings());
+      ({leitstellen: leitstellen} = await loadAllBuildings());
     } catch (e) {
       body.innerHTML = `<p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>`;
       return;
     }
-
-    const rows = leitstellen
-      .map(
-        l => `
-      <div class="form-group vn-building-row" data-id="${l.id}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-        <label style="flex: 0 0 45%; margin:0;">${escapeHtml(l.name)}</label>
-        <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
-        <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
-      </div>`
-      )
-      .join("");
-
-    body.innerHTML = `
-      <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung. Sortierung nach Art ist bei Leitstellen nicht nötig.</p>
-      ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
-        </button>
-      </div>
-    `;
-
+    const rows = leitstellen.map(l => `\n      <div class="form-group vn-building-row" data-id="${l.id}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">\n        <label style="flex: 0 0 45%; margin:0;">${escapeHtml(l.name)}</label>\n        <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>\n        <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">\n      </div>`).join("");
+    body.innerHTML = `\n      <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung. Sortierung nach Art ist bei Leitstellen nicht nötig.</p>\n      ${rows || '<p class="text-muted"><em>Keine Leitstellen gefunden.</em></p>'}\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-save-buildings" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
       const plan = [];
@@ -3988,8 +3076,8 @@
         plan.push({
           id: row.dataset.id,
           oldName: row.querySelector("label").textContent,
-          newName,
-          station: "Leitstellen",
+          newName: newName,
+          station: "Leitstellen"
         });
       });
       if (!plan.length) {
@@ -3999,44 +3087,22 @@
       renderBuildingRenameConfirm(plan, "umbenannt", renderLeitstelleRenameScreen, "Leitstelle(n)");
     });
   }
-
-  //////////////////////////////////////////////////
-  // Wachen-Check: Tabelle je Wache mit Ausbauten, Ausbaustufe und Lagerräumen, jeweils
-  // mit echtem Namen, Kosten und direkter Bau-Moeglichkeit (Credits oder Coins - jede
-  // Aktion fragt vorher, mit welcher Waehrung bezahlt werden soll). Dazu Personal und
-  // automatisches Werben als reine Info-Spalten.
-  //////////////////////////////////////////////////
-
-  // Baut eine einzelne Ausbau/Lager/Stufen-Aktion. currency ist immer "credits" oder
-  // "coins" - der Spieler waehlt das in einem Bestaetigungsdialog vor jeder Aktion selbst
-  // aus.
   function getCsrfTokenOrThrow(buildingId) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
     return csrfToken;
   }
-
-  // Nach einem Kauf/Verkauf braucht die Spiel-API selbst laut Rueckmeldung teils bis zu einer
-  // Minute, bis /api/v2/vehicles die neue Anzahl zeigt - ohne Gegenmassnahme sieht der
-  // Wachen-Bauplaner "Anwenden"-Screen direkt danach wieder den ALTEN Stand und zeigt
-  // faelschlich "1x kaufen"/"1x zu viel", obwohl die Aktion schon durch ist. Merkt Kaeufe/
-  // Verkaeufe deshalb hier optimistisch vor (pro Wache+Fahrzeugtyp, mehrere gleichzeitig
-  // moeglich) und rechnet sie oben auf den zuletzt geladenen (ggf. noch veralteten) Stand
-  // drauf. Nach PENDING_VEHICLE_CHANGE_TTL_MS gilt der Vormerkung als abgelaufen - danach
-  // zaehlt wieder ausschliesslich der echte, frisch geladene API-Stand (faellt also auf den
-  // tatsaechlichen Wert zurueck, falls die Vormerkung doch nicht gestimmt haben sollte).
-  const PENDING_VEHICLE_CHANGE_TTL_MS = 90 * 1000;
-  const pendingVehicleChanges = new Map(); // `${stationId}::${vehicleTypeId}` -> {delta, since}
-
+  const PENDING_VEHICLE_CHANGE_TTL_MS = 90 * 1e3;
+  const pendingVehicleChanges = new Map;
   function recordPendingVehicleChange(stationId, vehicleTypeId, delta) {
     const key = `${stationId}::${vehicleTypeId}`;
     const existing = pendingVehicleChanges.get(key);
     const stillFresh = existing && Date.now() - existing.since < PENDING_VEHICLE_CHANGE_TTL_MS;
-    pendingVehicleChanges.set(key, { delta: (stillFresh ? existing.delta : 0) + delta, since: Date.now() });
+    pendingVehicleChanges.set(key, {
+      delta: (stillFresh ? existing.delta : 0) + delta,
+      since: Date.now()
+    });
   }
-
-  // Liest UND raeumt zugleich auf - eine abgelaufene Vormerkung wird beim naechsten Abfragen
-  // automatisch entfernt, damit sie nicht ewig als "0" im Speicher haengen bleibt.
   function getPendingVehicleDelta(stationId, vehicleTypeId) {
     const key = `${stationId}::${vehicleTypeId}`;
     const entry = pendingVehicleChanges.get(key);
@@ -4047,20 +3113,12 @@
     }
     return entry.delta;
   }
-
   function hasFreshPendingVehicleChanges() {
     for (const entry of pendingVehicleChanges.values()) {
       if (Date.now() - entry.since < PENDING_VEHICLE_CHANGE_TTL_MS) return true;
     }
     return false;
   }
-
-  // Rendert den Wachenbauplan-"Anwenden"-Screen einmalig neu, sobald die letzte Vormerkung
-  // abgelaufen sein sollte - holt dabei automatisch den dann echten API-Stand. Nur EIN
-  // gemeinsamer Timer (nicht pro Kauf/Verkauf einzeln), sonst wuerden bei mehreren schnell
-  // aufeinanderfolgenden Aktionen mehrere Neu-Renderings gleichzeitig laufen. Rendert nur
-  // neu, wenn der Nutzer wirklich noch auf demselben Bauplan-Screen ist (data-blueprint-id),
-  // sonst wuerde ein spaeter feuernder Timer den falschen/verlassenen Screen ueberschreiben.
   let vehicleReconcileTimer = null;
   function scheduleVehicleReconcile(blueprintId, goBack) {
     if (vehicleReconcileTimer) clearTimeout(vehicleReconcileTimer);
@@ -4070,9 +3128,8 @@
       if (tbody?.dataset.blueprintId === blueprintId) {
         renderStationBlueprintApplyScreen(blueprintId, goBack);
       }
-    }, PENDING_VEHICLE_CHANGE_TTL_MS + 2000);
+    }, PENDING_VEHICLE_CHANGE_TTL_MS + 2e3);
   }
-
   async function buildExtension(buildingId, extensionId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
     const res = await fetchWithTimeout(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
@@ -4080,192 +3137,127 @@
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "X-CSRF-Token": csrfToken,
-      },
+        "X-CSRF-Token": csrfToken
+      }
     });
     if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
   }
-
-  // Kauft EIN Fahrzeug eines Typs an einer Wache. Frueher per POST + X-CSRF-Token (analog zu
-  // buildExtension()/buildStorage()) - das schlug live mit 404 fehl. Per echter Netzwerk-
-  // Aufzeichnung eines manuellen Kaufs bestaetigt: der Kaufen-Button im Spiel ist ein GANZ
-  // NORMALER GET-Link (Sec-Fetch-Mode: navigate, Sec-Fetch-User: ?1, KEIN X-CSRF-Token-Header,
-  // kein Body), keine POST-Anfrage - vermutlich existiert serverseitig gar keine POST-Route
-  // auf diesem Pfad mehr, daher das 404 bei jedem Versuch. Response ist ein 302-Redirect
-  // zurueck auf die Kauf-Seite; fetch() folgt dem per Default, res.ok prueft daher das
-  // Ergebnis nach dem Redirect.
   async function buyVehicle(buildingId, vehicleTypeId, currency) {
-    const res = await fetchWithTimeout(
-      `/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`,
-      { credentials: "same-origin" },
-    );
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/vehicle/${buildingId}/${vehicleTypeId}/${currency}?building=${buildingId}`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Kauf fehlgeschlagen (${res.status})`);
   }
-
-  // Verkauft/zerstoert EIN Fahrzeug unwiderruflich. Der echte "Verkaufen"-Link im Spiel ist
-  // ein Rails-UJS-Link mit data-method="delete" - der Browser wandelt das in ein POST-
-  // Formular mit den Feldern _method=delete + authenticity_token um (Rails behandelt das
-  // serverseitig dann als DELETE). Per echter Netzwerk-Aufzeichnung eines manuellen Verkaufs
-  // (curl-Export) korrigiert: der Token gehoert bei einem normalen Formular-Submit (Sec-Fetch-
-  // Mode: navigate) ALS authenticity_token IN DEN BODY, nicht als X-CSRF-Token-Header (der ist
-  // fuer AJAX/XHR-Anfragen gedacht) - vorher stand der Token faelschlich nur im Header.
   async function sellVehicle(vehicleId) {
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
     const res = await fetchWithTimeout(`/vehicles/${vehicleId}`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/x-www-form-urlencoded"
       },
-      body: new URLSearchParams({ _method: "delete", authenticity_token: csrfToken }),
+      body: new URLSearchParams({
+        _method: "delete",
+        authenticity_token: csrfToken
+      })
     });
     if (!res.ok) throw new Error(`Verkaufen fehlgeschlagen (${res.status})`);
   }
-
   async function buildStorage(buildingId, storageId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
-    const res = await fetchWithTimeout(
-      `/buildings/${buildingId}/storage_upgrade/${currency}/${storageId}?redirect_building_id=${buildingId}`,
-      {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-CSRF-Token": csrfToken,
-        },
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/storage_upgrade/${currency}/${storageId}?redirect_building_id=${buildingId}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRF-Token": csrfToken
       }
-    );
+    });
     if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
   }
-
   async function buildLevel(buildingId, currency, level) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
-    // WICHTIG: redirect "manual" statt des fetch()-Standards "follow". Dieser Endpunkt
-    // antwortet bei Erfolg mit einer Weiterleitung (302) - mit "follow" wuerde fetch()
-    // automatisch eine ZWEITE echte Anfrage an das Ziel der Weiterleitung schicken und
-    // damit den Ausbau doppelt abbuchen. Mit "manual" senden wir garantiert nur eine
-    // Anfrage.
     const res = await fetchWithTimeout(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
       method: "GET",
       credentials: "same-origin",
       redirect: "manual",
-      headers: { "X-CSRF-Token": csrfToken },
+      headers: {
+        "X-CSRF-Token": csrfToken
+      }
     });
-    // Bei redirect:"manual" liefert eine erfolgreiche Weiterleitung type "opaqueredirect"
-    // und status 0 - das ist hier der ERWARTETE Erfolgsfall, kein Fehler.
     if (res.type !== "opaqueredirect" && !res.ok) {
       throw new Error(`Ausbauen fehlgeschlagen (${res.status})`);
     }
   }
-
   async function loadBuildingsForCheck() {
     const buildings = await fetchJSON("/api/buildings");
     const requiredExtensionOverrides = await getRequiredExtensionsOverrides();
-
-    const leitstelleIds = new Set();
+    const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
-    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
-
-    return buildings
-      .filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt")
-      .map(b => {
-        const pseudoId = getPseudoBuildingTypeId(b);
-        const buildingKey = getBuildingKey(b);
-        const recommendedExtensions = pseudoId
-          ? requiredExtensionOverrides
-            ? requiredExtensionOverrides[pseudoId] || []
-            : getDefaultRequiredExtensions(pseudoId)
-          : [];
-        const extensions = Array.isArray(b.extensions) ? b.extensions : [];
-        const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
-        const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
-
-        const levelCatalog = LEVEL_CATALOG[buildingKey] || null;
-        const currentLevel = typeof b.level === "number" && b.level >= 0 ? b.level : -1;
-
-        const storageCatalog = STORAGE_CATALOG[buildingKey] || null;
-        const ownedStorageIds = new Set((b.storage_upgrades || []).map(u => u.type_id));
-
-        return {
-          id: String(b.id),
-          name: b.caption || `Wache ${b.id}`,
-          category: categoryForBuilding(b),
-          typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
-          leitstelleName: leitstelle ? leitstelle.caption : null,
-          pseudoId,
-          buildingKey,
-          extensions,
-          recommendedExtensions,
-          missingExtensions,
-          personnelCount: b.personal_count ?? null,
-          automaticHiring: b.hiring_automatic === true,
-          levelCatalog,
-          currentLevel,
-          storageCatalog,
-          ownedStorageIds,
-        };
-      });
+    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    return buildings.filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt").map(b => {
+      const pseudoId = getPseudoBuildingTypeId(b);
+      const buildingKey = getBuildingKey(b);
+      const recommendedExtensions = pseudoId ? requiredExtensionOverrides ? requiredExtensionOverrides[pseudoId] || [] : getDefaultRequiredExtensions(pseudoId) : [];
+      const extensions = Array.isArray(b.extensions) ? b.extensions : [];
+      const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
+      const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
+      const levelCatalog = LEVEL_CATALOG[buildingKey] || null;
+      const currentLevel = typeof b.level === "number" && b.level >= 0 ? b.level : -1;
+      const storageCatalog = STORAGE_CATALOG[buildingKey] || null;
+      const ownedStorageIds = new Set((b.storage_upgrades || []).map(u => u.type_id));
+      return {
+        id: String(b.id),
+        name: b.caption || `Wache ${b.id}`,
+        category: categoryForBuilding(b),
+        typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
+        leitstelleName: leitstelle ? leitstelle.caption : null,
+        pseudoId: pseudoId,
+        buildingKey: buildingKey,
+        extensions: extensions,
+        recommendedExtensions: recommendedExtensions,
+        missingExtensions: missingExtensions,
+        personnelCount: b.personal_count ?? null,
+        automaticHiring: b.hiring_automatic === true,
+        levelCatalog: levelCatalog,
+        currentLevel: currentLevel,
+        storageCatalog: storageCatalog,
+        ownedStorageIds: ownedStorageIds
+      };
+    });
   }
-
-  // Personal-Zelle: reine Anzahl, ohne Soll-Wert-Vergleich (dafuer gibt es den
-  // Personal-Check mit dem aus dem aktiven Wachenbauplan berechneten Sollwert).
   function renderPersonnelCell(station) {
     return `${station.personnelCount ?? "-"}`;
   }
-
-  // Ausbau-Badges einer Wache: gruen = gebaut und aktiv, blau = wird gerade gebaut, orange =
-  // nicht gebaut, aber auf der Referenz-Liste aus RECOMMENDED_EXTENSIONS_BY_PSEUDO_ID
-  // ("gefordert"), grau = nicht gebaut und nicht auf der Liste. Bedeutung 1:1 vom
-  // Referenzskript uebernommen. Namen/Kosten kommen aus dem fest einprogrammierten
-  // EXTENSION_CATALOG. Fehlende Ausbauten sind anklickbar und oeffnen den Bau-Dialog
-  // (Kosten werden vorher angezeigt, Waehrung wird dort ausgewaehlt).
   function renderExtensionBadges(station) {
     const catalogEntries = EXTENSION_CATALOG[station.buildingKey] || [];
-    const entries = catalogEntries.length
-      ? catalogEntries
-      : station.recommendedExtensions.map(id => ({ id, name: null, cost: null, coins: null }));
-
+    const entries = catalogEntries.length ? catalogEntries : station.recommendedExtensions.map(id => ({
+      id: id,
+      name: null,
+      cost: null,
+      coins: null
+    }));
     if (!entries.length) return '<span class="text-muted">-</span>';
-
     const recommendedIds = new Set(station.recommendedExtensions);
-
-    return entries
-      .map(entry => {
-        const owned = station.extensions.find(e => e.type_id === entry.id);
-        const label = entry.name || `Ausbau ${entry.id}`;
-
-        if (owned) {
-          const cssClass = owned.available_at ? "label-primary" : "label-success";
-          const title = owned.available_at ? `${label} (im Bau, verfügbar ab ${owned.available_at})` : label;
-          return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
-        }
-
-        const cssClass = recommendedIds.has(entry.id) ? "label-warning" : "label-default";
-        const suffix = recommendedIds.has(entry.id) ? " (gefordert)" : "";
-        const title =
-          entry.cost != null
-            ? `${label}${suffix} – ${entry.cost.toLocaleString("de-DE")} Credits oder ${entry.coins} Coins`
-            : `${label}${suffix} (noch nicht gebaut)`;
-        if (entry.cost == null) {
-          return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
-        }
-        return `<button type="button" class="label ${cssClass} vn-build-extension" title="${escapeHtml(title)}"
-                   style="margin:1px; border:none; cursor:pointer;"
-                   data-building-id="${station.id}" data-extension-id="${entry.id}"
-                   data-name="${escapeHtml(label)}" data-cost="${entry.cost}" data-coins="${entry.coins}"
-                   data-station-name="${escapeHtml(station.name)}">${entry.id}</button>`;
-      })
-      .join("");
+    return entries.map(entry => {
+      const owned = station.extensions.find(e => e.type_id === entry.id);
+      const label = entry.name || `Ausbau ${entry.id}`;
+      if (owned) {
+        const cssClass = owned.available_at ? "label-primary" : "label-success";
+        const title = owned.available_at ? `${label} (im Bau, verfügbar ab ${owned.available_at})` : label;
+        return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
+      }
+      const cssClass = recommendedIds.has(entry.id) ? "label-warning" : "label-default";
+      const suffix = recommendedIds.has(entry.id) ? " (gefordert)" : "";
+      const title = entry.cost != null ? `${label}${suffix} – ${entry.cost.toLocaleString("de-DE")} Credits oder ${entry.coins} Coins` : `${label}${suffix} (noch nicht gebaut)`;
+      if (entry.cost == null) {
+        return `<span class="label ${cssClass}" title="${escapeHtml(title)}" style="margin:1px;">${entry.id}</span>`;
+      }
+      return `<button type="button" class="label ${cssClass} vn-build-extension" title="${escapeHtml(title)}"\n                   style="margin:1px; border:none; cursor:pointer;"\n                   data-building-id="${station.id}" data-extension-id="${entry.id}"\n                   data-name="${escapeHtml(label)}" data-cost="${entry.cost}" data-coins="${entry.coins}"\n                   data-station-name="${escapeHtml(station.name)}">${entry.id}</button>`;
+    }).join("");
   }
-
-  // Ausbaustufe (getrenntes System von den Ausbauten oben): zeigt "Stufe X von Y" plus
-  // einen Button fuer die naechste Stufe, wenn eine LEVEL_CATALOG-Eintrag existiert und
-  // die Wache noch nicht auf der letzten Stufe ist.
-  // WICHTIG: Das Level-Feld der API entspricht direkt der im Spiel angezeigten
-  // "Stufe"-Nummer (bestaetigt: API-Wert 1 == Spiel zeigt "Stufe: 1") - keine eigene
-  // +1-Verschiebung vornehmen, sonst stimmen Anzeige und Bau-Zielstufe nicht mehr.
   function renderLevelCell(station) {
     if (!station.levelCatalog) return '<span class="text-muted">-</span>';
     const maxLevel = station.levelCatalog[station.levelCatalog.length - 1].id;
@@ -4278,97 +3270,38 @@
     const remaining = station.levelCatalog.slice(station.currentLevel + 1, maxLevel + 1);
     const maxCost = remaining.reduce((sum, l) => sum + l.cost, 0);
     const maxCoins = remaining.reduce((sum, l) => sum + l.coins, 0);
-    return `
-      <div>${label}</div>
-      <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"
-              data-building-id="${station.id}" data-level="${nextLevel.id}"
-              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}"
-              data-station-name="${escapeHtml(station.name)}">
-        Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)
-      </button>
-      <button type="button" class="btn btn-xs vn-build-level-max vn-btn-max-level" style="margin-top:2px; margin-left:2px;"
-              data-building-id="${station.id}" data-level="${maxLevel}"
-              data-cost="${maxCost}" data-coins="${maxCoins}"
-              data-station-name="${escapeHtml(station.name)}"
-              title="Direkt auf Stufe ${maxLevel} ausbauen (springt alle verbleibenden Stufen auf einmal)">
-        Max ausbauen auf Stufe ${maxLevel} (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)
-      </button>
-    `;
+    return `\n      <div>${label}</div>\n      <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"\n              data-building-id="${station.id}" data-level="${nextLevel.id}"\n              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}"\n              data-station-name="${escapeHtml(station.name)}">\n        Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)\n      </button>\n      <button type="button" class="btn btn-xs vn-build-level-max vn-btn-max-level" style="margin-top:2px; margin-left:2px;"\n              data-building-id="${station.id}" data-level="${maxLevel}"\n              data-cost="${maxCost}" data-coins="${maxCoins}"\n              data-station-name="${escapeHtml(station.name)}"\n              title="Direkt auf Stufe ${maxLevel} ausbauen (springt alle verbleibenden Stufen auf einmal)">\n        Max ausbauen auf Stufe ${maxLevel} (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)\n      </button>\n    `;
   }
-
-  // Lagerraum-Badges - gleiches Prinzip wie die Ausbau-Badges, aber eigener Katalog
-  // (STORAGE_CATALOG) und eigener Bau-Endpunkt (buildStorage).
   function renderStorageCell(station) {
     if (!station.storageCatalog || !station.storageCatalog.length) return '<span class="text-muted">-</span>';
-    return station.storageCatalog
-      .map(room => {
-        const owned = station.ownedStorageIds.has(room.id);
-        if (owned) {
-          return `<span class="label label-success" title="${escapeHtml(room.name)}" style="margin:1px;">✓</span>`;
-        }
-        const title = `${room.name} – ${room.cost.toLocaleString("de-DE")} Credits oder ${room.coins} Coins`;
-        return `<button type="button" class="label label-warning vn-build-storage" title="${escapeHtml(title)}"
-                   style="margin:1px; border:none; cursor:pointer;"
-                   data-building-id="${station.id}" data-storage-id="${room.id}"
-                   data-name="${escapeHtml(room.name)}" data-cost="${room.cost}" data-coins="${room.coins}"
-                   data-station-name="${escapeHtml(station.name)}">+</button>`;
-      })
-      .join("");
+    return station.storageCatalog.map(room => {
+      const owned = station.ownedStorageIds.has(room.id);
+      if (owned) {
+        return `<span class="label label-success" title="${escapeHtml(room.name)}" style="margin:1px;">✓</span>`;
+      }
+      const title = `${room.name} – ${room.cost.toLocaleString("de-DE")} Credits oder ${room.coins} Coins`;
+      return `<button type="button" class="label label-warning vn-build-storage" title="${escapeHtml(title)}"\n                   style="margin:1px; border:none; cursor:pointer;"\n                   data-building-id="${station.id}" data-storage-id="${room.id}"\n                   data-name="${escapeHtml(room.name)}" data-cost="${room.cost}" data-coins="${room.coins}"\n                   data-station-name="${escapeHtml(station.name)}">+</button>`;
+    }).join("");
   }
-
-  // Anzahl bereits fertig gebauter (nicht mehr im Bau befindlicher) Ausbauten einer
-  // Wache - dient nur als grobe Vergleichsgroesse zum Sortieren nach Ausbau-Fortschritt.
   function getBuiltExtensionsCount(station) {
     const catalogEntries = EXTENSION_CATALOG[station.buildingKey] || [];
-    const entries = catalogEntries.length ? catalogEntries : station.recommendedExtensions.map(id => ({ id }));
+    const entries = catalogEntries.length ? catalogEntries : station.recommendedExtensions.map(id => ({
+      id: id
+    }));
     return entries.filter(entry => {
       const owned = station.extensions.find(e => e.type_id === entry.id);
       return owned && !owned.available_at;
     }).length;
   }
-
-  // Kompakter Bau-Bestaetigungs-Bildschirm: zeigt Namen + Kosten, fragt immer nach der
-  // Waehrung (Credits oder Coins - nie automatisch eine Wahl treffen), fuehrt dann den
-  // uebergebenen Bau-Aufruf aus und kehrt zum Wachen-Check zurueck (frisch geladen,
-  // damit der neue Stand sofort sichtbar ist).
-  function renderBuildConfirmScreen({
-    title,
-    costCredits,
-    costCoins,
-    onConfirm,
-    goBack,
-    historyType,
-    historyLabel,
-    historyStation,
-  }) {
+  function renderBuildConfirmScreen({title: title, costCredits: costCredits, costCoins: costCoins, onConfirm: onConfirm, goBack: goBack, historyType: historyType, historyLabel: historyLabel, historyStation: historyStation}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const back = goBack || renderStationCheckScreen;
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>Bauen: <b>${escapeHtml(title)}</b></p>
-      <p class="text-muted" style="font-size:12px;">Womit soll bezahlt werden?</p>
-      <div class="form-group">
-        <button id="vn-btn-pay-credits" type="button" class="btn btn-success">
-          Mit Credits bauen (${costCredits.toLocaleString("de-DE")})
-        </button>
-        <button id="vn-btn-pay-coins" type="button" class="btn btn-danger">
-          Mit Coins bauen (${costCoins.toLocaleString("de-DE")})
-        </button>
-      </div>
-      <div id="vn-build-status" style="margin-top:10px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p>Bauen: <b>${escapeHtml(title)}</b></p>\n      <p class="text-muted" style="font-size:12px;">Womit soll bezahlt werden?</p>\n      <div class="form-group">\n        <button id="vn-btn-pay-credits" type="button" class="btn btn-success">\n          Mit Credits bauen (${costCredits.toLocaleString("de-DE")})\n        </button>\n        <button id="vn-btn-pay-coins" type="button" class="btn btn-danger">\n          Mit Coins bauen (${costCoins.toLocaleString("de-DE")})\n        </button>\n      </div>\n      <div id="vn-build-status" style="margin-top:10px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", back);
-
     const statusEl = document.getElementById("vn-build-status");
     const creditsBtn = document.getElementById("vn-btn-pay-credits");
     const coinsBtn = document.getElementById("vn-btn-pay-coins");
-
     async function pay(currency) {
       creditsBtn.disabled = true;
       coinsBtn.disabled = true;
@@ -4380,50 +3313,25 @@
           label: historyLabel,
           station: historyStation,
           cost: currency === "coins" ? costCoins : costCredits,
-          currency,
+          currency: currency
         });
         statusEl.innerHTML = `<span class="text-success">Erfolgreich gebaut. Lade neu ...</span>`;
         setTimeout(back, 600);
       } catch (e) {
         statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
-        // Nur ins Protokoll, KEIN reportError()-Banner - der Fehler ist hier schon direkt
-        // sichtbar, ein zusaetzliches Banner waere nur doppelt. Ohne diesen Log-Eintrag stand
-        // im Fehlerprotokoll bisher nichts, obwohl der Fehler auf dem Bildschirm sichtbar war.
         logErrorToStorage(`Bauen fehlgeschlagen: ${title}`, e.message).catch(() => {});
         creditsBtn.disabled = false;
         coinsBtn.disabled = false;
       }
     }
-
     creditsBtn.addEventListener("click", () => pay("credits"));
     coinsBtn.addEventListener("click", () => pay("coins"));
   }
-
-  // Eigene Bestaetigung fuer eine zerstoerende Aktion (aktuell: Fahrzeug verkaufen) statt
-  // eines blossen browser confirm() - analog zu renderBuildConfirmScreen, aber ohne
-  // Waehrungswahl (kostet nichts) und mit deutlich rot markierter Warnung.
-  function renderVehicleSellConfirmScreen({ vehicleId, vehicleName, stationName, goBack, onSold }) {
+  function renderVehicleSellConfirmScreen({vehicleId: vehicleId, vehicleName: vehicleName, stationName: stationName, goBack: goBack, onSold: onSold}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p class="text-danger"><b>Fahrzeug wirklich verkaufen?</b></p>
-      <p>
-        <b>${escapeHtml(vehicleName)}</b> (${escapeHtml(stationName)}) wird unwiderruflich
-        zerstört/verkauft - das kann NICHT rückgängig gemacht werden.
-      </p>
-      <div id="vn-sell-status" style="margin-top:10px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-btn-sell-confirm" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Verkaufen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-danger"><b>Fahrzeug wirklich verkaufen?</b></p>\n      <p>\n        <b>${escapeHtml(vehicleName)}</b> (${escapeHtml(stationName)}) wird unwiderruflich\n        zerstört/verkauft - das kann NICHT rückgängig gemacht werden.\n      </p>\n      <div id="vn-sell-status" style="margin-top:10px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-sell-confirm" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Verkaufen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-
     const statusEl = document.getElementById("vn-sell-status");
     const confirmBtn = document.getElementById("vn-btn-sell-confirm");
     confirmBtn.addEventListener("click", async () => {
@@ -4431,7 +3339,11 @@
       statusEl.innerHTML = `<em>Wird verkauft ...</em>`;
       try {
         await sellVehicle(vehicleId);
-        await logHistoryEntry({ type: "vehicle_sell", label: vehicleName, station: stationName });
+        await logHistoryEntry({
+          type: "vehicle_sell",
+          label: vehicleName,
+          station: stationName
+        });
         onSold?.();
         statusEl.innerHTML = `<span class="text-success">Verkauft. Lade neu ...</span>`;
         setTimeout(goBack, 600);
@@ -4442,51 +3354,20 @@
       }
     });
   }
-
-  // Eigene Bestaetigung fuer "Speicher loeschen" (Einstellungen) statt eines blossen browser
-  // confirm() - der Button bleibt gesperrt, bis das Bestaetigungswort exakt eingetippt wurde,
-  // damit ein versehentlicher Klick nicht sofort alle Daten loescht.
   const CLEAR_STORAGE_CONFIRM_WORD = "löschen";
-
   function renderClearStorageConfirmScreen(goBack) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Einstellungen › Speicher löschen");
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p class="text-danger"><b>Speicher wirklich löschen?</b></p>
-      <p>
-        Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen,
-        Namens-Bausteine, Wachen-Bauplaner, Verlauf, ...) unwiderruflich
-        gelöscht - als wäre das Script gerade neu installiert worden.
-      </p>
-      <div class="form-group">
-        <label for="vn-clear-confirm-input">
-          Tippe zum Bestätigen <code>${escapeHtml(CLEAR_STORAGE_CONFIRM_WORD)}</code> ein:
-        </label>
-        <input type="text" id="vn-clear-confirm-input" class="form-control" autocomplete="off">
-      </div>
-      <div id="vn-clear-confirm-status" style="margin-top:10px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-btn-clear-confirm" type="button" class="btn btn-danger" disabled>
-          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher endgültig löschen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-danger"><b>Speicher wirklich löschen?</b></p>\n      <p>\n        Dadurch werden ALLE von FuxTools gespeicherten Daten (Fahrzeugtyp-Namen,\n        Namens-Bausteine, Wachen-Bauplaner, Verlauf, ...) unwiderruflich\n        gelöscht - als wäre das Script gerade neu installiert worden.\n      </p>\n      <div class="form-group">\n        <label for="vn-clear-confirm-input">\n          Tippe zum Bestätigen <code>${escapeHtml(CLEAR_STORAGE_CONFIRM_WORD)}</code> ein:\n        </label>\n        <input type="text" id="vn-clear-confirm-input" class="form-control" autocomplete="off">\n      </div>\n      <div id="vn-clear-confirm-status" style="margin-top:10px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-clear-confirm" type="button" class="btn btn-danger" disabled>\n          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher endgültig löschen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-
     const input = document.getElementById("vn-clear-confirm-input");
     const confirmBtn = document.getElementById("vn-btn-clear-confirm");
     const statusEl = document.getElementById("vn-clear-confirm-status");
-
     input.addEventListener("input", () => {
       confirmBtn.disabled = input.value.trim().toLowerCase() !== CLEAR_STORAGE_CONFIRM_WORD;
     });
     input.focus();
-
     confirmBtn.addEventListener("click", async () => {
       confirmBtn.disabled = true;
       input.disabled = true;
@@ -4502,139 +3383,65 @@
       }
     });
   }
-
   async function renderStationCheckScreen(preservedState) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachenausbau");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
-
     let stations;
     try {
       stations = await loadBuildingsForCheck();
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>
-        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>\n        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
-    // Kein automatisches Neuladen waehrend der Bildschirm offen ist (anders als der Personal-
-    // Scan gibt es hier keine Server-Anfrage im Hintergrund) - Wachen-/Ausbaustand kann daher
-    // veralten, wenn man das Fenster laenger offen laesst oder parallel im Spiel etwas
-    // aendert. Zeitstempel + manueller "Aktualisieren"-Button (wie beim Wachenbauplan
-    // "Anwenden") machen sichtbar, wie aktuell die Anzeige gerade ist.
     const lastLoadedAt = Date.now();
-
     const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
-
-    // "category" ist der Standard-Sortiermodus (nach Kategorie gruppiert, dann Name) -
-    // die anderen Spalten sind einfache auf-/absteigend umschaltbare Sortierungen.
     let sortColumn = preservedState?.sortColumn || "category";
     let sortAscending = preservedState?.sortAscending ?? true;
-
     const columnLabels = {
       category: "Wache",
       personnel: "Personal",
       hiring: "Automat. Werben",
-      extensions: "Ausbauten",
+      extensions: "Ausbauten"
     };
-
-    // Kategorien bleiben IMMER erhalten (sonst verliert man bei vielen Wachen die
-    // Uebersicht) - sortColumn/sortAscending bestimmen nur die Reihenfolge INNERHALB
-    // jeder Kategorie, nicht ob ueberhaupt gruppiert wird.
     function sortedStations() {
       const dir = sortAscending ? 1 : -1;
-      return [...stations].sort((a, b) => {
+      return [ ...stations ].sort((a, b) => {
         const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
         if (catDiff !== 0) return catDiff;
-
         if (sortColumn === "category") return a.name.localeCompare(b.name);
-
         let diff = 0;
-        if (sortColumn === "personnel") diff = (a.personnelCount ?? -1) - (b.personnelCount ?? -1);
-        else if (sortColumn === "hiring") diff = Number(a.automaticHiring) - Number(b.automaticHiring);
-        else if (sortColumn === "extensions") diff = getBuiltExtensionsCount(a) - getBuiltExtensionsCount(b);
-        // Der Namens-Rueckfall bei Gleichstand bleibt bewusst IMMER aufsteigend -
-        // sonst dreht sich bei vielen gleichen Werten (z.B. ueberall "300"/"Ja") nur
-        // die Namensreihenfolge mit der Sortierrichtung, was wie ein kaputter Sortierer
-        // aussieht (nur "dir" auf den eigentlichen Spaltenvergleich anwenden).
+        if (sortColumn === "personnel") diff = (a.personnelCount ?? -1) - (b.personnelCount ?? -1); else if (sortColumn === "hiring") diff = Number(a.automaticHiring) - Number(b.automaticHiring); else if (sortColumn === "extensions") diff = getBuiltExtensionsCount(a) - getBuiltExtensionsCount(b);
         return diff !== 0 ? diff * dir : a.name.localeCompare(b.name);
       });
     }
-
     function headerHtml(column) {
       const label = columnLabels[column];
-      const icon =
-        column !== sortColumn
-          ? "glyphicon-sort text-muted"
-          : sortAscending
-            ? "glyphicon-sort-by-attributes"
-            : "glyphicon-sort-by-attributes-alt";
+      const icon = column !== sortColumn ? "glyphicon-sort text-muted" : sortAscending ? "glyphicon-sort-by-attributes" : "glyphicon-sort-by-attributes-alt";
       return `<span style="white-space:nowrap;">${label}&nbsp;<span class="glyphicon ${icon}" style="font-size:10px;"></span></span>`;
     }
-
-    // Aktueller Filter-/Sortierzustand - wird beim Oeffnen eines Bau-Dialogs mitgegeben,
-    // damit man nach dem Bauen (oder Abbrechen) genau hier wieder landet statt in der
-    // Standardansicht.
     function currentState() {
       return {
-        sortColumn,
-        sortAscending,
+        sortColumn: sortColumn,
+        sortAscending: sortAscending,
         searchQuery: document.getElementById("vn-station-check-search")?.value || "",
-        typeFilter: document.getElementById("vn-station-check-type-filter")?.value || "",
+        typeFilter: document.getElementById("vn-station-check-type-filter")?.value || ""
       };
     }
-
-    // Blendet Wachen-Zeilen anhand von Sucheingabe und Typ-Filter ein/aus, ohne die
-    // Tabelle neu aufzubauen.
     const applyRowVisibility = makeRowVisibilityFilter({
       container: body,
       searchInputId: "vn-station-check-search",
       typeFilterId: "vn-station-check-type-filter",
       rowSelector: ".vn-check-station-row",
-      searchField: "name",
+      searchField: "name"
     });
-
     function renderTable() {
       const list = sortedStations();
-
-      const rows = list
-        .map(s => {
-          return `
-            <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}"
-                data-category="${escapeHtml(s.category)}" data-type="${escapeHtml(s.typeName || "")}">
-              <td>
-                <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>
-                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}${s.leitstelleName ? ` · ${escapeHtml(s.leitstelleName)}` : ""}</small>
-              </td>
-              <td>${renderPersonnelCell(s)}</td>
-              <td>
-                <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">
-                  ${s.automaticHiring ? "Ja" : "Nein"}
-                </span>
-              </td>
-              <td>${renderExtensionBadges(s)}</td>
-              <td>${renderLevelCell(s)}</td>
-              <td>${renderStorageCell(s)}</td>
-            </tr>
-          `;
-        })
-        .join("");
-
-      body.querySelector("thead").innerHTML = `
-        <tr>
-          <th class="vn-check-sort-header" data-column="category" style="cursor:pointer; white-space:nowrap;">${headerHtml("category")}</th>
-          <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer; white-space:nowrap;">${headerHtml("personnel")}</th>
-          <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer; white-space:nowrap;">${headerHtml("hiring")}</th>
-          <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer; white-space:nowrap;">${headerHtml("extensions")}</th>
-          <th>Stufe</th>
-          <th>Lagerräume</th>
-        </tr>
-      `;
+      const rows = list.map(s => `\n            <tr class="vn-check-station-row" data-name="${escapeHtml(s.name.toLowerCase())}"\n                data-category="${escapeHtml(s.category)}" data-type="${escapeHtml(s.typeName || "")}">\n              <td>\n                <a href="/buildings/${s.id}" target="_blank">${escapeHtml(s.name)}</a>\n                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}${s.leitstelleName ? ` · ${escapeHtml(s.leitstelleName)}` : ""}</small>\n              </td>\n              <td>${renderPersonnelCell(s)}</td>\n              <td>\n                <span class="label ${s.automaticHiring ? "label-success" : "label-default"}">\n                  ${s.automaticHiring ? "Ja" : "Nein"}\n                </span>\n              </td>\n              <td>${renderExtensionBadges(s)}</td>\n              <td>${renderLevelCell(s)}</td>\n              <td>${renderStorageCell(s)}</td>\n            </tr>\n          `).join("");
+      body.querySelector("thead").innerHTML = `\n        <tr>\n          <th class="vn-check-sort-header" data-column="category" style="cursor:pointer; white-space:nowrap;">${headerHtml("category")}</th>\n          <th class="vn-check-sort-header" data-column="personnel" style="cursor:pointer; white-space:nowrap;">${headerHtml("personnel")}</th>\n          <th class="vn-check-sort-header" data-column="hiring" style="cursor:pointer; white-space:nowrap;">${headerHtml("hiring")}</th>\n          <th class="vn-check-sort-header" data-column="extensions" style="cursor:pointer; white-space:nowrap;">${headerHtml("extensions")}</th>\n          <th>Stufe</th>\n          <th>Lagerräume</th>\n        </tr>\n      `;
       body.querySelector("tbody").innerHTML = rows;
-
       body.querySelectorAll(".vn-check-sort-header").forEach(th => {
         th.addEventListener("click", () => {
           const column = th.dataset.column;
@@ -4647,16 +3454,11 @@
           renderTable();
         });
       });
-
-
       body.querySelectorAll(".vn-build-extension").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
           const extensionId = Number(btn.dataset.extensionId);
-          // Zustand JETZT sichern (Suche/Filter/Sortierung), nicht erst wenn goBack
-          // ausgefuehrt wird - die Suchleiste/das Dropdown existieren dann nicht mehr,
-          // weil der Bau-Bestaetigungs-Bildschirm den Inhalt schon ersetzt hat.
           const savedState = currentState();
           renderBuildConfirmScreen({
             title: btn.dataset.name,
@@ -4666,11 +3468,10 @@
             goBack: () => renderStationCheckScreen(savedState),
             historyType: "extension",
             historyLabel: btn.dataset.name,
-            historyStation: btn.dataset.stationName,
+            historyStation: btn.dataset.stationName
           });
         });
       });
-
       body.querySelectorAll(".vn-build-storage").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
@@ -4685,11 +3486,10 @@
             goBack: () => renderStationCheckScreen(savedState),
             historyType: "storage",
             historyLabel: btn.dataset.name,
-            historyStation: btn.dataset.stationName,
+            historyStation: btn.dataset.stationName
           });
         });
       });
-
       body.querySelectorAll(".vn-build-level, .vn-build-level-max").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
@@ -4704,59 +3504,14 @@
             goBack: () => renderStationCheckScreen(savedState),
             historyType: "level",
             historyLabel: `Ausbaustufe ${level}`,
-            historyStation: btn.dataset.stationName,
+            historyStation: btn.dataset.stationName
           });
         });
       });
-
       applyRowVisibility();
     }
-
-    const typeOptions = [...new Set(stations.map(s => s.typeName).filter(Boolean))].sort((a, b) =>
-      a.localeCompare(b, "de"),
-    );
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Grün = gebaut/aktiv, Blau = in Bau, Orange = gefordert, Grau = nicht gebaut.
-        ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch ein Ausbau.
-      </p>
-      <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-        <select id="vn-station-check-type-filter" class="form-control" style="max-width:220px;">
-          <option value="">Alle Gebäudetypen</option>
-          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
-        </select>
-        <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."
-               value="${escapeHtml(preservedState?.searchQuery || "")}" style="max-width:200px;">
-        <button id="vn-btn-required-extensions-from-check" type="button" class="btn btn-default" style="margin-left:auto; white-space:nowrap;">
-          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen
-        </button>
-      </div>
-      <div style="max-height:55vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
-          <colgroup>
-            <col style="width:20%;">
-            <col style="width:8%;">
-            <col style="width:11%;">
-            <col style="width:33%;">
-            <col style="width:13%;">
-            <col style="width:15%;">
-          </colgroup>
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-station-check-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-        </button>
-        <span class="label label-default" style="font-size:12px;">Stand: ${escapeHtml(new Date(lastLoadedAt).toLocaleString("de-DE"))}</span>
-      </div>
-    `;
-
+    const typeOptions = [ ...new Set(stations.map(s => s.typeName).filter(Boolean)) ].sort((a, b) => a.localeCompare(b, "de"));
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Grün = gebaut/aktiv, Blau = in Bau, Orange = gefordert, Grau = nicht gebaut.\n        ${withMissingExtensionsCount} von ${stations.length} Wachen fehlt noch ein Ausbau.\n      </p>\n      <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">\n        <select id="vn-station-check-type-filter" class="form-control" style="max-width:220px;">\n          <option value="">Alle Gebäudetypen</option>\n          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}\n        </select>\n        <input type="text" id="vn-station-check-search" class="form-control" placeholder="Wache suchen ..."\n               value="${escapeHtml(preservedState?.searchQuery || "")}" style="max-width:200px;">\n        <button id="vn-btn-required-extensions-from-check" type="button" class="btn btn-default" style="margin-left:auto; white-space:nowrap;">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen\n        </button>\n      </div>\n      <div style="max-height:55vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:20%;">\n            <col style="width:8%;">\n            <col style="width:11%;">\n            <col style="width:33%;">\n            <col style="width:13%;">\n            <col style="width:15%;">\n          </colgroup>\n          <thead></thead>\n          <tbody></tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-station-check-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n        </button>\n        <span class="label label-default" style="font-size:12px;">Stand: ${escapeHtml(new Date(lastLoadedAt).toLocaleString("de-DE"))}</span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     if (preservedState?.typeFilter) {
       document.getElementById("vn-station-check-type-filter").value = preservedState.typeFilter;
@@ -4770,61 +3525,29 @@
     document.getElementById("vn-station-check-refresh").addEventListener("click", () => {
       renderStationCheckScreen(currentState());
     });
-
     renderTable();
   }
-
-  //////////////////////////////////////////////////
-  // Personal-Check: prueft je Wache, ob genug Personal mit bestimmten Ausbildungen
-  // vorhanden ist (z.B. ELW-2-Fahrer). Es gibt dafuer keine JSON-API - die Personal-
-  // Seite jeder Wache (/buildings/{id}/personals) wird als HTML geladen und die
-  // Tabelle darin ausgewertet (data-filterable-by-Attribut = Ausbildungs-Slugs pro
-  // Person). Automatischer Scan beim Oeffnen von Personal-Check/Schulungen, wenn der
-  // letzte Scan mehr als PERSONNEL_SCAN_STALE_MS her ist (siehe ensureFreshPersonnelScan),
-  // zusaetzlich jederzeit per Button manuell ausloesbar.
-  //////////////////////////////////////////////////
-
   const PERSONNEL_SCAN_CONCURRENCY = 5;
-
   async function loadPersonnelCheckStations() {
     const buildings = await fetchJSON("/api/buildings");
-    const leitstelleIds = new Set();
+    const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
-    return buildings
-      .filter(
-        b =>
-          !leitstelleIds.has(String(b.id)) &&
-          categoryForBuilding(b) !== "Unbekannt" &&
-          // Krankenhaeuser und Schulen haben kein zuweisbares Personal (nur Betten
-          // bzw. Lehrgaenge), "Sonstiges" (Leitstelle, Komplexe, Verbandszellen,
-          // Bereitstellungsraum) hat ebenfalls kein Personal mit Ausbildungen - fuer den
-          // Personal-Check ohne Bedeutung.
-          categoryForBuilding(b) !== "Krankenhäuser & Schulen" &&
-          categoryForBuilding(b) !== "Sonstiges",
-      )
-      .map(b => {
-        const pseudoId = getPseudoBuildingTypeId(b);
-        const buildingKey = getBuildingKey(b);
-        return {
-          id: String(b.id),
-          name: b.caption || `Wache ${b.id}`,
-          category: categoryForBuilding(b),
-          typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
-          pseudoId,
-        };
-      });
+    return buildings.filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt" && categoryForBuilding(b) !== "Krankenhäuser & Schulen" && categoryForBuilding(b) !== "Sonstiges").map(b => {
+      const pseudoId = getPseudoBuildingTypeId(b);
+      const buildingKey = getBuildingKey(b);
+      return {
+        id: String(b.id),
+        name: b.caption || `Wache ${b.id}`,
+        category: categoryForBuilding(b),
+        typeName: BUILDING_TYPE_NAMES[buildingKey] || null,
+        pseudoId: pseudoId
+      };
+    });
   }
-
-  // Liest jede Personal-Zeile aus der HTML-Personalseite einer Wache aus: Personal-ID (Wert
-  // der "personal-delete-checkbox" in der ersten Spalte, per Live-Diagnose bestaetigt), Name,
-  // die Ausbildungs-Slugs (data-filterable-by), den Klartext-Namen der Ausbildung (Spalte
-  // "Ausbildung" - nur eindeutig, wenn die Person genau einen Slug hat) und den Status
-  // (Spalte "Status", z.B. "Verfügbar" oder "Im Unterricht"). Liefert ALLE Zeilen, auch
-  // Personen ganz ohne Ausbildung, damit sich Gesamtzahlen berechnen lassen.
   function parsePersonalPageHtml(html) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
+    const doc = (new DOMParser).parseFromString(html, "text/html");
     const rows = doc.querySelectorAll("#personal_table tbody tr");
     const entries = [];
     rows.forEach(row => {
@@ -4839,31 +3562,28 @@
       const name = row.children[1]?.textContent.trim() || "";
       const educationText = row.children[2]?.textContent.trim() || "";
       const statusText = row.children[4]?.textContent.trim() || "";
-      entries.push({ id, slugs, name, educationText, statusText });
+      entries.push({
+        id: id,
+        slugs: slugs,
+        name: name,
+        educationText: educationText,
+        statusText: statusText
+      });
     });
     return entries;
   }
-
   async function fetchPersonalPage(buildingId) {
-    const res = await fetchWithTimeout(`/buildings/${buildingId}/personals`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${buildingId}/personals`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Fehler beim Laden von Personal (Gebäude ${buildingId}): ${res.status}`);
     return await res.text();
   }
-
-  // Ab wann ein vorhandener Scan als "veraltet" gilt und automatisch neu gescannt wird
-  // (siehe ensureFreshPersonnelScan()) - beim Oeffnen von Personal-Check oder Schulungen.
-  const PERSONNEL_SCAN_STALE_MS = 15 * 60 * 1000;
-
-  // Scannt ALLE Wachen aller Kategorien in einem Lauf (Concurrency begrenzt, wie beim
-  // Umbenennen grosser Fahrzeugmengen) und speichert je Wache die Ausbildungs-Anzahl pro
-  // Slug. Ein einzelner, gemeinsamer Zeitstempel (PERSONNEL_SCAN_META_KEY) statt einem
-  // Zeitstempel pro Wache - das Laden ist schnell genug, um nicht mehr pro Kategorie
-  // einzeln zu scannen. Neu entdeckte Slug->Name-Zuordnungen werden dauerhaft mitgesammelt.
+  const PERSONNEL_SCAN_STALE_MS = 15 * 60 * 1e3;
   async function scanAllPersonnel(onProgress) {
     const stations = await loadPersonnelCheckStations();
     const scanData = await getPersonnelScanData();
     const qualifications = await getPersonnelQualifications();
-
     let nextIndex = 0;
     let finished = 0;
     async function worker() {
@@ -4877,10 +3597,9 @@
           let withoutEducation = 0;
           let available = 0;
           let inTraining = 0;
-          entries.forEach(({ slugs, name, educationText, statusText }) => {
+          entries.forEach(({slugs: slugs, name: name, educationText: educationText, statusText: statusText}) => {
             if (!slugs.length) withoutEducation++;
-            if (statusText.includes("Unterricht")) inTraining++;
-            else if (statusText.includes("Verfügbar")) available++;
+            if (statusText.includes("Unterricht")) inTraining++; else if (statusText.includes("Verfügbar")) available++;
             slugs.forEach(slug => {
               counts[slug] = (counts[slug] || 0) + 1;
               if (name) (names[slug] || (names[slug] = [])).push(name);
@@ -4889,7 +3608,14 @@
               }
             });
           });
-          scanData[station.id] = { counts, names, total: entries.length, withoutEducation, available, inTraining };
+          scanData[station.id] = {
+            counts: counts,
+            names: names,
+            total: entries.length,
+            withoutEducation: withoutEducation,
+            available: available,
+            inTraining: inTraining
+          };
         } catch (e) {
           console.warn("[FuxTools] Personal-Scan fehlgeschlagen für Wache", station.id, e);
         }
@@ -4898,17 +3624,16 @@
       }
     }
     const workerCount = Math.min(PERSONNEL_SCAN_CONCURRENCY, stations.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
+    await Promise.all(Array.from({
+      length: workerCount
+    }, () => worker()));
     await storeData(scanData, PERSONNEL_SCAN_KEY);
     await storeData(qualifications, PERSONNEL_QUALIFICATIONS_KEY);
-    await storeData({ lastScanAt: Date.now() }, PERSONNEL_SCAN_META_KEY);
+    await storeData({
+      lastScanAt: Date.now()
+    }, PERSONNEL_SCAN_META_KEY);
     return stations.length;
   }
-
-  // Wird beim Oeffnen von Personal-Check/Schulungen aufgerufen: scannt automatisch neu,
-  // wenn noch nie oder vor mehr als PERSONNEL_SCAN_STALE_MS gescannt wurde, sonst werden
-  // einfach die vorhandenen Daten verwendet (kein Zwangs-Scan bei jedem Oeffnen).
   async function ensureFreshPersonnelScan(onProgress) {
     const meta = await getPersonnelScanMeta();
     if (meta.lastScanAt && Date.now() - meta.lastScanAt < PERSONNEL_SCAN_STALE_MS) {
@@ -4917,106 +3642,66 @@
     await scanAllPersonnel(onProgress);
     return true;
   }
-
-  // Zeigt je Wache, ob genug Personal mit den in den Einstellungen GESPEICHERTEN
-  // Ausbildungs-Anforderungen vorhanden ist. Ohne eigene, gespeicherte Konfiguration ist
-  // ueberall 0 gefordert (Standard). Badges erscheinen aber nicht nur fuer konfigurierte
-  // Anforderungen, sondern auch fuer jede tatsaechlich vorhandene Ausbildung (have > 0) -
-  // sonst wuerde bereits vorhandenes Personal mit Ausbildung bei "0 gefordert" komplett
-  // unter den Tisch fallen ("-" statt z.B. "5/0").
-  // Gruen = genau passend, Gelb = zu wenig, Rot = mehr als gefordert (ueberbesetzt, auch
-  // bei 0 gefordert), Grau = fuer diesen Gebaeudetyp weder etwas gefordert noch vorhanden,
-  // "Nicht gescannt" = noch keine Scan-Daten vorhanden. Die Namen der Personen mit der
-  // jeweiligen Ausbildung stehen im Tooltip (title).
   function renderPersonnelBadges(station, requirements, qualifications, scanData) {
     const scan = scanData[station.id];
     if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
-
     const req = requirements[station.pseudoId] || {};
-    const slugs = new Set([
-      ...Object.keys(req).filter(slug => req[slug] > 0),
-      ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0),
-    ]);
-
-    const badges = [...slugs]
-      .sort((a, b) => (qualifications[a] || a).localeCompare(qualifications[b] || b, "de"))
-      .map(slug => {
-        const required = req[slug] || 0;
-        const have = scan.counts[slug] || 0;
-        const name = qualifications[slug] || slug;
-        const namesList = (scan.names?.[slug] || []).join(", ");
-        const title = namesList ? `${name}: ${namesList}` : name;
-
-        let cssClass;
-        let label;
-        if (have < required) {
-          cssClass = "label-warning";
-          label = `${name} ${have}/${required} (${required - have} fehlen)`;
-        } else if (have === required) {
-          cssClass = "label-success";
-          label = `${name} ${have}/${required}`;
-        } else {
-          cssClass = "label-danger";
-          label = `${name} ${have}/${required} (${have - required} zu viel)`;
-        }
-        return `<span class="label ${cssClass}" style="margin:1px;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
-      });
+    const slugs = new Set([ ...Object.keys(req).filter(slug => req[slug] > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
+    const badges = [ ...slugs ].sort((a, b) => (qualifications[a] || a).localeCompare(qualifications[b] || b, "de")).map(slug => {
+      const required = req[slug] || 0;
+      const have = scan.counts[slug] || 0;
+      const name = qualifications[slug] || slug;
+      const namesList = (scan.names?.[slug] || []).join(", ");
+      const title = namesList ? `${name}: ${namesList}` : name;
+      let cssClass;
+      let label;
+      if (have < required) {
+        cssClass = "label-warning";
+        label = `${name} ${have}/${required} (${required - have} fehlen)`;
+      } else if (have === required) {
+        cssClass = "label-success";
+        label = `${name} ${have}/${required}`;
+      } else {
+        cssClass = "label-danger";
+        label = `${name} ${have}/${required} (${have - required} zu viel)`;
+      }
+      return `<span class="label ${cssClass}" style="margin:1px;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+    });
     return badges.join(" ") || '<span class="text-muted">-</span>';
   }
-
-  // Kompakte Personal-Gesamtuebersicht einer Wache (gesamt / ohne Ausbildung /
-  // verfuegbar / im Unterricht), analog zu einer im Forum gesehenen Referenz - eigene,
-  // kompakte Umsetzung im FuxTools-Stil statt einer grossen Detail-Ansicht.
   function renderPersonnelOverview(station, scanData) {
     const scan = scanData[station.id];
     if (!scan) return '<span class="text-muted">-</span>';
-    return `
-      <div>${scan.total} gesamt</div>
-      <div class="text-muted">${scan.withoutEducation} ohne Ausbildung</div>
-      <div class="text-muted">${scan.available} verfügbar · ${scan.inTraining} im Unterricht</div>
-    `;
+    return `\n      <div>${scan.total} gesamt</div>\n      <div class="text-muted">${scan.withoutEducation} ohne Ausbildung</div>\n      <div class="text-muted">${scan.available} verfügbar · ${scan.inTraining} im Unterricht</div>\n    `;
   }
-
   async function renderPersonalCheckScreen() {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Personal-Check");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
-
     let stations;
     try {
       stations = await loadPersonnelCheckStations();
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>
-        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>\n        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
-
     body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
     await ensureFreshPersonnelScan((done, of) => {
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
-
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const requirements = await computePersonnelRequirementsFromBlueprints();
     const qualifications = await getPersonnelQualifications();
-
     const applyRowVisibility = makeRowVisibilityFilter({
       container: body,
       searchInputId: "vn-personnel-search",
       typeFilterId: "vn-personnel-type-filter",
       rowSelector: ".vn-personnel-row",
-      searchField: "name",
+      searchField: "name"
     });
-
-    // Summe der fehlenden Personen ueber alle geforderten Ausbildungen einer Wache -
-    // Grundlage fuer "nach unvollstaendigen Wachen sortieren". Nicht gescannte Wachen
-    // zaehlen als am unvollstaendigsten (unbekannt = zuerst pruefen), Wachen ohne
-    // Anforderung als am vollstaendigsten (0).
     function personnelMissingCount(station) {
       const req = requirements[station.pseudoId] || {};
       const entries = Object.entries(req).filter(([, required]) => required > 0);
@@ -5025,15 +3710,11 @@
       if (!scan) return Number.MAX_SAFE_INTEGER;
       return entries.reduce((sum, [slug, required]) => sum + Math.max(0, required - (scan.counts[slug] || 0)), 0);
     }
-
-    // "category" (Standard, nach Kategorie+Name) oder "missing" (nach fehlendem
-    // Personal) - umschaltbar ueber Klick auf die Spaltenueberschriften.
     let sortColumn = "category";
     let sortAscending = true;
-
     function sortedStations() {
       const dir = sortAscending ? 1 : -1;
-      return [...stations].sort((a, b) => {
+      return [ ...stations ].sort((a, b) => {
         if (sortColumn === "category") {
           const catDiff = CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category);
           return catDiff !== 0 ? catDiff : a.name.localeCompare(b.name);
@@ -5042,110 +3723,28 @@
         return diff !== 0 ? diff * dir : a.name.localeCompare(b.name);
       });
     }
-
     function sortIcon(column) {
       if (column !== sortColumn) return "glyphicon-sort text-muted";
       return sortAscending ? "glyphicon-sort-by-attributes" : "glyphicon-sort-by-attributes-alt";
     }
-
     function renderTable() {
       const list = sortedStations();
-
-      const rows = list
-        .map(s => {
-          return `
-            <tr class="vn-personnel-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-type="${escapeHtml(s.typeName || "")}">
-              <td>
-                <a href="/buildings/${s.id}/personals" target="_blank">${escapeHtml(s.name)}</a>
-                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}</small>
-              </td>
-              <td><small>${renderPersonnelOverview(s, scanData)}</small></td>
-              <td>${renderPersonnelBadges(s, requirements, qualifications, scanData)}</td>
-            </tr>
-          `;
-        })
-        .join("");
-
+      const rows = list.map(s => `\n            <tr class="vn-personnel-row" data-name="${escapeHtml(s.name.toLowerCase())}" data-type="${escapeHtml(s.typeName || "")}">\n              <td>\n                <a href="/buildings/${s.id}/personals" target="_blank">${escapeHtml(s.name)}</a>\n                <br><small class="text-muted">${escapeHtml(s.typeName || s.category)}</small>\n              </td>\n              <td><small>${renderPersonnelOverview(s, scanData)}</small></td>\n              <td>${renderPersonnelBadges(s, requirements, qualifications, scanData)}</td>\n            </tr>\n          `).join("");
       document.getElementById("vn-personnel-results-body").innerHTML = rows;
       body.querySelector("#vn-personnel-header-wache .glyphicon").className = `glyphicon ${sortIcon("category")}`;
       body.querySelector("#vn-personnel-header-ausbildungen .glyphicon").className = `glyphicon ${sortIcon("missing")}`;
       applyRowVisibility();
     }
-
-    const typeOptions = [...new Set(stations.map(s => s.typeName).filter(Boolean))].sort((a, b) =>
-      a.localeCompare(b, "de"),
-    );
-
+    const typeOptions = [ ...new Set(stations.map(s => s.typeName).filter(Boolean)) ].sort((a, b) => a.localeCompare(b, "de"));
     function lastScanLabel() {
-      return scanMeta.lastScanAt
-        ? `Letzter Scan: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
-        : "Noch nie gescannt";
+      return scanMeta.lastScanAt ? `Letzter Scan: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}` : "Noch nie gescannt";
     }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Grün = passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.
-        Bedarf kommt aus dem aktiven Wachenbauplan je Gebäudetyp.
-      </p>
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
-        <button type="button" id="vn-personnel-goto-blueprints" class="btn btn-default btn-sm">
-          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten
-        </button>
-        <button type="button" id="vn-personnel-goto-schooling" class="btn btn-primary btn-sm">
-          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Schulungen starten
-        </button>
-      </div>
-
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <select id="vn-personnel-type-filter" class="form-control" style="max-width:260px;">
-          <option value="">Alle Gebäudetypen</option>
-          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}
-        </select>
-        <input type="text" id="vn-personnel-search" class="form-control" placeholder="Wache suchen ..." style="flex:1;">
-      </div>
-      <div style="max-height:45vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
-          <colgroup>
-            <col style="width:25%;">
-            <col style="width:18%;">
-            <col style="width:57%;">
-          </colgroup>
-          <thead>
-            <tr>
-              <th id="vn-personnel-header-wache" style="cursor:pointer; white-space:nowrap;">
-                Wache <span class="glyphicon ${sortIcon("category")}" style="font-size:10px;"></span>
-              </th>
-              <th>Personal</th>
-              <th id="vn-personnel-header-ausbildungen" style="cursor:pointer; white-space:nowrap;">
-                Personal-Ausbildungen <span class="glyphicon ${sortIcon("missing")}" style="font-size:10px;"></span>
-              </th>
-            </tr>
-          </thead>
-          <tbody id="vn-personnel-results-body"></tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button type="button" id="vn-personnel-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-        </button>
-        <span class="label label-default" id="vn-personnel-scan-status" style="font-size:12px;">
-          ${escapeHtml(lastScanLabel())}
-        </span>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Grün = passend, Gelb = zu wenig, Rot = mehr als gefordert, Grau = nichts gefordert.\n        Bedarf kommt aus dem aktiven Wachenbauplan je Gebäudetyp.\n      </p>\n      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">\n        <button type="button" id="vn-personnel-goto-blueprints" class="btn btn-default btn-sm">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n        </button>\n        <button type="button" id="vn-personnel-goto-schooling" class="btn btn-primary btn-sm">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Schulungen starten\n        </button>\n      </div>\n\n      <div style="display:flex; gap:8px; margin-bottom:8px;">\n        <select id="vn-personnel-type-filter" class="form-control" style="max-width:260px;">\n          <option value="">Alle Gebäudetypen</option>\n          ${typeOptions.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("")}\n        </select>\n        <input type="text" id="vn-personnel-search" class="form-control" placeholder="Wache suchen ..." style="flex:1;">\n      </div>\n      <div style="max-height:45vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:25%;">\n            <col style="width:18%;">\n            <col style="width:57%;">\n          </colgroup>\n          <thead>\n            <tr>\n              <th id="vn-personnel-header-wache" style="cursor:pointer; white-space:nowrap;">\n                Wache <span class="glyphicon ${sortIcon("category")}" style="font-size:10px;"></span>\n              </th>\n              <th>Personal</th>\n              <th id="vn-personnel-header-ausbildungen" style="cursor:pointer; white-space:nowrap;">\n                Personal-Ausbildungen <span class="glyphicon ${sortIcon("missing")}" style="font-size:10px;"></span>\n              </th>\n            </tr>\n          </thead>\n          <tbody id="vn-personnel-results-body"></tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button type="button" id="vn-personnel-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n        </button>\n        <span class="label label-default" id="vn-personnel-scan-status" style="font-size:12px;">\n          ${escapeHtml(lastScanLabel())}\n        </span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-personnel-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-personnel-type-filter").addEventListener("change", applyRowVisibility);
-    document
-      .getElementById("vn-personnel-goto-blueprints")
-      .addEventListener("click", () => renderStationBlueprintsListScreen(renderPersonalCheckScreen));
-    document
-      .getElementById("vn-personnel-goto-schooling")
-      .addEventListener("click", () => renderSchoolingScreen(renderPersonalCheckScreen));
+    document.getElementById("vn-personnel-goto-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen(renderPersonalCheckScreen));
+    document.getElementById("vn-personnel-goto-schooling").addEventListener("click", () => renderSchoolingScreen(renderPersonalCheckScreen));
     document.getElementById("vn-personnel-header-wache").addEventListener("click", () => {
       sortColumn = "category";
       sortAscending = true;
@@ -5160,7 +3759,6 @@
       }
       renderTable();
     });
-
     document.getElementById("vn-personnel-scan-btn").addEventListener("click", async () => {
       const btn = document.getElementById("vn-personnel-scan-btn");
       const statusEl = document.getElementById("vn-personnel-scan-status");
@@ -5179,138 +3777,96 @@
         btn.disabled = false;
       }
     });
-
     renderTable();
   }
-
-  //////////////////////////////////////////////////
-  // Schulungen: nutzt die im Personal-Check gescannten Zahlen (counts pro Wache+Slug)
-  // und die aus dem je Gebaeudetyp aktiven Wachenbauplan berechnete Anforderung (siehe
-  // computePersonnelRequirementsFromBlueprints), um fehlendes
-  // Personal automatisch in die passende Schule zu schicken - ein Klassenraum fasst immer
-  // 10 Personen (siehe free_space_for_personnel_selection() im Spiel selbst). Es gibt
-  // dafuer keine JSON-API: der Lehrgang-Tab jeder Schule ist eine grosse HTML-Seite, und
-  // die Personal-Auswahl pro Wache wird darin erst per AJAX nachgeladen (schooling_
-  // personal_select) - deshalb zwei Anfragen pro Lauf (Schule fuer Token+Raum+Lehrgangs-
-  // ID, dann jede betroffene Wache fuer die tatsaechlichen Personal-IDs).
-  //////////////////////////////////////////////////
-
-  // Schule (building_type) je Kategorie, in die Personal dieser Kategorie geschickt wird.
   const SCHOOL_BUILDING_TYPE_BY_CATEGORY = {
-    Feuerwehr: 1, // Feuerwehrschule
-    Rettungsdienst: 3, // Rettungsschule
-    Polizei: 8, // Polizeischule
-    THW: 10, // THW-Bundesschule
-    Seenotrettung: 27, // Schule fuer Seefahrt und Seenotrettung
+    Feuerwehr: 1,
+    Rettungsdienst: 3,
+    Polizei: 8,
+    THW: 10,
+    Seenotrettung: 27
   };
-
   const SCHOOLING_SEATS_PER_ROOM = 10;
-
-  // Jede Schule hat 1 Klassenraum als Standard, plus einen weiteren je gebautem "Weiterer
-  // Klassenraum"-Ausbau (Ids 0/1/2, siehe EXTENSION_CATALOG - identisch bei allen 5
-  // Schul-Gebaeudetypen) - im Spiel selbst auf der Gebaeudeseite sichtbar ("Bereits fertig
-  // gebaut"/"Noch nicht gebaut"). Zuverlaessiger als die Raum-Auswahl im Lehrgangs-Formular
-  // zu scrapen (die existiert nur, wenn gerade ein Raum frei ist - fuer die GESAMTZAHL der
-  // Raeume ist das ungeeignet, siehe fetchSchoolPageInfo).
-  const SCHOOL_CLASSROOM_EXTENSION_IDS = [0, 1, 2];
-
+  const SCHOOL_CLASSROOM_EXTENSION_IDS = [ 0, 1, 2 ];
   function countSchoolClassrooms(building) {
     const extensions = Array.isArray(building.extensions) ? building.extensions : [];
     const builtExtraRooms = extensions.filter(e => SCHOOL_CLASSROOM_EXTENSION_IDS.includes(e.type_id)).length;
     return 1 + builtExtraRooms;
   }
-
   async function loadOwnedSchoolsByCategory() {
     const buildings = await fetchJSON("/api/buildings");
     const byCategory = {};
     for (const b of buildings) {
-      const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(
-        cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type,
-      );
+      const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type);
       if (!category) continue;
       (byCategory[category] || (byCategory[category] = [])).push({
         id: String(b.id),
         name: b.caption || `Schule ${b.id}`,
-        maxRooms: countSchoolClassrooms(b),
+        maxRooms: countSchoolClassrooms(b)
       });
     }
     return byCategory;
   }
-
-  // Welche eigene Schule fuer eine Kategorie genutzt wird, ist fuer den Spieler egal (es gibt
-  // keinen Unterschied zwischen zwei Feuerwehrschulen) - deshalb einfach die erste gefundene,
-  // keine Auswahl-Notwendigkeit im UI.
   function pickSchoolForCategory(schoolsByCategory, category) {
     return (schoolsByCategory[category] || [])[0] || null;
   }
-
-  // Ermittelt je Kategorie+Ausbildungs-Slug, wie viel Personal insgesamt fehlt (Summe ueber
-  // alle Wachen dieser Kategorie) - Grundlage fuer die Schulungen-Uebersicht. Wachen ohne
-  // Scan-Daten werden ausgelassen (wie bei den Badges im Personal-Check: unbekannt statt
-  // faelschlich "fehlt nichts"), ebenso Wachen unter der Mindest-Personalstaerke (schuetzt
-  // frisch gebaute/kleine Wachen davor, sofort leergeraeumt zu werden).
   function computeTrainingNeeds(stations, requirements, scanData, minStaff) {
-    const needs = new Map();
+    const needs = new Map;
     for (const station of stations) {
       const scan = scanData[station.id];
       if (!scan) continue;
       if (scan.total < minStaff) continue;
       const schoolBuildingType = SCHOOL_BUILDING_TYPE_BY_CATEGORY[station.category];
       if (!schoolBuildingType) continue;
-
       const req = requirements[station.pseudoId] || {};
       for (const [slug, required] of Object.entries(req)) {
         const deficit = required - (scan.counts[slug] || 0);
         if (deficit <= 0) continue;
-
         const key = `${station.category}::${slug}`;
         if (!needs.has(key)) {
-          needs.set(key, { category: station.category, slug, stations: [], totalDeficit: 0 });
+          needs.set(key, {
+            category: station.category,
+            slug: slug,
+            stations: [],
+            totalDeficit: 0
+          });
         }
         const need = needs.get(key);
-        need.stations.push({ id: station.id, name: station.name, deficit });
+        need.stations.push({
+          id: station.id,
+          name: station.name,
+          deficit: deficit
+        });
         need.totalDeficit += deficit;
       }
     }
-    return [...needs.values()];
+    return [ ...needs.values() ];
   }
-
-  // Laedt den Lehrgang-Tab der Schule und liest die Anzahl frei WAEHLBARER, komplett
-  // ungenutzter Klassenraeume (Anzahl <option> in #building_rooms_use) aus - "slug" ist
-  // optional und liefert zusaetzlich authenticity_token sowie den Formular-Wert des
-  // gewuenschten Lehrgangs (Format "<slug>:<lehrgangsId>", siehe #education_select), wird
-  // also nur gebraucht, wenn tatsaechlich ausgebildet werden soll.
-  //
-  // WICHTIG (per Live-Diagnose im Browser bestaetigt, zweimal): #building_rooms_use existiert
-  // im HTML NUR, wenn die Schule mindestens einen KOMPLETT freien (noch nie belegten)
-  // Klassenraum hat - laeuft ueberall schon ein Lehrgang (auch wenn der laut API noch
-  // "open_spaces" zeigt - die sind NICHT mehr nutzbar, sobald der Lehrgang laeuft), fehlt der
-  // Raum-Waehler, aber das <form> samt #education_select kann trotzdem noch vorhanden sein
-  // (offenbar fuer den Fall, dass doch noch ein Raum frei wird). "occupied" (Anzahl aktuell
-  // laufender Lehrgaenge laut /api/schoolings, siehe countOccupiedRooms) ist deshalb die
-  // einzige verlaessliche Quelle fuer belegte Raeume - die Gesamtraumzahl ergibt sich als
-  // occupied + frei-waehlbare Raeume (NIE geraten/hart codiert).
   async function fetchSchoolPageInfo(schoolId, occupied, slug = null) {
-    const res = await fetchWithTimeout(`/buildings/${schoolId}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/buildings/${schoolId}`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Schule (Gebäude ${schoolId}) konnte nicht geladen werden (${res.status}).`);
-    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
     const form = doc.querySelector(`form[action="/buildings/${schoolId}/education"]`);
     if (!form) {
-      if (occupied > 0) return { maxRooms: occupied, freeRooms: 0 };
+      if (occupied > 0) return {
+        maxRooms: occupied,
+        freeRooms: 0
+      };
       throw new Error("Ausbildungs-Formular an dieser Schule nicht gefunden.");
     }
-
-    const roomOptions = [...form.querySelectorAll("#building_rooms_use option")];
+    const roomOptions = [ ...form.querySelectorAll("#building_rooms_use option") ];
     const freeRooms = roomOptions.length ? Math.max(...roomOptions.map(o => Number(o.value) || 1)) : 0;
     const maxRooms = occupied + freeRooms;
-
-    const result = { maxRooms, freeRooms };
+    const result = {
+      maxRooms: maxRooms,
+      freeRooms: freeRooms
+    };
     if (slug) {
       const authenticityToken = form.querySelector('input[name="authenticity_token"]')?.value;
       if (!authenticityToken) throw new Error("CSRF-Token im Ausbildungs-Formular nicht gefunden.");
-      const educationOption = [...form.querySelectorAll("#education_select option")].find(o =>
-        o.value.startsWith(`${slug}:`),
-      );
+      const educationOption = [ ...form.querySelectorAll("#education_select option") ].find(o => o.value.startsWith(`${slug}:`));
       if (!educationOption) throw new Error("Dieser Lehrgang wird an dieser Schule nicht angeboten.");
       result.authenticityToken = authenticityToken;
       result.educationValue = educationOption.value;
@@ -5318,107 +3874,49 @@
     }
     return result;
   }
-
-  // Liest die Lehrgangsdauer aus dem Options-Text (z.B. "Dekon-P Lehrgang (3 Tage)") - fuer
-  // die Fertig-Schaetzung in der eigenen Bestaetigungs-Ansicht (siehe renderSchoolingConfirm-
-  // Screen). null, falls das Format mal nicht passt (Anzeige laesst die Schaetzung dann weg).
   function parseEducationDurationDays(educationLabel) {
     const match = educationLabel?.match(/\((\d+)\s*Tage?\)/);
     return match ? Number(match[1]) : null;
   }
-
-  // Echte Auslastung ueber /api/schoolings statt HTML-Raten: liefert je Lehrgangs-Instanz
-  // (ein Eintrag = EIN belegter Klassenraum) building_id, ob sie noch laeuft und wann sie
-  // fertig ist. Mehrere Instanzen pro Schule moeglich (mehrere Raeume gleichzeitig belegt).
   async function fetchSchoolingRuns() {
     return await fetchJSON("/api/schoolings");
   }
-
-  // Anzahl der GERADE (oder demnaechst per verzoegertem Start) belegten Klassenraeume einer
-  // Schule - NUR nach Fertig-Zeitpunkt in der Zukunft, bewusst OHNE das "running"-Flag zu
-  // verlangen: ein per verzoegertem Start eingeplanter Lehrgang hat schon einen echten
-  // finish_time in der Zukunft, obwohl "running" noch false ist (per Test bestaetigt) - der
-  // Klassenraum ist trotzdem schon belegt/reserviert, das Flag hinkt hier also hinterher statt
-  // umgekehrt.
   function countOccupiedRooms(schoolingRuns, schoolId) {
     const now = Date.now();
-    return schoolingRuns.filter(
-      run => String(run.building_id) === String(schoolId) && new Date(run.finish_time).getTime() > now,
-    ).length;
+    return schoolingRuns.filter(run => String(run.building_id) === String(schoolId) && new Date(run.finish_time).getTime() > now).length;
   }
-
-  // Fruehester Fertig-Zeitpunkt unter den (auch per verzoegertem Start) belegten
-  // Klassenraeumen einer Schule (oder null, falls keiner belegt ist) - fuer die Anzeige
-  // "belegt bis ..." statt nur "belegt".
   function earliestSchoolingFinish(schoolingRuns, schoolId) {
     const now = Date.now();
-    const finishTimes = schoolingRuns
-      .filter(run => String(run.building_id) === String(schoolId))
-      .map(run => new Date(run.finish_time).getTime())
-      .filter(t => t > now);
+    const finishTimes = schoolingRuns.filter(run => String(run.building_id) === String(schoolId)).map(run => new Date(run.finish_time).getTime()).filter(t => t > now);
     return finishTimes.length ? Math.min(...finishTimes) : null;
   }
-
-  // Laedt die Personal-Auswahl EINER Wache fuer den Lehrgang-Tab (eigene AJAX-Anfrage im
-  // Spiel selbst, siehe personal-select-heading href) und liefert alle Personen, die diese
-  // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
-  // haben (echte Vor-Ort-Daten statt der ggf. veralteten Scan-Zahlen).
-  //
-  // Diese Auswahl-Seite kennt aber NUR den einen hier gesuchten Slug - ob eine Person schon
-  // eine ANDERE Ausbildung hat oder gerade "Im Unterricht"/"Im Einsatz" ist, weiss sie nicht
-  // (per Live-Test bestaetigt: genau das fuehrte dazu, dass eine Person mit bereits einer
-  // Ausbildung zusaetzlich fuer eine zweite eingeteilt wurde). Deshalb zusaetzlich die normale
-  // Personal-Seite derselben Wache abfragen (parsePersonalPageHtml, dieselbe Quelle wie beim
-  // Personal-Check-Scan) und ueber die Personal-ID abgleichen (beide Checkboxen - "schooling_
-  // checkbox" hier und "personal-delete-checkbox" auf der Personal-Seite - tragen dieselbe
-  // echte Personal-ID als value, per Live-Diagnose bestaetigt): nur wer dort GAR KEINE
-  // Ausbildung hat UND als "Verfuegbar" gilt, bleibt uebrig. Keine passende ID gefunden
-  // schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
   async function fetchAvailablePersonnelForEducation(stationId, slug) {
-    const [selectRes, personalHtml] = await Promise.all([
-      fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" }),
-      fetchPersonalPage(stationId),
-    ]);
+    const [selectRes, personalHtml] = await Promise.all([ fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, {
+      credentials: "same-origin"
+    }), fetchPersonalPage(stationId) ]);
     if (!selectRes.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${selectRes.status}).`);
-    const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [e.id, e]));
-
-    const doc = new DOMParser().parseFromString(await selectRes.text(), "text/html");
-    return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
-      .filter(cb => cb.getAttribute(slug) === "false")
-      .map(cb => ({
-        id: cb.value,
-        name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value,
-      }))
-      .filter(p => {
-        const entry = statusById.get(p.id);
-        return !!entry && entry.slugs.length === 0 && entry.statusText.trim() === "Verfügbar";
-      });
+    const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [ e.id, e ]));
+    const doc = (new DOMParser).parseFromString(await selectRes.text(), "text/html");
+    return [ ...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`) ].filter(cb => cb.getAttribute(slug) === "false").map(cb => ({
+      id: cb.value,
+      name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value
+    })).filter(p => {
+      const entry = statusById.get(p.id);
+      return !!entry && entry.slugs.length === 0 && entry.statusText.trim() === "Verfügbar";
+    });
   }
-
-  // Ermittelt fuer einen Bedarf (eine Kategorie+Ausbildung, ueber ggf. mehrere Wachen) an
-  // einer gewaehlten Schule GENAU, wer ausgebildet wuerde, OHNE etwas abzuschicken - Raeume/
-  // Lehrgang ermitteln, je Wache (groesster Mangel zuerst) so viele freie Personen wie noetig
-  // einsammeln (bis zur tatsaechlich freien Kapazitaet). Grundlage fuer die eigene
-  // Bestaetigungs-Ansicht (siehe renderSchoolingConfirmScreen) statt eines blossen
-  // Browser-confirm() - der Spieler soll VOR dem Klick exakt sehen, wer betroffen ist.
   async function planTrainingRun(need, school) {
     const schoolId = school.id;
     const schoolingRuns = await fetchSchoolingRuns();
     const occupied = countOccupiedRooms(schoolingRuns, schoolId);
-    // freeRooms fuer die Zuteilung kommt aus der ECHTEN Raumzahl der Schule (school.maxRooms,
-    // siehe countSchoolClassrooms) statt aus der Raum-Auswahl im Formular - die HTML-Anfrage
-    // hier liefert weiterhin authenticityToken/educationValue, die es nur im echten Formular
-    // gibt.
     const freeRooms = Math.max(0, school.maxRooms - occupied);
     if (freeRooms <= 0) {
       throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
     }
-    const { authenticityToken, educationValue, educationLabel } = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
-
+    const {authenticityToken: authenticityToken, educationValue: educationValue, educationLabel: educationLabel} = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
     const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(need.totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
     const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
-
-    const stationsByDeficit = [...need.stations].sort((a, b) => b.deficit - a.deficit);
+    const stationsByDeficit = [ ...need.stations ].sort((a, b) => b.deficit - a.deficit);
     const selectedByStation = [];
     for (const station of stationsByDeficit) {
       const alreadySelected = selectedByStation.reduce((sum, s) => sum + s.people.length, 0);
@@ -5427,108 +3925,61 @@
       if (takeCount <= 0) continue;
       const available = await fetchAvailablePersonnelForEducation(station.id, need.slug);
       const people = available.slice(0, takeCount);
-      if (people.length) selectedByStation.push({ stationId: station.id, stationName: station.name, people });
+      if (people.length) selectedByStation.push({
+        stationId: station.id,
+        stationName: station.name,
+        people: people
+      });
     }
-
     const selected = selectedByStation.flatMap(s => s.people);
     if (!selected.length) {
-      throw new Error(
-        "Kein verfügbares Personal gefunden (ohne jede Ausbildung und als \"Verfügbar\" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig ausgebildet).",
-      );
+      throw new Error('Kein verfügbares Personal gefunden (ohne jede Ausbildung und als "Verfügbar" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig ausgebildet).');
     }
-
     const actualRooms = Math.min(freeRooms, Math.max(1, Math.ceil(selected.length / SCHOOLING_SEATS_PER_ROOM)));
     const durationDays = parseEducationDurationDays(educationLabel);
-    const finishEstimate = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000) : null;
-
+    const finishEstimate = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1e3) : null;
     return {
-      schoolId,
-      authenticityToken,
-      educationValue,
-      educationLabel,
-      durationDays,
-      finishEstimate,
-      actualRooms,
-      selectedByStation,
-      selected,
+      schoolId: schoolId,
+      authenticityToken: authenticityToken,
+      educationValue: educationValue,
+      educationLabel: educationLabel,
+      durationDays: durationDays,
+      finishEstimate: finishEstimate,
+      actualRooms: actualRooms,
+      selectedByStation: selectedByStation,
+      selected: selected
     };
   }
-
-  // Schickt einen zuvor mit planTrainingRun() erstellten, vom Spieler bestaetigten Plan
-  // tatsaechlich ab (das echte Ausbilden-Formular der Schule).
   async function submitTrainingRun(plan) {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams;
     params.append("utf8", "✓");
     params.append("authenticity_token", plan.authenticityToken);
     params.append("building_rooms_use", String(plan.actualRooms));
     params.append("education_select", plan.educationValue);
-    params.append("alliance[duration]", "0"); // 0 = direkt starten, keine Verbandsfreigabe
+    params.append("alliance[duration]", "0");
     params.append("alliance[cost]", "0");
     plan.selected.forEach(p => params.append("personal_ids[]", p.id));
-
     const res = await fetchWithTimeout(`/buildings/${plan.schoolId}/education`, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
     });
-    // Erfolg = echte Weiterleitung (redirect_to der Rails-Action). Ohne Weiterleitung wird
-    // stattdessen das Formular mit einer Fehlermeldung neu gerendert (z.B. keine freien
-    // Plaetze mehr) - das ist trotz HTTP 200 KEIN Erfolg.
     if (!res.ok || !res.redirected) {
       throw new Error(`Ausbildung wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
     }
   }
-
-  // Eigene Bestaetigungs-Ansicht statt eines blossen Browser-confirm() - zeigt GENAU, wer
-  // (aus welcher Wache, wie viele) zu welchem Lehrgang an welche Schule geschickt wird und
-  // eine Fertig-Schaetzung, bevor tatsaechlich etwas an das Spiel abgeschickt wird.
-  function renderSchoolingConfirmScreen({ need, school, qualificationName, plan, goBack }) {
+  function renderSchoolingConfirmScreen({need: need, school: school, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
-
-    const stationRows = plan.selectedByStation
-      .map(
-        s => `
-          <tr>
-            <td>${escapeHtml(s.stationName)}</td>
-            <td>${s.people.length}</td>
-          </tr>
-        `,
-      )
-      .join("");
-
-    const finishLabel = plan.finishEstimate
-      ? plan.finishEstimate.toLocaleString("de-DE", { dateStyle: "medium", timeStyle: "short" })
-      : "unbekannt (Lehrgangsdauer nicht erkannt)";
-
-    body.innerHTML = `
-      <p>
-        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>
-        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}
-      </p>
-      <table class="table table-condensed table-striped" style="font-size:12px;">
-        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>
-        <tbody>${stationRows}</tbody>
-      </table>
-      <p>
-        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>
-        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.
-      </p>
-      <p class="text-muted" style="font-size:12px;">
-        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.
-      </p>
-      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen
-        </button>
-      </div>
-    `;
-
+    const stationRows = plan.selectedByStation.map(s => `\n          <tr>\n            <td>${escapeHtml(s.stationName)}</td>\n            <td>${s.people.length}</td>\n          </tr>\n        `).join("");
+    const finishLabel = plan.finishEstimate ? plan.finishEstimate.toLocaleString("de-DE", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }) : "unbekannt (Lehrgangsdauer nicht erkannt)";
+    body.innerHTML = `\n      <p>\n        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>\n        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <p>\n        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>\n        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-confirm-schooling").addEventListener("click", async () => {
       const confirmBtn = document.getElementById("vn-btn-confirm-schooling");
@@ -5542,9 +3993,7 @@
         await logHistoryEntry({
           type: "schooling_start",
           label: qualificationName,
-          // Personal-ID statt Name, damit der Nutzer die Zuweisung im Spiel (/personals/{id})
-          // direkt nachpruefen kann.
-          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`,
+          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`
         });
         statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
         setTimeout(goBack, 600);
@@ -5555,53 +4004,32 @@
       }
     });
   }
-
   async function renderSchoolingScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Schulungen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Bedarf ...</p>`;
-
     let stations, schoolsByCategory;
     try {
-      [stations, schoolsByCategory] = await Promise.all([loadPersonnelCheckStations(), loadOwnedSchoolsByCategory()]);
+      [stations, schoolsByCategory] = await Promise.all([ loadPersonnelCheckStations(), loadOwnedSchoolsByCategory() ]);
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-        </div>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
-
     body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
     await ensureFreshPersonnelScan((done, of) => {
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
-
     const requirements = await computePersonnelRequirementsFromBlueprints();
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const qualifications = await getPersonnelQualifications();
     let minStaff = await getPersonnelSchoolingMinStaff();
-
-    // Schule je Kategorie ist fix fuer den ganzen Bildschirm (welche konkrete Schule genutzt
-    // wird, ist egal - siehe pickSchoolForCategory) - Kapazitaet/Auslastung nur einmal pro
-    // tatsaechlich benoetigter Schule laden, nicht pro Zeile.
     const schoolByCategory = {};
     for (const category of Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY)) {
       schoolByCategory[category] = pickSchoolForCategory(schoolsByCategory, category);
     }
-    // Raumzahl kommt jetzt direkt aus den ECHTEN Ausbauten der Schule (school.maxRooms, siehe
-    // countSchoolClassrooms) statt aus der Raum-Auswahl im Lehrgangs-Formular - die existiert
-    // im HTML naemlich nur, wenn gerade ein Raum frei ist, und war deshalb als Quelle fuer die
-    // GESAMTZAHL ungeeignet (siehe fetchSchoolPageInfo). Belegte Raeume kommen weiterhin aus
-    // /api/schoolings (countOccupiedRooms) - kein HTML-Scraping mehr fuer die Uebersicht
-    // noetig.
     const capacityBySchoolId = {};
     let schoolingRuns = [];
     try {
@@ -5614,15 +4042,17 @@
       const occupied = countOccupiedRooms(schoolingRuns, school.id);
       const freeRooms = Math.max(0, school.maxRooms - occupied);
       const nextFreeAt = earliestSchoolingFinish(schoolingRuns, school.id);
-      capacityBySchoolId[school.id] = { maxRooms: school.maxRooms, freeRooms, nextFreeAt };
+      capacityBySchoolId[school.id] = {
+        maxRooms: school.maxRooms,
+        freeRooms: freeRooms,
+        nextFreeAt: nextFreeAt
+      };
     }
-
     let needs = [];
     function recomputeNeeds() {
       needs = computeTrainingNeeds(stations, requirements, scanData, minStaff);
     }
     recomputeNeeds();
-
     function capacityLabel(school) {
       if (!school) return `<span class="text-muted">Keine eigene Schule</span>`;
       const info = capacityBySchoolId[school.id];
@@ -5632,127 +4062,40 @@
       }
       const freeSeats = info.freeRooms * SCHOOLING_SEATS_PER_ROOM;
       const untilLabel = info.nextFreeAt ? ` (bis ${new Date(info.nextFreeAt).toLocaleString("de-DE")})` : "";
-      const statusBadge =
-        info.freeRooms > 0
-          ? `<span class="label label-success">${info.freeRooms}/${info.maxRooms} Klassenräume frei (${freeSeats} Plätze)</span>`
-          : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt${escapeHtml(untilLabel)}</span>`;
+      const statusBadge = info.freeRooms > 0 ? `<span class="label label-success">${info.freeRooms}/${info.maxRooms} Klassenräume frei (${freeSeats} Plätze)</span>` : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt${escapeHtml(untilLabel)}</span>`;
       return `${escapeHtml(school.name)} · ${statusBadge}`;
     }
-
-    // Kompakte Uebersicht ALLER eigenen Schulen samt Auslastung, unabhaengig davon, ob es
-    // gerade einen Bedarf gibt - immer ganz oben sichtbar (anders als die Gruppen weiter
-    // unten, die nur bei tatsaechlichem Personalmangel auftauchen).
     function renderSchoolOverview() {
       const categoriesWithSchool = CATEGORY_ORDER.filter(cat => schoolByCategory[cat]);
       if (!categoriesWithSchool.length) return "";
-      const cards = categoriesWithSchool
-        .map(
-          category => `
-            <div class="vn-settings-card" style="flex:1; min-width:220px;">
-              <b>${escapeHtml(category)}</b><br>
-              <small>${capacityLabel(schoolByCategory[category])}</small>
-            </div>
-          `,
-        )
-        .join("");
+      const cards = categoriesWithSchool.map(category => `\n            <div class="vn-settings-card" style="flex:1; min-width:220px;">\n              <b>${escapeHtml(category)}</b><br>\n              <small>${capacityLabel(schoolByCategory[category])}</small>\n            </div>\n          `).join("");
       return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
     }
-
     function renderGroups() {
       if (!needs.length) {
         return `<p class="text-muted">Kein fehlendes Personal gefunden (oder noch nicht gescannt).</p>`;
       }
-      const byCategory = new Map();
+      const byCategory = new Map;
       for (const need of needs) {
         if (!byCategory.has(need.category)) byCategory.set(need.category, []);
         byCategory.get(need.category).push(need);
       }
-
-      return CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map(category => {
-          const school = schoolByCategory[category];
-          const categoryNeeds = byCategory
-            .get(category)
-            .sort((a, b) =>
-              (qualifications[a.slug] || a.slug).localeCompare(qualifications[b.slug] || b.slug, "de"),
-            );
-
-          const rows = categoryNeeds
-            .map(need => {
-              const qualificationName = qualifications[need.slug] || need.slug;
-              const stationTitle = need.stations.map(s => `${s.name} (${s.deficit} fehlen)`).join(", ");
-              const needKey = `${need.category}::${need.slug}`;
-              return `
-                <tr>
-                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>
-                  <td style="vertical-align:middle;" title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>
-                  <td style="vertical-align:middle;">
-                    <button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" ${school ? "" : "disabled"}>
-                      <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden
-                    </button>
-                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>
-                  </td>
-                </tr>
-              `;
-            })
-            .join("");
-
-          return `
-            <div style="margin-bottom:16px;">
-              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>
-              <table class="table table-condensed table-striped" style="font-size:12px;">
-                <thead>
-                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>
-                </thead>
-                <tbody>${rows}</tbody>
-              </table>
-            </div>
-          `;
-        })
-        .join("");
+      return CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
+        const school = schoolByCategory[category];
+        const categoryNeeds = byCategory.get(category).sort((a, b) => (qualifications[a.slug] || a.slug).localeCompare(qualifications[b.slug] || b.slug, "de"));
+        const rows = categoryNeeds.map(need => {
+          const qualificationName = qualifications[need.slug] || need.slug;
+          const stationTitle = need.stations.map(s => `${s.name} (${s.deficit} fehlen)`).join(", ");
+          const needKey = `${need.category}::${need.slug}`;
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;" title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>\n                  <td style="vertical-align:middle;">\n                    <button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" ${school ? "" : "disabled"}>\n                      <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden\n                    </button>\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+        }).join("");
+        return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
+      }).join("");
     }
-
     function render() {
-      body.innerHTML = `
-        <p class="text-muted" style="font-size:12px;">
-          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven
-          Wachenbauplan) und startet echte Lehrgänge - Personal steht währenddessen nicht für
-          Einsätze zur Verfügung, Anzahl vorher prüfen.
-        </p>
-        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>
-        <div class="form-inline" style="margin-bottom:10px;">
-          <label for="vn-schooling-min-staff" style="font-size:12px;">
-            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?
-          </label>
-          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"
-                 value="${minStaff}" style="width:70px; margin-left:8px;">
-        </div>
-        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>
-        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">
-            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten
-          </button>
-          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">
-            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-          </button>
-          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">
-            ${
-              scanMeta.lastScanAt
-                ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}`
-                : "Noch nie gescannt"
-            }
-          </span>
-        </div>
-      `;
-
+      body.innerHTML = `\n        <p class="text-muted" style="font-size:12px;">\n          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven\n          Wachenbauplan) und startet echte Lehrgänge - Personal steht währenddessen nicht für\n          Einsätze zur Verfügung, Anzahl vorher prüfen.\n        </p>\n        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>\n        <div class="form-inline" style="margin-bottom:10px;">\n          <label for="vn-schooling-min-staff" style="font-size:12px;">\n            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?\n          </label>\n          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"\n                 value="${minStaff}" style="width:70px; margin-left:8px;">\n        </div>\n        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>\n        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n          </button>\n          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n          </button>\n          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">\n            ${scanMeta.lastScanAt ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}` : "Noch nie gescannt"}\n          </span>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
-      document
-        .getElementById("vn-schooling-goto-blueprints")
-        .addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingScreen(goBack)));
-
+      document.getElementById("vn-schooling-goto-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingScreen(goBack)));
       document.getElementById("vn-schooling-min-staff").addEventListener("change", async e => {
         minStaff = Math.max(0, parseInt(e.target.value, 10) || 0);
         await storeData(minStaff, PERSONNEL_SCHOOLING_MIN_STAFF_KEY);
@@ -5760,7 +4103,6 @@
         document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
         wireStartButtons();
       });
-
       document.getElementById("vn-schooling-scan-btn").addEventListener("click", async () => {
         const btn = document.getElementById("vn-schooling-scan-btn");
         const statusEl = document.getElementById("vn-schooling-scan-status");
@@ -5781,10 +4123,8 @@
           btn.disabled = false;
         }
       });
-
       wireStartButtons();
     }
-
     function wireStartButtons() {
       body.querySelectorAll(".vn-schooling-start").forEach(btn => {
         btn.addEventListener("click", async () => {
@@ -5794,17 +4134,16 @@
           if (!school) return;
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
           const qualificationName = qualifications[need.slug] || need.slug;
-
           btn.disabled = true;
           statusEl.textContent = "Lade Vorschau ...";
           try {
             const plan = await planTrainingRun(need, school);
             renderSchoolingConfirmScreen({
-              need,
-              school,
-              qualificationName,
-              plan,
-              goBack: () => renderSchoolingScreen(goBack),
+              need: need,
+              school: school,
+              qualificationName: qualificationName,
+              plan: plan,
+              goBack: () => renderSchoolingScreen(goBack)
             });
           } catch (e) {
             statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
@@ -5813,64 +4152,44 @@
         });
       });
     }
-
     render();
   }
-
-  //////////////////////////////////////////////////
-  // Statistik: reiner Ueberblick, wie viele Wachen je Gebaeudetyp und Leitstelle vorhanden
-  // sind, dazu Fahrzeug- und Personalzahlen - hilft z.B. VOR dem Anlegen eines Wachen-
-  // Bauplans zu sehen, ob man den gewaehlten Gebaeudetyp (z.B. "Feuerwache (Kleinwache)")
-  // ueberhaupt besitzt. Nutzt bewusst dieselben Datenquellen wie Wachenausbau/Personal-Check
-  // (loadBuildingsForCheck/fetchAllVehiclesV2/Personal-Scan), keine eigene Logik noetig.
-  // Personalzahlen gibt es nur fuer Gebaeudetypen mit trainierbarem Personal (Feuerwehr/
-  // Rettungsdienst/Polizei/THW & Co.) - Krankenhaeuser, Schulen, Leitstellen & Sonstiges
-  // zeigen dafuer "-", da es dort keinen Personal-Scan gibt (siehe loadPersonnelCheckStations).
-  //////////////////////////////////////////////////
-
   async function renderStationStatisticsScreen() {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Statistik");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
-
     let allStations, vehicles;
     try {
-      [allStations, vehicles] = await Promise.all([loadBuildingsForCheck(), fetchAllVehiclesV2()]);
+      [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2() ]);
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-        </div>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
-
     body.innerHTML = `<p>Prüfe letzten Personal-Scan ...</p>`;
     await ensureFreshPersonnelScan((done, of) => {
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
     const scanData = await getPersonnelScanData();
     const scanMeta = await getPersonnelScanMeta();
-
-    const vehicleCountByStation = new Map();
+    const vehicleCountByStation = new Map;
     for (const v of vehicles) {
       const stationId = String(v.building_id ?? v.building);
       vehicleCountByStation.set(stationId, (vehicleCountByStation.get(stationId) || 0) + 1);
     }
-
-    // Verschachtelt: Leitstelle -> Gebaeudetyp -> {stations, vehicles, personnel, hasScan}
-    const byLeitstelle = new Map();
+    const byLeitstelle = new Map;
     for (const s of allStations) {
       const leitstelleKey = s.leitstelleName || "Ohne Leitstelle";
-      if (!byLeitstelle.has(leitstelleKey)) byLeitstelle.set(leitstelleKey, new Map());
+      if (!byLeitstelle.has(leitstelleKey)) byLeitstelle.set(leitstelleKey, new Map);
       const byType = byLeitstelle.get(leitstelleKey);
       const typeKey = s.typeName || "Unbekannter Gebäudetyp";
-      if (!byType.has(typeKey)) byType.set(typeKey, { stations: 0, vehicles: 0, personnel: 0, hasScan: false });
+      if (!byType.has(typeKey)) byType.set(typeKey, {
+        stations: 0,
+        vehicles: 0,
+        personnel: 0,
+        hasScan: false
+      });
       const entry = byType.get(typeKey);
       entry.stations++;
       entry.vehicles += vehicleCountByStation.get(s.id) || 0;
@@ -5880,141 +4199,53 @@
         entry.hasScan = true;
       }
     }
-
     let grandStations = 0;
     let grandVehicles = 0;
     let grandPersonnel = 0;
-
-    const sections = [...byLeitstelle.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], "de"))
-      .map(([leitstelleName, byType]) => {
-        let sectionStations = 0;
-        let sectionVehicles = 0;
-        let sectionPersonnel = 0;
-        const rows = [...byType.entries()]
-          .sort((a, b) => a[0].localeCompare(b[0], "de"))
-          .map(([typeName, entry]) => {
-            sectionStations += entry.stations;
-            sectionVehicles += entry.vehicles;
-            sectionPersonnel += entry.personnel;
-            return `
-              <tr>
-                <td>${escapeHtml(typeName)}</td>
-                <td>${entry.stations}</td>
-                <td>${entry.vehicles}</td>
-                <td>${entry.hasScan ? entry.personnel : "-"}</td>
-              </tr>
-            `;
-          })
-          .join("");
-        grandStations += sectionStations;
-        grandVehicles += sectionVehicles;
-        grandPersonnel += sectionPersonnel;
-        return `
-          <div class="panel panel-default" style="margin-bottom:8px;">
-            <div class="panel-heading" style="padding:8px 12px;">
-              <b>${escapeHtml(leitstelleName)}</b>
-              <span class="text-muted">(${sectionStations} Wachen, ${sectionVehicles} Fahrzeuge, ${sectionPersonnel} Personal)</span>
-            </div>
-            <div class="panel-body" style="padding:0;">
-              <table class="table table-condensed table-striped" style="font-size:12px; margin-bottom:0;">
-                <thead><tr><th>Gebäudetyp</th><th>Wachen</th><th>Fahrzeuge</th><th>Personal</th></tr></thead>
-                <tbody>${rows}</tbody>
-              </table>
-            </div>
-          </div>
-        `;
-      })
-      .join("");
-
-    const lastScanLabel = scanMeta.lastScanAt
-      ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
-      : "Personal noch nie gescannt";
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Wachen je Gebäudetyp, gruppiert nach Leitstelle. Personal nur für Gebäudetypen mit
-        Ausbildungs-Personal (Feuerwehr, Rettungsdienst, Polizei, THW &amp; Co.) - "-" bedeutet
-        kein Personal-Scan möglich/vorhanden.
-      </p>
-      <p class="text-muted" style="font-size:12px;">
-        <b>Gesamt:</b> ${grandStations} Wachen, ${grandVehicles} Fahrzeuge, ${grandPersonnel} Personal
-      </p>
-      <div style="max-height:55vh; overflow:auto;">
-        ${sections || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
-      </div>
-      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <span class="text-muted" style="font-size:11px;">${escapeHtml(lastScanLabel)}</span>
-      </div>
-    `;
-
+    const sections = [ ...byLeitstelle.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([leitstelleName, byType]) => {
+      let sectionStations = 0;
+      let sectionVehicles = 0;
+      let sectionPersonnel = 0;
+      const rows = [ ...byType.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([typeName, entry]) => {
+        sectionStations += entry.stations;
+        sectionVehicles += entry.vehicles;
+        sectionPersonnel += entry.personnel;
+        return `\n              <tr>\n                <td>${escapeHtml(typeName)}</td>\n                <td>${entry.stations}</td>\n                <td>${entry.vehicles}</td>\n                <td>${entry.hasScan ? entry.personnel : "-"}</td>\n              </tr>\n            `;
+      }).join("");
+      grandStations += sectionStations;
+      grandVehicles += sectionVehicles;
+      grandPersonnel += sectionPersonnel;
+      return `\n          <div class="panel panel-default" style="margin-bottom:8px;">\n            <div class="panel-heading" style="padding:8px 12px;">\n              <b>${escapeHtml(leitstelleName)}</b>\n              <span class="text-muted">(${sectionStations} Wachen, ${sectionVehicles} Fahrzeuge, ${sectionPersonnel} Personal)</span>\n            </div>\n            <div class="panel-body" style="padding:0;">\n              <table class="table table-condensed table-striped" style="font-size:12px; margin-bottom:0;">\n                <thead><tr><th>Gebäudetyp</th><th>Wachen</th><th>Fahrzeuge</th><th>Personal</th></tr></thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          </div>\n        `;
+    }).join("");
+    const lastScanLabel = scanMeta.lastScanAt ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}` : "Personal noch nie gescannt";
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Wachen je Gebäudetyp, gruppiert nach Leitstelle. Personal nur für Gebäudetypen mit\n        Ausbildungs-Personal (Feuerwehr, Rettungsdienst, Polizei, THW &amp; Co.) - "-" bedeutet\n        kein Personal-Scan möglich/vorhanden.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        <b>Gesamt:</b> ${grandStations} Wachen, ${grandVehicles} Fahrzeuge, ${grandPersonnel} Personal\n      </p>\n      <div style="max-height:55vh; overflow:auto;">\n        ${sections || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <span class="text-muted" style="font-size:11px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
   }
-
-  //////////////////////////////////////////////////
-  // Fahrzeug-Besatzung: manche Fahrzeugtypen brauchen eine KOMPLETT mit einer bestimmten
-  // Ausbildung besetzte Besatzung (z.B. ELW 2 - jeder an Bord braucht den ELW-2-Lehrgang,
-  // nicht nur der "Fahrer"). Weist dafuer verfuegbares, passend ausgebildetes Personal ueber
-  // die echte Fahrzeug-Zuweisungsseite zu (/vehicles/{id}/zuweisung, dieselbe Seite wie im
-  // Spiel unter "Besatzung zuweisen") und korrigiert danach den FMS-Status: FMS 6 (nicht
-  // besetzt), wenn nicht alle Plaetze mit passendem Personal belegt sind, sonst FMS 2 (frei
-  // auf Funk) - verhindert, dass ein Fahrzeug ohne die noetige Ausbildung zu einem Einsatz
-  // ausrueckt, UND dass diese Personen versehentlich einem anderen Fahrzeug zugeteilt werden.
-  //
-  // Woher welche Fahrzeugtypen eine Ausbildung brauchen, kommt NICHT mehr aus einer von Hand
-  // gepflegten Liste, sondern direkt aus dem ohnehin schon geladenen Katalog von
-  // api.lss-manager.de (vehicleTypeCatalog, siehe initVehicleTypeCaptions()) - der enthaelt
-  // je Fahrzeugtyp "staff.training" mit echten Slugs UND ob ALLE zugewiesenen Personen die
-  // Ausbildung brauchen ({all:true}, z.B. ELW 2) oder nur ein Teil davon ({min:N}, z.B. GRTW
-  // braucht nur 1 von 6 mit Notarzt-Ausbildung - der Rest darf beliebiges Personal sein).
-  // Manche Fahrzeuge (z.B. Dekon-P) brauchen die Ausbildung nur IRGENDWO am Einsatzort
-  // ("trainingAtScene"), nicht in der eigenen Besatzung - die werden hier bewusst ausgeschlossen,
-  // ebenso Anhaenger ohne eigene Besatzung (staff.max = 0).
-  //
-  // Die Zuweisungs-Logik (Ablauf/Klassen/Spaltenaufbau der Zuweisungs-Seite) ist vom
-  // Community-Script "Personalzuweiser" (BOS-Ernie) uebernommen, der FMS-Ablauf (welcher
-  // Status wann gesetzt wird) vom Community-Script "FMS6" (LaLeLu4153) - beide bedienen
-  // genau diese beiden Spiel-Funktionen bereits erfolgreich.
-  //////////////////////////////////////////////////
-
-  // Liefert je Fahrzeugtyp die Liste der benoetigten Ausbildungs-Slugs (min: null = ALLE
-  // zugewiesenen Personen brauchen den Slug, min: <Zahl> = nur so viele davon) sowie die
-  // echte Mindest-/Maximalbesatzung - oder null, wenn der Typ keine besondere Ausbildung fuer
-  // seine EIGENE Besatzung braucht.
   function getVehicleTypeRequirement(vehicleTypeId) {
     const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
     if (!staff?.training || staff.trainingAtScene || !staff.max) return null;
-
     const requirements = [];
     for (const categoryTrainings of Object.values(staff.training)) {
       for (const [slug, spec] of Object.entries(categoryTrainings)) {
         const min = spec.all ? null : Number(spec.min) || 0;
-        if (min === 0) continue; // z.B. Dekon-P: min:0 = keine Anforderung an die eigene Besatzung
+        if (min === 0) continue;
         const existing = requirements.find(r => r.slug === slug);
-        if (!existing) requirements.push({ slug, min });
-        else if (existing.min !== null && (min === null || min > existing.min)) existing.min = min;
+        if (!existing) requirements.push({
+          slug: slug,
+          min: min
+        }); else if (existing.min !== null && (min === null || min > existing.min)) existing.min = min;
       }
     }
     if (!requirements.length) return null;
-
-    return { requirements, staffMin: staff.min, staffMax: staff.max };
+    return {
+      requirements: requirements,
+      staffMin: staff.min,
+      staffMax: staff.max
+    };
   }
-
-  // Wie getVehicleTypeRequirement(), aber fuer die BAUPLAN-PERSONALPLANUNG (Personal-Check/
-  // Schulungen, "Benoetigtes Personal" im Bauplan-Editor) statt die echte Fahrzeug-Besatzung:
-  // eine Anforderung mit min:0 (z.B. Dekon-P - die Ausbildung wird an der Schule gebraucht,
-  // nicht in der eigenen Besatzung) bedeutet fuer die eigene Besatzung zwar "keine Pflicht",
-  // im Account muss trotzdem MINDESTENS eine ausgebildete Person vorhanden sein - deshalb hier
-  // min:1 statt komplettem Wegfall, mit staffMax als Obergrenze (statt wie bei
-  // getVehicleTypeRequirement() ganz zu verschwinden). "all"-Anforderungen (min:null) liefern
-  // ein Fenster von staffMin bis staffMax, echte Teil-Anforderungen (min:N>0) bleiben fest bei N.
   function getBlueprintTrainingRequirement(vehicleTypeId) {
     const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
     if (!staff?.training || !staff.max) return null;
-
     const requirements = [];
     for (const categoryTrainings of Object.values(staff.training)) {
       for (const [slug, spec] of Object.entries(categoryTrainings)) {
@@ -6028,121 +4259,87 @@
           max = rawMin || staff.max;
         }
         const existing = requirements.find(r => r.slug === slug);
-        if (!existing) requirements.push({ slug, min, max });
-        else {
+        if (!existing) requirements.push({
+          slug: slug,
+          min: min,
+          max: max
+        }); else {
           existing.min = Math.max(existing.min, min);
           existing.max = Math.max(existing.max, max);
         }
       }
     }
     if (!requirements.length) return null;
-
-    return { requirements };
+    return {
+      requirements: requirements
+    };
   }
-
-  // FMS-Stati, bei denen ein Fahrzeug "an der Wache" ist (einsatzbereit auf Wache/Funk, oder
-  // schon als nicht besetzt markiert) - NUR in diesem Zustand wird je eingegriffen. Alles
-  // andere (Anfahrt, am Einsatzort, Patiententransport, ...) wird NIE angefasst, damit nie
-  // versehentlich in einen laufenden Einsatz eingegriffen wird.
-  const VEHICLE_FMS_AT_STATION = new Set([1, 2, 6]);
+  const VEHICLE_FMS_AT_STATION = new Set([ 1, 2, 6 ]);
   const VEHICLE_FMS_NOT_STAFFED = 6;
   const VEHICLE_FMS_READY = 2;
-
-  // Wie getVehicleTypeRequirement(), aber liefert auch fuer FAHRZEUGE OHNE Ausbildungs-
-  // anforderung (normale Loeschfahrzeuge, RTW, ...) ein Ergebnis (requirements: leeres Array)
-  // statt null - solange sie ueberhaupt eine eigene Besatzung haben (staff.max > 0, schliesst
-  // reine Anhaenger/Geraetefahrzeuge ohne Besatzung aus). Grundlage fuer die "Normale
-  // Fahrzeuge einbeziehen"-Option der Fahrzeug-Besatzung (siehe loadCrewCheckVehicles).
   function getVehicleTypeCrewTarget(vehicleTypeId) {
     const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
     if (!staff?.max) return null;
     const requirement = getVehicleTypeRequirement(vehicleTypeId);
     if (requirement) return requirement;
-    return { requirements: [], staffMin: staff.min, staffMax: staff.max };
+    return {
+      requirements: [],
+      staffMin: staff.min,
+      staffMax: staff.max
+    };
   }
-
-  // Alle Ausbildungs-Slugs, die IRGENDEIN Fahrzeugtyp als Besatzungs-Anforderung braucht (z.B.
-  // Notarzt fuer NAW/RTW-Sonderfahrzeuge) - Grundlage dafuer, bei normalen Fahrzeugen (siehe
-  // assignAnyPersonnelToVehicle) genau DIESES Personal zu schonen. Wird nicht gecacht, da
-  // vehicleTypeCatalog sich innerhalb einer Sitzung praktisch nie aendert und die Liste mit
-  // ~180 Eintraegen trivial billig zu berechnen ist.
   function getSpecialTrainingSlugs() {
-    const slugs = new Set();
+    const slugs = new Set;
     for (const typeId of Object.keys(vehicleTypeCatalog)) {
       const requirement = getVehicleTypeRequirement(Number(typeId));
       if (requirement) for (const req of requirement.requirements) slugs.add(req.slug);
     }
     return slugs;
   }
-
-  // Laedt ALLE Fahrzeuge mit eigener Besatzung (staff.max > 0) - inklusive normaler
-  // Fahrzeuge ohne Ausbildungsanforderung (Feld "special": false). Ob normale Fahrzeuge in
-  // der Anzeige/beim Zuweisen tatsaechlich beruecksichtigt werden, entscheidet erst die UI
-  // (Checkbox "Normale Fahrzeuge einbeziehen", siehe renderVehicleCrewScreen) - hier wird
-  // bewusst IMMER die volle Liste geladen, damit das Umschalten der Checkbox keinen erneuten
-  // Server-Roundtrip braucht.
   async function loadCrewCheckVehicles() {
-    const [vehicles, buildings] = await Promise.all([fetchAllVehiclesV2(), fetchJSON("/api/buildings")]);
-    const buildingsById = new Map(buildings.map(b => [String(b.id), b]));
-    return vehicles
-      .map(v => {
-        const typeId = v.vehicle_type ?? v.type;
-        const info = getVehicleTypeCrewTarget(typeId);
-        if (!info) return null;
-        const stationId = String(v.building_id ?? v.building);
-        const station = buildingsById.get(stationId);
-        const leitstelleId = station?.leitstelle_building_id != null ? String(station.leitstelle_building_id) : "none";
-        const leitstelleBuilding = leitstelleId !== "none" ? buildingsById.get(leitstelleId) : null;
-        return {
-          id: String(v.id),
-          caption: v.caption || `Fahrzeug ${v.id}`,
-          requirements: info.requirements,
-          staffMin: info.staffMin,
-          staffMax: info.staffMax,
-          special: info.requirements.length > 0,
-          category: station ? categoryForBuilding(station) : "Unbekannt",
-          stationId,
-          stationName: station?.caption || `Wache ${stationId}`,
-          leitstelleId,
-          leitstelleName: leitstelleId !== "none" ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
-        };
-      })
-      .filter(Boolean);
+    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
+    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    return vehicles.map(v => {
+      const typeId = v.vehicle_type ?? v.type;
+      const info = getVehicleTypeCrewTarget(typeId);
+      if (!info) return null;
+      const stationId = String(v.building_id ?? v.building);
+      const station = buildingsById.get(stationId);
+      const leitstelleId = station?.leitstelle_building_id != null ? String(station.leitstelle_building_id) : "none";
+      const leitstelleBuilding = leitstelleId !== "none" ? buildingsById.get(leitstelleId) : null;
+      return {
+        id: String(v.id),
+        caption: v.caption || `Fahrzeug ${v.id}`,
+        requirements: info.requirements,
+        staffMin: info.staffMin,
+        staffMax: info.staffMax,
+        special: info.requirements.length > 0,
+        category: station ? categoryForBuilding(station) : "Unbekannt",
+        stationId: stationId,
+        stationName: station?.caption || `Wache ${stationId}`,
+        leitstelleId: leitstelleId,
+        leitstelleName: leitstelleId !== "none" ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle"
+      };
+    }).filter(Boolean);
   }
-
-  // Fragt den aktuellen FMS-Status frisch ab (NICHT aus einer evtl. veralteten Bulk-Liste) -
-  // unmittelbar vor jedem Eingriff, als letztes Sicherheitsnetz gegen einen mittlerweile
-  // ausgerueckten Wagen.
   async function fetchVehicleFmsReal(vehicleId) {
-    const res = await fetchWithTimeout(`/api/v2/vehicles/${vehicleId}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/api/v2/vehicles/${vehicleId}`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`Fahrzeug ${vehicleId} konnte nicht geladen werden (${res.status}).`);
     const data = await res.json();
     const vehicle = data.result || data;
     return vehicle.fms_real ?? vehicle.fms ?? null;
   }
-
-  // Liest die Zuweisungs-Seite eines Fahrzeugs aus: je Person die Ausbildungs-Slugs
-  // (data-filterable-by, wie auch auf der Personal-Seite einer Wache), ob sie "Im Unterricht"
-  // (also nicht verfuegbar) ist, ob sie SCHON diesem Fahrzeug zugewiesen ist (Button mit
-  // Klasse "btn-assigned", Link-Text "Fahrzeugbindung entfernen") und der Zuweisen-Link, falls
-  // verfuegbar. Per Live-Diagnose im Browser bestaetigt: Personal, das bereits einem ANDEREN
-  // Fahrzeug zugewiesen ist, bekommt KEINEN deaktivierten Button, sondern denselben
-  // Zuweisen-Link wie freies Personal - nur mit Klasse "btn-warning" statt "btn-success". Ein
-  // Klick auf diesen Link (POST auf denselben "/vehicles/{id}/zuweisungDo/{personal_id}"-
-  // Endpunkt wie beim normalen Zuweisen) zieht die Person server-seitig automatisch vom alten
-  // Fahrzeug ab und weist sie in EINEM Request diesem hier zu - kein separater Abzieh-Schritt
-  // noetig, derselbe Endpunkt ist ein Toggle (siehe assignedElsewhere unten). Kapazitaet kommt
-  // bewusst NICHT von hier (die #count_personal-Anzeige ist ein rein client-seitiger Zaehler,
-  // der auf einer frisch geladenen Seite nicht den echten Stand zeigt), sondern aus dem
-  // Fahrzeug-Katalog (vehicle.staffMax, siehe checkAndFixVehicleCrew).
   async function fetchVehicleAssignmentPage(vehicleId) {
-    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/zuweisung`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/zuweisung`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) {
       throw new Error(`Zuweisungs-Seite von Fahrzeug ${vehicleId} konnte nicht geladen werden (${res.status}).`);
     }
-    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-
-    const people = [...doc.querySelectorAll("#personal_table tr[data-filterable-by]")].map(row => {
+    const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
+    const people = [ ...doc.querySelectorAll("#personal_table tr[data-filterable-by]") ].map(row => {
       let slugs;
       try {
         slugs = JSON.parse(row.dataset.filterableBy || "[]");
@@ -6156,43 +4353,31 @@
         assignedHere: !!row.querySelector("a.btn-assigned"),
         assignedElsewhere: !!row.querySelector("a.btn-warning[personal_id]"),
         assignHref: assignBtn?.getAttribute("href") || null,
-        unassignHref: row.querySelector("a.btn-assigned[personal_id]")?.getAttribute("href") || null,
+        unassignHref: row.querySelector("a.btn-assigned[personal_id]")?.getAttribute("href") || null
       };
     });
-
-    return { people };
+    return {
+      people: people
+    };
   }
-
-  // Weist so viele verfuegbare (nicht im Unterricht, noch nicht diesem Fahrzeug zugewiesene)
-  // Personen mit dem gesuchten Slug zu, wie fuer diese EINE Anforderung noch fehlen (target,
-  // begrenzt durch staffMax). Zieht bei Bedarf auch Personal von einem ANDEREN Fahrzeug ab
-  // (Klasse "btn-warning", siehe fetchVehicleAssignmentPage) - der Server macht das Umziehen in
-  // einem einzigen POST, kein separater Abzieh-Schritt noetig (per Live-Diagnose bestaetigt).
-  // Echte freie Personen werden aber IMMER zuerst verwendet, ein Umzug nur, wenn sonst niemand
-  // mit dieser Ausbildung frei ist - unnoetiges Hin-und-her-Schieben wird so vermieden.
   async function assignQualifiedPersonnelToVehicleForSlug(vehicleId, slug, target, staffMax) {
-    const { people } = await fetchVehicleAssignmentPage(vehicleId);
+    const {people: people} = await fetchVehicleAssignmentPage(vehicleId);
     const assignedCount = people.filter(p => p.assignedHere).length;
     const alreadyQualified = people.filter(p => p.assignedHere && p.slugs.includes(slug)).length;
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
     let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - alreadyQualified));
     let assignedNow = 0;
-
-    const eligible = people
-      .filter(p => !p.assignedHere && !p.inTraining && p.assignHref && p.slugs.includes(slug))
-      .sort((a, b) => Number(a.assignedElsewhere) - Number(b.assignedElsewhere));
-
+    const eligible = people.filter(p => !p.assignedHere && !p.inTraining && p.assignHref && p.slugs.includes(slug)).sort((a, b) => Number(a.assignedElsewhere) - Number(b.assignedElsewhere));
     for (const person of eligible) {
       if (remaining <= 0) break;
-
       const res = await fetchWithTimeout(person.assignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest",
-        },
+          "X-Requested-With": "XMLHttpRequest"
+        }
       });
       if (!res.ok) throw new Error(`Zuweisen fehlgeschlagen (${res.status}).`);
       assignedNow++;
@@ -6201,53 +4386,29 @@
     }
     return assignedNow;
   }
-
-  // Wie assignQualifiedPersonnelToVehicleForSlug(), aber OHNE Ausbildungs-Filter - fuer
-  // normale Fahrzeuge ohne besondere Anforderung: einfach mit beliebigem verfuegbarem
-  // Personal (kein Unterricht, noch niemand anderem zugewiesen) bis zum Ziel auffuellen.
-  // Verteilt sich automatisch fair auf mehrere Fahrzeuge derselben Kategorie/Wache, WEIL
-  // jedes Fahrzeug im "Alle ... pruefen & zuweisen"-Lauf nur bis zu seinem eigenen Ziel
-  // (staffMin bei "Minimum", nicht staffMax) auffuellt statt sich das gesamte verfuegbare
-  // Personal zu greifen.
   async function assignAnyPersonnelToVehicle(vehicleId, target, staffMax, untrainedOnly = false) {
-    const { people } = await fetchVehicleAssignmentPage(vehicleId);
+    const {people: people} = await fetchVehicleAssignmentPage(vehicleId);
     const assignedCount = people.filter(p => p.assignedHere).length;
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
     let remaining = Math.min(Math.max(0, staffMax - assignedCount), Math.max(0, target - assignedCount));
     let assignedNow = 0;
-
-    // Prioritaet beim Zuweisen: 1) Personal OHNE jede Sonderausbildung zuerst - sonst
-    // "verbraucht" ein normales Fahrzeug (z.B. LF20) wertvolles Personal wie Notarzt, das
-    // eigentlich fuer NAW/RTW gebraucht wird. 2) unter gleichrangigen Kandidaten echte freie
-    // Personen vor solchen, die von einem ANDEREN Fahrzeug abgezogen werden muessten (Klasse
-    // "btn-warning", siehe fetchVehicleAssignmentPage) - vermeidet unnoetiges Hin-und-Her-
-    // Schieben, wenn ohnehin schon genug frei verfuegbares Personal existiert.
-    // Mit untrainedOnly (z.B. fuer GruKw bei BePol/THW/SEG, das selbst KEINE Ausbildung
-    // braucht): Spezialisten werden nicht nur nachrangig, sondern komplett ausgeschlossen -
-    // lieber ein Platz leer als einen Notarzt/Spezialisten hierfuer "auszugeben", der sich im
-    // Spiel bei Alarmierung ohnehin selbst dem richtigen Fahrzeug zuordnet.
     const specialSlugs = getSpecialTrainingSlugs();
-    const eligible = people
-      .filter(p => !p.assignedHere && !p.inTraining && p.assignHref)
-      .filter(p => !untrainedOnly || !p.slugs.some(s => specialSlugs.has(s)))
-      .sort((a, b) => {
-        const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
-        const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
-        if (aSpecial !== bSpecial) return aSpecial - bSpecial;
-        return Number(a.assignedElsewhere) - Number(b.assignedElsewhere);
-      });
-
+    const eligible = people.filter(p => !p.assignedHere && !p.inTraining && p.assignHref).filter(p => !untrainedOnly || !p.slugs.some(s => specialSlugs.has(s))).sort((a, b) => {
+      const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
+      const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
+      if (aSpecial !== bSpecial) return aSpecial - bSpecial;
+      return Number(a.assignedElsewhere) - Number(b.assignedElsewhere);
+    });
     for (const person of eligible) {
       if (remaining <= 0) break;
-
       const res = await fetchWithTimeout(person.assignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest",
-        },
+          "X-Requested-With": "XMLHttpRequest"
+        }
       });
       if (!res.ok) throw new Error(`Zuweisen fehlgeschlagen (${res.status}).`);
       assignedNow++;
@@ -6256,17 +4417,12 @@
     }
     return assignedNow;
   }
-
   async function setVehicleFms(vehicleId, fmsStatus) {
-    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/set_fms/${fmsStatus}`, { credentials: "same-origin" });
+    const res = await fetchWithTimeout(`/vehicles/${vehicleId}/set_fms/${fmsStatus}`, {
+      credentials: "same-origin"
+    });
     if (!res.ok) throw new Error(`FMS-Status konnte nicht auf ${fmsStatus} gesetzt werden (${res.status}).`);
   }
-
-  // Prueft anhand einer bereits geladenen Zuweisungs-Seite, ob ALLE Anforderungen erfuellt
-  // sind: Grundbesatzung (staffMin) erreicht, und je Anforderung entweder ALLE zugewiesenen
-  // Personen (min:null) oder mindestens min Personen den Slug haben. Bei "alle" wird bewusst
-  // zusaetzlich verlangt, dass UEBERHAUPT jemand zugewiesen ist (sonst waere ".every()" auf
-  // einer leeren Liste faelschlich immer erfuellt).
   function isVehicleFullyStaffed(assignmentPage, vehicle) {
     const assignedPeople = assignmentPage.people.filter(p => p.assignedHere);
     if (assignedPeople.length < (Number(vehicle.staffMin) || 0)) return false;
@@ -6275,59 +4431,36 @@
       return assignedPeople.filter(p => p.slugs.includes(req.slug)).length >= req.min;
     });
   }
-
-  // Kompletter Ablauf fuer EIN Fahrzeug: je Anforderung (z.B. bei GW-Verpflegung gleich zwei
-  // verschiedene Ausbildungen) freie Plaetze mit passendem Personal auffuellen - zwischen den
-  // Anforderungen wird die Zuweisungs-Seite neu geladen, damit die zweite Anforderung die
-  // durch die erste schon belegten Plaetze beruecksichtigt. Bei Teil-Anforderungen (min:N)
-  // bestimmt staffingMode das Ziel: "min" (Standard, spart Personal fuer andere Fahrzeuge)
-  // oder "full" (gleich die volle Besatzung mit dieser Ausbildung befuellen). Fahrzeuge OHNE
-  // Anforderung (requirements leer, siehe getVehicleTypeCrewTarget) werden stattdessen
-  // einfach mit beliebigem verfuegbarem Personal bis staffMin ("Minimum") bzw. staffMax
-  // ("Volle Besatzung") aufgefuellt - dasselbe staffingMode-Umschalten gilt fuer beide Faelle.
-  // Danach wird geprueft, ob JETZT alle Anforderungen erfuellt sind (nicht nur die neu
-  // zugewiesenen Personen - sonst wuerde trotz untrainierter Alt-Besatzung faelschlich FMS 2
-  // gesetzt) und der FMS-Status gesetzt.
-  // Zieht bei "Minimum" ueberzaehliges Personal wieder ab (z.B. Reste eines frueheren "Volle
-  // Besatzung"-Laufs), bis staffMin erreicht ist - haelt dabei je Teil-Anforderung mindestens
-  // req.min ein. Wird NIE fuer Anforderungen "alle muessen das koennen" (min:null) aufgerufen,
-  // die zielen bewusst immer auf staffMax. Bevorzugt Personal OHNE Sonderausbildung zum
-  // Abziehen (spezialisiertes Personal bleibt moeglichst zugewiesen, wird woanders gebraucht).
   async function trimVehicleCrewToStaffMin(vehicle) {
-    const { people } = await fetchVehicleAssignmentPage(vehicle.id);
+    const {people: people} = await fetchVehicleAssignmentPage(vehicle.id);
     const assigned = people.filter(p => p.assignedHere);
     let excess = assigned.length - (Number(vehicle.staffMin) || 0);
     if (excess <= 0) return 0;
-
-    const slugCounts = new Map();
+    const slugCounts = new Map;
     for (const req of vehicle.requirements) {
       slugCounts.set(req.slug, assigned.filter(p => p.slugs.includes(req.slug)).length);
     }
     const specialSlugs = getSpecialTrainingSlugs();
-    const candidates = [...assigned].sort((a, b) => {
+    const candidates = [ ...assigned ].sort((a, b) => {
       const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
       const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
       return aSpecial - bSpecial;
     });
-
     const csrfToken = getCsrfTokenOrThrow(vehicle.id);
     let removed = 0;
     for (const person of candidates) {
       if (excess <= 0) break;
       if (!person.unassignHref) continue;
-      const wouldViolate = vehicle.requirements.some(
-        req => person.slugs.includes(req.slug) && slugCounts.get(req.slug) - 1 < req.min
-      );
+      const wouldViolate = vehicle.requirements.some(req => person.slugs.includes(req.slug) && slugCounts.get(req.slug) - 1 < req.min);
       if (wouldViolate) continue;
-
       const res = await fetchWithTimeout(person.unassignHref, {
         method: "POST",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest",
-        },
+          "X-Requested-With": "XMLHttpRequest"
+        }
       });
       if (!res.ok) throw new Error(`Abziehen fehlgeschlagen (${res.status}).`);
       for (const req of vehicle.requirements) {
@@ -6339,16 +4472,14 @@
     }
     return removed;
   }
-
   async function checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly = false, trimEnabled = true) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
       throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
     }
-
     let assignedNow = 0;
-    const targetByRequirement = new Map();
+    const targetByRequirement = new Map;
     const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
     if (vehicle.requirements.length) {
       for (const req of vehicle.requirements) {
@@ -6356,47 +4487,20 @@
         targetByRequirement.set(req.slug, target);
         assignedNow += await assignQualifiedPersonnelToVehicleForSlug(vehicle.id, req.slug, target, vehicle.staffMax);
       }
-      // Bei TEIL-Anforderungen (z.B. NAW: nur 1 Notarzt noetig, staffMax aber 3) blieben die
-      // uebrigen Plaetze bisher leer, selbst wenn reichlich unqualifiziertes Personal frei war -
-      // die Schleife oben fuellt ja nur die Ausbildungs-Slugs selbst auf. Deshalb danach mit
-      // BELIEBIGEM verfuegbarem Personal bis staffMin/staffMax auffuellen - aber nur, wenn KEINE
-      // Anforderung "alle muessen das koennen" ist (min:null, z.B. ELW 2). Dort waere ein
-      // zusaetzlicher, unpassend ausgebildeter Platz ein Verstoss gegen genau diese Anforderung,
-      // ein unvollstaendig besetztes ELW 2 ist also weiterhin korrekt und gewollt. Die
-      // Pflicht-Plaetze oben (req.slug) bleiben von untrainedOnly unberuehrt - das betrifft nur
-      // diese ZUSAETZLICHEN, nicht zwingend geforderten Restplaetze.
       if (!hasFullRequirement) {
         const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
         assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax, untrainedOnly);
       }
     } else {
-      // Fahrzeuge OHNE jede eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) -
-      // genau hier wirkt "Nur ungeschultes Personal zuweisen".
       const target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
       assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax, untrainedOnly);
     }
-
-    // Wechsel von "Volle Besatzung" zurueck auf "Minimum": ueberzaehliges Personal (aus einem
-    // frueheren Voll-Lauf) wird jetzt wieder abgezogen statt nur stehen zu bleiben - so wird
-    // es fuer andere Fahrzeuge wieder frei. Nicht bei Anforderungen, die immer auf staffMax
-    // zielen (min:null), und nur wenn "Vollstaendig anwenden" aktiv ist - bei "Nur ergaenzen"
-    // (trimEnabled = false) wird NIE etwas entfernt, egal mit welchen Einstellungen frueher
-    // zugewiesen wurde.
     if (staffingMode !== "full" && !hasFullRequirement && trimEnabled) {
       await trimVehicleCrewToStaffMin(vehicle);
     }
-
     const after = await fetchVehicleAssignmentPage(vehicle.id);
     const fullyStaffed = isVehicleFullyStaffed(after, vehicle);
     const assignedCount = after.people.filter(p => p.assignedHere).length;
-
-    // Fuer eine verstaendliche Anzeige (statt "X/Y passend besetzt", das wie ein Bruchteil
-    // der Gesamtkapazitaet aussieht, obwohl es die belegten Plaetze zaehlt): wie viel vom
-    // TATSAECHLICH GEFORDERTEN Personal (je Anforderung das gleiche Ziel wie beim Zuweisen
-    // oben) schon mit passender Ausbildung zugewiesen ist. Ueberzaehlige Treffer je
-    // Anforderung werden auf ihr Ziel gedeckelt, damit Ueberbesetzung einer Anforderung
-    // nicht die Zahl einer anderen kaschiert. Fahrzeuge ohne Anforderung zeigen stattdessen
-    // Belegung gegen ihr Ziel (staffMin/staffMax je nach Modus).
     const assignedPeople = after.people.filter(p => p.assignedHere);
     let requiredPersonnel = 0;
     let trainedPersonnel = 0;
@@ -6411,21 +4515,22 @@
       requiredPersonnel = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
       trainedPersonnel = Math.min(assignedCount, requiredPersonnel);
     }
-
     if (fullyStaffed) {
       if (fmsBefore === VEHICLE_FMS_NOT_STAFFED) await setVehicleFms(vehicle.id, VEHICLE_FMS_READY);
     } else if (fmsBefore !== VEHICLE_FMS_NOT_STAFFED) {
       await setVehicleFms(vehicle.id, VEHICLE_FMS_NOT_STAFFED);
     }
-
-    return { assignedNow, assignedCount, capacity: vehicle.staffMax, requiredPersonnel, trainedPersonnel, fullyStaffed };
+    return {
+      assignedNow: assignedNow,
+      assignedCount: assignedCount,
+      capacity: vehicle.staffMax,
+      requiredPersonnel: requiredPersonnel,
+      trainedPersonnel: trainedPersonnel,
+      fullyStaffed: fullyStaffed
+    };
   }
-
-  // Zieht ALLE aktuell zugewiesenen Personen von einem Fahrzeug ab - nutzt denselben
-  // "/vehicles/{id}/zuweisungDo/{personal_id}"-Endpunkt wie das Zuweisen (Button "btn-assigned",
-  // Link-Text "Fahrzeugbindung entfernen"), per Live-Diagnose im Browser als Toggle bestaetigt.
   async function unassignAllPersonnelFromVehicle(vehicleId) {
-    const { people } = await fetchVehicleAssignmentPage(vehicleId);
+    const {people: people} = await fetchVehicleAssignmentPage(vehicleId);
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
     let removed = 0;
     for (const person of people) {
@@ -6436,8 +4541,8 @@
         headers: {
           "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
           "X-CSRF-Token": csrfToken,
-          "X-Requested-With": "XMLHttpRequest",
-        },
+          "X-Requested-With": "XMLHttpRequest"
+        }
       });
       if (!res.ok) throw new Error(`Abziehen fehlgeschlagen (${res.status}).`);
       removed++;
@@ -6445,97 +4550,44 @@
     }
     return removed;
   }
-
-  // Kompletter Ablauf fuer EIN Fahrzeug bei "Alle Zuweisungen rueckgaengig machen": wie
-  // checkAndFixVehicleCrew() bei Fahrzeugen im Einsatz vorsichtig (nie anfassen), zieht danach
-  // die komplette Besatzung ab und setzt FMS 6 (nicht besetzt) - konsistent mit dem Rest des
-  // Tools, das FMS 6 immer als "keine passende Besatzung" verwendet.
   async function clearVehicleCrew(vehicle) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber übersprungen.");
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
       throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
     }
-    // Bewusst KEIN setVehicleFms(..., VEHICLE_FMS_NOT_STAFFED) hier (anders als
-    // checkAndFixVehicleCrew): laut Rueckmeldung loest FMS 6 im Spiel eine automatische
-    // Nachbesetzung aus - genau das Gegenteil von dem, was "Alle Zuweisungen rueckgaengig
-    // machen" erreichen soll. Nur die Besatzung abziehen, FMS-Status unangetastet lassen.
     return await unassignAllPersonnelFromVehicle(vehicle.id);
   }
-
-  // Wachen laufen bereits strikt SEQUENZIELL (siehe stationQueue-Gruppierung), nur
-  // verschiedene Wachen parallel - diese Zahl war daher nie eine Frage der Personal-Race-
-  // Sicherheit, nur der Geschwindigkeit. Bei Accounts mit mehreren tausend Fahrzeugen wuerde
-  // ein zu niedriger Wert einen kompletten Durchlauf unnoetig in die Laenge ziehen.
   const VEHICLE_CREW_CHECK_CONCURRENCY = 8;
-
-  // Schritt 1 von Fahrzeug-Besatzung: Leitstelle(n) auswaehlen, damit Pruefen/Zuweisen sich
-  // gezielt auf einen Teil des Accounts beschraenken laesst statt immer auf alles. Laedt die
-  // volle Fahrzeugliste einmal hier und reicht sie an renderVehicleCrewScreen weiter, damit
-  // beim "Weiter"-Klick kein zweiter Server-Roundtrip noetig ist.
   async function renderVehicleCrewLeitstelleSelection(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Fahrzeug-Besatzung › Leitstelle wählen");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p><em>Lade Fahrzeuge ...</em></p>`;
-
     let allVehicles;
     try {
       allVehicles = await loadCrewCheckVehicles();
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-        </div>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
-
-    const byLeitstelle = new Map();
+    const byLeitstelle = new Map;
     for (const v of allVehicles) {
-      if (!byLeitstelle.has(v.leitstelleId)) byLeitstelle.set(v.leitstelleId, { name: v.leitstelleName, vehicles: [] });
+      if (!byLeitstelle.has(v.leitstelleId)) byLeitstelle.set(v.leitstelleId, {
+        name: v.leitstelleName,
+        vehicles: []
+      });
       byLeitstelle.get(v.leitstelleId).vehicles.push(v);
     }
-
-    const rows = [...byLeitstelle.entries()]
-      .sort((a, b) => a[1].name.localeCompare(b[1].name, "de"))
-      .map(([id, info]) => {
-        const stationCount = new Set(info.vehicles.map(v => v.stationId)).size;
-        return `
-        <div class="checkbox" style="margin: 2px 0;">
-          <label>
-            <input type="checkbox" class="vn-crew-leitstelle-check" value="${escapeHtml(id)}" checked>
-            ${escapeHtml(info.name)} <span class="text-muted">(${stationCount} Wachen, ${info.vehicles.length} Fahrzeuge)</span>
-          </label>
-        </div>`;
-      })
-      .join("");
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Fahrzeug-Besatzung nur für ausgewählte Leitstelle(n) prüfen und zuweisen - praktisch,
-        um gezielt einen Teil des Accounts zu bearbeiten statt immer alle Fahrzeuge.
-      </p>
-      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px;">
-        ${rows || '<p class="text-muted"><em>Keine passenden Fahrzeuge gefunden.</em></p>'}
-      </div>
-      <div class="vn-sticky-footer">
-        <button type="button" id="vn-btn-back" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-next-crew-leitstelle" type="button" class="btn btn-primary">
-          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>
-        </button>
-      </div>
-    `;
-
+    const rows = [ ...byLeitstelle.entries() ].sort((a, b) => a[1].name.localeCompare(b[1].name, "de")).map(([id, info]) => {
+      const stationCount = new Set(info.vehicles.map(v => v.stationId)).size;
+      return `\n        <div class="checkbox" style="margin: 2px 0;">\n          <label>\n            <input type="checkbox" class="vn-crew-leitstelle-check" value="${escapeHtml(id)}" checked>\n            ${escapeHtml(info.name)} <span class="text-muted">(${stationCount} Wachen, ${info.vehicles.length} Fahrzeuge)</span>\n          </label>\n        </div>`;
+    }).join("");
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Fahrzeug-Besatzung nur für ausgewählte Leitstelle(n) prüfen und zuweisen - praktisch,\n        um gezielt einen Teil des Accounts zu bearbeiten statt immer alle Fahrzeuge.\n      </p>\n      <div style="max-height: 380px; overflow-y: auto; border: 1px solid #eee; padding: 8px; border-radius: 4px;">\n        ${rows || '<p class="text-muted"><em>Keine passenden Fahrzeuge gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-next-crew-leitstelle" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-next-crew-leitstelle").addEventListener("click", () => {
-      const ids = [...body.querySelectorAll(".vn-crew-leitstelle-check:checked")].map(el => el.value);
+      const ids = [ ...body.querySelectorAll(".vn-crew-leitstelle-check:checked") ].map(el => el.value);
       if (!ids.length) {
         alert("Bitte mindestens eine Leitstelle auswählen.");
         return;
@@ -6543,121 +4595,94 @@
       renderVehicleCrewScreen(() => renderVehicleCrewLeitstelleSelection(goBack), allVehicles, ids);
     });
   }
-
-  // Zeigt einem Fahrzeug/einer Wache-Kombination nach dem Pruefen als anklickbaren Link,
-  // wenn es NICHT vollstaendig besetzt ist bzw. ein Fehler auftrat - direkt ins Fahrzeug im
-  // Spiel, statt einer langen Tabelle ALLER Fahrzeuge (bei vielen Fahrzeugen unuebersichtlich).
-  // "allVehiclesFull"/"selectedLeitstelleIds" kommen von renderVehicleCrewLeitstelleSelection
-  // (bereits geladene Fahrzeugliste + gewaehlte Leitstellen) - ohne die beiden Parameter wird
-  // wie bisher die komplette Liste geladen und ungefiltert gezeigt.
   async function renderVehicleCrewScreen(goBack = renderMainMenu, allVehiclesFull = null, selectedLeitstelleIds = null) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Fahrzeug-Besatzung");
     const body = document.getElementById("vehicle-naming-modal-body");
-
     let allVehicles = allVehiclesFull;
     if (!allVehicles) {
       body.innerHTML = `<p>Lade Fahrzeuge ...</p>`;
       try {
         allVehicles = await loadCrewCheckVehicles();
       } catch (e) {
-        body.innerHTML = `
-          <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
-          <div class="vn-sticky-footer">
-            <button id="vn-btn-back" type="button" class="btn btn-default">
-              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-            </button>
-          </div>
-        `;
+        body.innerHTML = `\n          <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n          <div class="vn-sticky-footer">\n            <button id="vn-btn-back" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n            </button>\n          </div>\n        `;
         document.getElementById("vn-btn-back").addEventListener("click", goBack);
         return;
       }
     }
-
-    // "scopeVehicles" ist die durch die Leitstellen-Auswahl eingegrenzte Teilmenge von
-    // allVehicles (= ALLE Fahrzeuge account-weit, fuer den Existenz-Abgleich der Problem-Liste
-    // unten noetig) - ohne Leitstellen-Filter identisch zu allVehicles.
-    const scopeVehicles = selectedLeitstelleIds
-      ? allVehicles.filter(v => selectedLeitstelleIds.includes(v.leitstelleId))
-      : allVehicles;
-
+    const scopeVehicles = selectedLeitstelleIds ? allVehicles.filter(v => selectedLeitstelleIds.includes(v.leitstelleId)) : allVehicles;
     let staffingMode = await getVehicleCrewStaffingMode();
     let includeNormal = await getVehicleCrewIncludeNormal();
     let untrainedOnly = await getVehicleCrewUntrainedOnly();
     let trimEnabled = await getVehicleCrewTrimEnabled();
-
-    // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von Leitstellen-Auswahl UND
-    // includeNormal ab) - wird beim Umschalten der Checkbox neu berechnet, ohne die
-    // Fahrzeugliste erneut vom Server zu laden (siehe loadCrewCheckVehicles: laedt bewusst
-    // IMMER alle Fahrzeuge).
     let vehicles;
     let byCategory;
     function recomputeVisibleVehicles() {
       vehicles = scopeVehicles.filter(v => v.special || includeNormal);
-      byCategory = new Map();
+      byCategory = new Map;
       for (const v of vehicles) {
         if (!byCategory.has(v.category)) byCategory.set(v.category, []);
         byCategory.get(v.category).push(v);
       }
     }
     recomputeVisibleVehicles();
-
-    // Problem-Liste: "allProblemsById" haelt ALLE gespeicherten Eintraege (auch fuer Fahrzeuge
-    // ausserhalb der aktuellen Leitstellen-Auswahl), "problemsById" nur die im aktuellen Scope
-    // sichtbaren/bearbeitbaren. Wichtig: Speichern MUSS immer ueber persistProblems() laufen,
-    // das problemsById wieder in allProblemsById zurueckmischt - sonst wuerden beim Speichern
-    // waehrend eines Leitstellen-Filters die Eintraege ausserhalb des Scopes geloescht, obwohl
-    // die zugehoerigen Fahrzeuge ja weiterhin existieren (siehe Kommentar bei VEHICLE_CREW_PROBLEMS_KEY).
-    const vehiclesById = new Map(allVehicles.map(v => [v.id, v]));
+    const vehiclesById = new Map(allVehicles.map(v => [ v.id, v ]));
     const scopedIds = new Set(scopeVehicles.map(v => v.id));
     const persistedProblems = await getVehicleCrewProblems();
-    const allProblemsById = new Map(); // vehicleId -> { vehicle, message, since }
-    for (const [id, { message, since }] of Object.entries(persistedProblems)) {
+    const allProblemsById = new Map;
+    for (const [id, {message: message, since: since}] of Object.entries(persistedProblems)) {
       const vehicle = vehiclesById.get(id);
-      if (vehicle) allProblemsById.set(id, { vehicle, message, since });
+      if (vehicle) allProblemsById.set(id, {
+        vehicle: vehicle,
+        message: message,
+        since: since
+      });
     }
     if (Object.keys(persistedProblems).length !== allProblemsById.size) {
-      await saveVehicleCrewProblems(allProblemsById); // nur echte Karteileichen (verkauft/umgebaut) raus
+      await saveVehicleCrewProblems(allProblemsById);
     }
-    const problemsById = new Map([...allProblemsById].filter(([id]) => scopedIds.has(id)));
-
+    const problemsById = new Map([ ...allProblemsById ].filter(([id]) => scopedIds.has(id)));
     async function persistProblems() {
-      for (const id of [...allProblemsById.keys()]) {
+      for (const id of [ ...allProblemsById.keys() ]) {
         if (scopedIds.has(id) && !problemsById.has(id)) allProblemsById.delete(id);
       }
       for (const [id, entry] of problemsById) allProblemsById.set(id, entry);
       await saveVehicleCrewProblems(allProblemsById);
     }
-
     function formatSince(since) {
       if (!since) return "unbekannt";
       const d = new Date(since);
-      return `${d.toLocaleDateString("de-DE")}, ${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+      return `${d.toLocaleDateString("de-DE")}, ${d.toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit"
+      })}`;
     }
-
-    // Sortierung der Fehler-Liste per Klick auf die Spaltenueberschrift (wie bei "Wachen
-    // umbenennen") - erneuter Klick auf dieselbe Spalte dreht die Richtung um.
-    const problemsSort = { column: "category", asc: true };
-
-    function problemsSortKey(column, { vehicle, message, since }) {
+    const problemsSort = {
+      column: "category",
+      asc: true
+    };
+    function problemsSortKey(column, {vehicle: vehicle, message: message, since: since}) {
       switch (column) {
-        case "station":
-          return vehicle.stationName;
-        case "vehicle":
-          return vehicle.caption;
-        case "status":
-          return message || "";
-        case "since":
-          return since || 0;
-        case "category":
-        default:
-          return vehicle.category;
+       case "station":
+        return vehicle.stationName;
+
+       case "vehicle":
+        return vehicle.caption;
+
+       case "status":
+        return message || "";
+
+       case "since":
+        return since || 0;
+
+       case "category":
+       default:
+        return vehicle.category;
       }
     }
-
     function renderProblemsRows() {
       const dir = problemsSort.asc ? 1 : -1;
-      const rows = [...problemsById.entries()].sort(([, a], [, b]) => {
+      const rows = [ ...problemsById.entries() ].sort(([, a], [, b]) => {
         const ka = problemsSortKey(problemsSort.column, a);
         const kb = problemsSortKey(problemsSort.column, b);
         if (typeof ka === "number" && typeof kb === "number") return dir * (ka - kb);
@@ -6666,43 +4691,18 @@
       if (!rows.length) {
         return `<tr><td colspan="6" class="text-muted">Noch keine Probleme gefunden (oder noch nicht geprüft).</td></tr>`;
       }
-      return rows
-        .map(
-          ([id, { vehicle, message, since }]) => `
-            <tr>
-              <td>${escapeHtml(vehicle.category)}</td>
-              <td>${escapeHtml(vehicle.stationName)}</td>
-              <td><a href="/vehicles/${escapeHtml(vehicle.id)}" target="_blank">${escapeHtml(vehicle.caption)}</a></td>
-              <td class="text-danger">${escapeHtml(message || "")}</td>
-              <td class="text-muted" style="white-space:nowrap;">${escapeHtml(formatSince(since))}</td>
-              <td>
-                <button type="button" class="btn btn-default btn-xs vn-crew-problem-remove" data-id="${escapeHtml(id)}"
-                        title="Aus der Liste entfernen (macht keine Zuweisung rückgängig)">
-                  <span class="glyphicon glyphicon-remove" aria-hidden="true"></span>
-                </button>
-              </td>
-            </tr>
-          `,
-        )
-        .join("");
+      return rows.map(([id, {vehicle: vehicle, message: message, since: since}]) => `\n            <tr>\n              <td>${escapeHtml(vehicle.category)}</td>\n              <td>${escapeHtml(vehicle.stationName)}</td>\n              <td><a href="/vehicles/${escapeHtml(vehicle.id)}" target="_blank">${escapeHtml(vehicle.caption)}</a></td>\n              <td class="text-danger">${escapeHtml(message || "")}</td>\n              <td class="text-muted" style="white-space:nowrap;">${escapeHtml(formatSince(since))}</td>\n              <td>\n                <button type="button" class="btn btn-default btn-xs vn-crew-problem-remove" data-id="${escapeHtml(id)}"\n                        title="Aus der Liste entfernen (macht keine Zuweisung rückgängig)">\n                  <span class="glyphicon glyphicon-remove" aria-hidden="true"></span>\n                </button>\n              </td>\n            </tr>\n          `).join("");
     }
-
     function problemsHeaderHtml() {
-      const arrow = col =>
-        problemsSort.column === col
-          ? `<span class="glyphicon glyphicon-triangle-${problemsSort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>`
-          : "";
-      const th = (col, label) =>
-        `<th class="vn-problems-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
+      const arrow = col => problemsSort.column === col ? `<span class="glyphicon glyphicon-triangle-${problemsSort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>` : "";
+      const th = (col, label) => `<th class="vn-problems-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
       return `${th("category", "Kategorie")}${th("station", "Wache")}${th("vehicle", "Fahrzeug")}${th("status", "Status")}${th("since", "Seit")}<th></th>`;
     }
-
     function bindProblemsSortHeaders() {
       body.querySelectorAll(".vn-problems-sort-th").forEach(th => {
         th.addEventListener("click", () => {
           const col = th.dataset.sort;
-          if (problemsSort.column === col) problemsSort.asc = !problemsSort.asc;
-          else {
+          if (problemsSort.column === col) problemsSort.asc = !problemsSort.asc; else {
             problemsSort.column = col;
             problemsSort.asc = true;
           }
@@ -6710,7 +4710,6 @@
         });
       });
     }
-
     function updateProblemsTable() {
       const headRow = document.getElementById("vn-crew-problems-head");
       if (headRow) headRow.innerHTML = problemsHeaderHtml();
@@ -6718,7 +4717,6 @@
       bindProblemsRowButtons();
       bindProblemsSortHeaders();
     }
-
     function bindProblemsRowButtons() {
       body.querySelectorAll(".vn-crew-problem-remove").forEach(btn => {
         btn.addEventListener("click", async () => {
@@ -6729,117 +4727,25 @@
         });
       });
     }
-
     function renderGroups() {
       if (!vehicles.length) {
         return `<p class="text-muted">Keine passenden Fahrzeuge gefunden.</p>`;
       }
-      return CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map(category => {
-          // Laeuft diese Kategorie noch aus einem FRUEHEREN Aufruf dieses Screens (Fenster
-          // zwischenzeitlich geschlossen+wiedergeoeffnet)? Dann sofort als "Abbrechen" (rot)
-          // starten statt faelschlich wieder als startbar - verhindert einen doppelten,
-          // parallelen Lauf derselben Kategorie.
-          const running = runningCategoryRuns.get(category);
-          const btnClass = running ? "btn-danger" : "btn-primary";
-          const btnLabel = running
-            ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
-            : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
-          const percent = running && running.total > 0 ? Math.round((running.done / running.total) * 100) : 0;
-          return `
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
-              <span style="display:inline-block; min-width:140px;">
-                <b>${escapeHtml(category)}</b>
-                <span class="text-muted" style="font-size:11px;">(${byCategory.get(category).length})</span>
-              </span>
-              <button type="button" class="btn ${btnClass} btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">
-                ${btnLabel}
-              </button>
-              <div class="vn-crew-category-progress-wrap" data-category="${escapeHtml(category)}"
-                   style="flex:1; min-width:160px; display:${running ? "block" : "none"};">
-                <div class="progress" style="margin:0; height:16px;">
-                  <div class="progress-bar vn-crew-category-progress-bar" data-category="${escapeHtml(category)}"
-                       style="width:${percent}%;"></div>
-                </div>
-              </div>
-              <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}">${escapeHtml(running?.statusText || "")}</small>
-            </div>
-          `;
-        })
-        .join("");
+      return CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
+        const running = runningCategoryRuns.get(category);
+        const btnClass = running ? "btn-danger" : "btn-primary";
+        const btnLabel = running ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen` : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+        const percent = running && running.total > 0 ? Math.round(running.done / running.total * 100) : 0;
+        return `\n            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">\n              <span style="display:inline-block; min-width:140px;">\n                <b>${escapeHtml(category)}</b>\n                <span class="text-muted" style="font-size:11px;">(${byCategory.get(category).length})</span>\n              </span>\n              <button type="button" class="btn ${btnClass} btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">\n                ${btnLabel}\n              </button>\n              <div class="vn-crew-category-progress-wrap" data-category="${escapeHtml(category)}"\n                   style="flex:1; min-width:160px; display:${running ? "block" : "none"};">\n                <div class="progress" style="margin:0; height:16px;">\n                  <div class="progress-bar vn-crew-category-progress-bar" data-category="${escapeHtml(category)}"\n                       style="width:${percent}%;"></div>\n                </div>\n              </div>\n              <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}">${escapeHtml(running?.statusText || "")}</small>\n            </div>\n          `;
+      }).join("");
     }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale
-        Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt).
-      </p>
-      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
-        <div class="vn-btn-group-box">
-          <span class="vn-btn-group-label">Bei Teil-Anforderungen (z.B. GRTW/NAW):</span>
-          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"
-                  title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">
-            Nur Minimum
-          </button>
-          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full"
-                  title="Belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.">
-            Volle Besatzung
-          </button>
-        </div>
-        <div class="vn-btn-group-box">
-          <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"
-                  title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">
-            Normale Fahrzeuge einbeziehen
-          </button>
-          <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"
-                  title="Bei Fahrzeugen ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten (Notarzt usw.) nie verbraucht - lieber ein Platz leer. Echte Ausbildungspflichten (z.B. Notarzt auf NAW) bleiben davon unberührt.">
-            Nur ungeschultes Personal zuweisen
-          </button>
-        </div>
-        <div class="vn-btn-group-box">
-          <span class="vn-btn-group-label">Bereits Zugewiesenes:</span>
-          <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"
-                  title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">
-            Nur ergänzen
-          </button>
-          <button type="button" class="btn btn-sm ${trimEnabled ? "btn-danger" : "btn-default"} vn-crew-trim" data-trim="on"
-                  title="Gleicht die Besatzung komplett an die aktuellen Einstellungen an - entfernt auch überzähliges Personal (z.B. beim Wechsel von Voll- auf Minimum-Besatzung) oder gibt einen Spezialisten frei, der auf einem Fahrzeug ohne eigene Anforderung sitzt.">
-            Vollständig anwenden
-          </button>
-        </div>
-      </div>
-      <div id="vn-crew-groups">${renderGroups()}</div>
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">
-        <b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b>
-        <button type="button" id="vn-btn-clear-problems" class="btn btn-default btn-xs">
-          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Liste leeren
-        </button>
-      </div>
-      <div style="max-height:35vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px;">
-          <thead>
-            <tr id="vn-crew-problems-head">${problemsHeaderHtml()}</tr>
-          </thead>
-          <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer" style="display:flex; justify-content:space-between;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-unassign-all" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Alle Zuweisungen rückgängig machen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale\n        Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt).\n      </p>\n      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bei Teil-Anforderungen (z.B. GRTW/NAW):</span>\n          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"\n                  title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">\n            Nur Minimum\n          </button>\n          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full"\n                  title="Belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.">\n            Volle Besatzung\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"\n                  title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">\n            Normale Fahrzeuge einbeziehen\n          </button>\n          <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"\n                  title="Bei Fahrzeugen ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten (Notarzt usw.) nie verbraucht - lieber ein Platz leer. Echte Ausbildungspflichten (z.B. Notarzt auf NAW) bleiben davon unberührt.">\n            Nur ungeschultes Personal zuweisen\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bereits Zugewiesenes:</span>\n          <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"\n                  title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">\n            Nur ergänzen\n          </button>\n          <button type="button" class="btn btn-sm ${trimEnabled ? "btn-danger" : "btn-default"} vn-crew-trim" data-trim="on"\n                  title="Gleicht die Besatzung komplett an die aktuellen Einstellungen an - entfernt auch überzähliges Personal (z.B. beim Wechsel von Voll- auf Minimum-Besatzung) oder gibt einen Spezialisten frei, der auf einem Fahrzeug ohne eigene Anforderung sitzt.">\n            Vollständig anwenden\n          </button>\n        </div>\n      </div>\n      <div id="vn-crew-groups">${renderGroups()}</div>\n      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">\n        <b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b>\n        <button type="button" id="vn-btn-clear-problems" class="btn btn-default btn-xs">\n          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Liste leeren\n        </button>\n      </div>\n      <div style="max-height:35vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead>\n            <tr id="vn-crew-problems-head">${problemsHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; justify-content:space-between;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-unassign-all" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Alle Zuweisungen rückgängig machen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-unassign-all").addEventListener("click", () => {
       renderVehicleCrewUnassignAllConfirmScreen(scopeVehicles, () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds));
     });
     bindProblemsRowButtons();
     bindProblemsSortHeaders();
-
     document.getElementById("vn-btn-clear-problems").addEventListener("click", () => {
       if (!problemsById.size) return;
       renderSimpleConfirmScreen({
@@ -6852,10 +4758,9 @@
           problemsById.clear();
           await persistProblems();
           renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds);
-        },
+        }
       });
     });
-
     body.querySelectorAll(".vn-crew-mode").forEach(btn => {
       btn.addEventListener("click", async () => {
         staffingMode = btn.dataset.mode;
@@ -6868,7 +4773,6 @@
         });
       });
     });
-
     body.querySelectorAll(".vn-crew-trim").forEach(btn => {
       btn.addEventListener("click", async () => {
         trimEnabled = btn.dataset.trim === "on";
@@ -6881,31 +4785,21 @@
         });
       });
     });
-
-    // Button/Statuszeile einer Kategorie IMMER frisch per body.querySelector() suchen statt
-    // einmal zu cachen - body selbst ist ein fixer DOM-Knoten (nur .innerHTML wechselt), so
-    // findet auch ein Update aus einem AELTEREN Aufruf dieses Screens (Fenster zwischenzeitlich
-    // geschlossen+wiedergeoeffnet) die jeweils AKTUELLEN Elemente statt ins Leere zu laufen.
     function setCategoryRunningUI(category, running) {
       const btn = body.querySelector(`.vn-crew-check-category[data-category="${category}"]`);
       if (!btn) return;
       btn.classList.toggle("btn-danger", running);
       btn.classList.toggle("btn-primary", !running);
-      btn.innerHTML = running
-        ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
-        : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+      btn.innerHTML = running ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen` : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
       const wrap = body.querySelector(`.vn-crew-category-progress-wrap[data-category="${category}"]`);
       if (wrap) wrap.style.display = running ? "block" : "none";
     }
-
-    // Ladebalken im selben Design wie beim Umbenennen (Task-Center-Fortschrittsbalken) -
-    // vorher gab es hier nur den Text ("12/50 geprüft ..."), keinen visuellen Fortschritt.
     function setCategoryStatusText(category, text, done, total) {
       const el = body.querySelector(`.vn-crew-category-status[data-category="${category}"]`);
       if (el) el.textContent = text;
       const state = runningCategoryRuns.get(category);
       if (state) {
-        state.statusText = text; // ueberlebt ein Neu-Rendern zwischendurch
+        state.statusText = text;
         if (total > 0) {
           state.done = done;
           state.total = total;
@@ -6913,19 +4807,15 @@
       }
       const bar = body.querySelector(`.vn-crew-category-progress-bar[data-category="${category}"]`);
       if (bar && state && state.total > 0) {
-        bar.style.width = `${Math.round((state.done / state.total) * 100)}%`;
+        bar.style.width = `${Math.round(state.done / state.total * 100)}%`;
       }
-      // Dieselbe Kategorie kann statt hier auch im Task-Center sichtbar sein (anderer
-      // Bildschirm, gleicher DOM-Knoten #vehicle-naming-modal-body) - dort ebenfalls
-      // aktualisieren, sonst "friert" der Fortschritt dort ein, waehrend man hinschaut.
       const tcText = document.querySelector(`.vn-tc-crew-text[data-category="${category}"]`);
       if (tcText) tcText.textContent = text;
       const tcBar = document.querySelector(`.vn-tc-crew-bar[data-category="${category}"]`);
       if (tcBar && state && state.total > 0) {
-        tcBar.style.width = `${Math.round((state.done / state.total) * 100)}%`;
+        tcBar.style.width = `${Math.round(state.done / state.total * 100)}%`;
       }
     }
-
     function bindCategoryButtons() {
       body.querySelectorAll(".vn-crew-check-category").forEach(btn => {
         const category = btn.dataset.category;
@@ -6933,44 +4823,36 @@
           const running = runningCategoryRuns.get(category);
           if (running) {
             running.cancelled = true;
-            updateHistoryEntry(running.historyId, { status: "cancelled", label: `${category}: Abbruch angefordert ...` });
+            updateHistoryEntry(running.historyId, {
+              status: "cancelled",
+              label: `${category}: Abbruch angefordert ...`
+            });
             return;
           }
-
           const categoryVehicles = byCategory.get(category) || [];
-          // Verlaufs-Eintrag schon JETZT anlegen (status "running") - siehe Kommentar bei
-          // startHistoryEntry/runRenamePlan, gleiches Prinzip fuer Fahrzeug-Besatzung.
           const historyId = await startHistoryEntry({
             type: "crew_assignment",
-            label: `${category}: 0/${categoryVehicles.length} gestartet ...`,
+            label: `${category}: 0/${categoryVehicles.length} gestartet ...`
           });
-          const state = { cancelled: false, statusText: "", historyId };
+          const state = {
+            cancelled: false,
+            statusText: "",
+            historyId: historyId
+          };
           runningCategoryRuns.set(category, state);
           activeCrewCategoryRunCount++;
           updateBackgroundTaskBadge();
           setCategoryRunningUI(category, true);
-
           let done = 0;
           let ok = 0;
           let failed = 0;
           setCategoryStatusText(category, `0/${categoryVehicles.length} geprüft ...`, 0, categoryVehicles.length);
-
-          // WICHTIG: Faehrzeuge DERSELBEN Wache duerfen nie parallel von zwei Workern
-          // bearbeitet werden - fetchVehicleAssignmentPage() zeigt den STATIONS-weiten
-          // Personal-Pool, und zwei gleichzeitig geladene Schnappschuesse koennen dieselbe
-          // freie Person beide als verfuegbar sehen (klassische Read-Then-Write-Race). Ergebnis
-          // war genau das gemeldete Symptom: manche Fahrzeuge bleiben trotz genug freiem
-          // Personal unbesetzt, ein erneuter Klick (wenn nichts mehr parallel laeuft) behebt es
-          // dann zufaellig. Deshalb: Warteschlange aus ganzen WACHEN statt einzelner Fahrzeuge -
-          // Fahrzeuge derselben Wache laufen dadurch immer strikt nacheinander, verschiedene
-          // Wachen weiterhin parallel (die teilen sich ja kein Personal).
-          const stationGroups = new Map();
+          const stationGroups = new Map;
           for (const v of categoryVehicles) {
             if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
             stationGroups.get(v.stationId).push(v);
           }
-          const stationQueue = [...stationGroups.values()];
-
+          const stationQueue = [ ...stationGroups.values() ];
           let nextStationIndex = 0;
           async function worker() {
             while (nextStationIndex < stationQueue.length) {
@@ -6987,23 +4869,22 @@
                     failed++;
                     const existing = problemsById.get(vehicle.id);
                     problemsById.set(vehicle.id, {
-                      vehicle,
+                      vehicle: vehicle,
                       message: `${result.trainedPersonnel}/${result.requiredPersonnel} erforderliches Personal zugewiesen`,
-                      since: existing?.since || Date.now(),
+                      since: existing?.since || Date.now()
                     });
                   }
                 } catch (e) {
                   failed++;
                   const existing = problemsById.get(vehicle.id);
-                  problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
+                  problemsById.set(vehicle.id, {
+                    vehicle: vehicle,
+                    message: e.message,
+                    since: existing?.since || Date.now()
+                  });
                 }
                 done++;
-                setCategoryStatusText(
-                  category,
-                  `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`,
-                  done,
-                  categoryVehicles.length,
-                );
+                setCategoryStatusText(category, `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`, done, categoryVehicles.length);
                 const problemsBody = document.getElementById("vn-crew-problems-body");
                 if (problemsBody) {
                   problemsBody.innerHTML = renderProblemsRows();
@@ -7014,37 +4895,29 @@
             }
           }
           const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
-          await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-          const summary = state.cancelled
-            ? `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`
-            : `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+          await Promise.all(Array.from({
+            length: workerCount
+          }, () => worker()));
+          const summary = state.cancelled ? `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)` : `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
           setCategoryStatusText(category, summary);
-          // Merkt sich das Ergebnis als "fertig, noch nicht angesehen" (siehe
-          // renderTaskCenterScreen) - sonst verschwindet der Navbar-Hinweis sofort wieder,
-          // ohne dass man das Ergebnis je zu sehen bekommt.
-          finishedCrewCategoryRuns.set(category, { summary, finishedAt: Date.now() });
-          // Denselben beim Start angelegten Eintrag abschliessen statt einen zweiten anzulegen -
-          // IMMER, auch bei 0 Treffern, sonst bliebe der Eintrag faelschlich auf "running" stehen.
+          finishedCrewCategoryRuns.set(category, {
+            summary: summary,
+            finishedAt: Date.now()
+          });
           await updateHistoryEntry(state.historyId, {
             label: `${category}: ${summary}`,
-            status: state.cancelled ? "cancelled" : "done",
+            status: state.cancelled ? "cancelled" : "done"
           });
           runningCategoryRuns.delete(category);
           activeCrewCategoryRunCount--;
           updateBackgroundTaskBadge();
           tryStartNextQueuedBackgroundTask();
           setCategoryRunningUI(category, false);
-          // Ist inzwischen (der Lauf kann Minuten dauern) das Task-Center der sichtbare
-          // Bildschirm statt dieser Fahrzeug-Besatzung-Ansicht hier, komplett neu rendern -
-          // sonst bliebe die Kategorie dort faelschlich als "laeuft" mit Abbrechen-Button
-          // stehen, bis man den Bildschirm einmal schliesst und neu oeffnet.
           refreshTaskCenterIfVisible();
         });
       });
     }
     bindCategoryButtons();
-
     document.getElementById("vn-crew-include-normal").addEventListener("click", async e => {
       includeNormal = !includeNormal;
       e.target.classList.toggle("btn-primary", includeNormal);
@@ -7054,7 +4927,6 @@
       document.getElementById("vn-crew-groups").innerHTML = renderGroups();
       bindCategoryButtons();
     });
-
     document.getElementById("vn-crew-untrained-only").addEventListener("click", async e => {
       untrainedOnly = !untrainedOnly;
       e.target.classList.toggle("btn-primary", untrainedOnly);
@@ -7062,69 +4934,41 @@
       await storeData(untrainedOnly, VEHICLE_CREW_UNTRAINED_ONLY_KEY);
     });
   }
-
-  // Eigenes Bestaetigungsfenster (Abbrechen/Bestaetigen, wie beim Fahrzeug-Verkaufen) statt
-  // eines einfachen confirm() - zieht bei ALLEN Fahrzeugen im aktuellen Leitstellen-Scope
-  // (unabhaengig von der "Normale Fahrzeuge einbeziehen"-Anzeige-Checkbox) die komplette
-  // Besatzung ab. Bewusst OHNE getippte Bestaetigung (anders als "Speicher loeschen") - reicht
-  // laut Rueckmeldung als Sicherung.
   function renderVehicleCrewUnassignAllConfirmScreen(vehicles, goBack) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p class="text-danger"><b>Wirklich bei ${vehicles.length} Fahrzeugen die komplette Besatzung abziehen?</b></p>
-      <p>
-        Betrifft alle Fahrzeuge der aktuellen Leitstellen-Auswahl. Sofort wirksam im Spiel,
-        nicht per Klick rückgängig zu machen. Fahrzeuge im Einsatz werden übersprungen.
-      </p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-btn-unassign-confirm" type="button" class="btn btn-danger">
-          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Besatzung abziehen
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-danger"><b>Wirklich bei ${vehicles.length} Fahrzeugen die komplette Besatzung abziehen?</b></p>\n      <p>\n        Betrifft alle Fahrzeuge der aktuellen Leitstellen-Auswahl. Sofort wirksam im Spiel,\n        nicht per Klick rückgängig zu machen. Fahrzeuge im Einsatz werden übersprungen.\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-unassign-confirm" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Besatzung abziehen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-unassign-confirm").addEventListener("click", () => {
       executeUnassignAllPlan(vehicles, goBack);
     });
   }
-
-  // Laeuft wie Umbenennen/Fahrzeug-Besatzung-Kategorien ueber das gemeinsame Hintergrund-
-  // Task-System (Ladebalken, Abbrechen, Task-Center, Warteschlange falls schon etwas anderes
-  // laeuft, zweistufiges Verlauf-Logging) statt einer eigenen, bisher rein textuellen
-  // Fortschrittsanzeige direkt auf dem Bestaetigungs-Bildschirm.
   function executeUnassignAllPlan(vehicles, goBack) {
     const title = "Alle Zuweisungen rückgängig machen";
     const queued = runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue));
     if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
   }
-
   async function runUnassignAllPlan(vehicles, goBack, title, viaQueue) {
     const historyId = await startHistoryEntry({
       type: "crew_unassign_all",
-      label: `0/${vehicles.length} gestartet ...`,
+      label: `0/${vehicles.length} gestartet ...`
     });
     let cancelled = false;
     beginBackgroundTask(title, () => {
       cancelled = true;
-      updateHistoryEntry(historyId, { status: "cancelled", label: "Abbruch angefordert ..." });
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
     });
     if (!viaQueue) renderBackgroundTaskProgressScreen();
-
-    // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
-    // den Personal-Pool), verschiedene Wachen parallel.
-    const stationGroups = new Map();
+    const stationGroups = new Map;
     for (const v of vehicles) {
       if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
       stationGroups.get(v.stationId).push(v);
     }
-    const stationQueue = [...stationGroups.values()];
-
+    const stationQueue = [ ...stationGroups.values() ];
     let done = 0;
     let removedTotal = 0;
     let failed = 0;
@@ -7141,89 +4985,54 @@
             failed++;
           }
           done++;
-          updateBackgroundTaskProgress(
-            Math.round((done / vehicles.length) * 100),
-            `${done}/${vehicles.length} Fahrzeuge bearbeitet (${removedTotal} Personen abgezogen${failed ? `, ${failed} übersprungen/Fehler` : ""}) ...`,
-          );
+          updateBackgroundTaskProgress(Math.round(done / vehicles.length * 100), `${done}/${vehicles.length} Fahrzeuge bearbeitet (${removedTotal} Personen abgezogen${failed ? `, ${failed} übersprungen/Fehler` : ""}) ...`);
         }
       }
     }
     const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
-    await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
+    await Promise.all(Array.from({
+      length: workerCount
+    }, () => worker()));
     const summary = `${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}`;
-    // Denselben beim Start angelegten Eintrag jetzt abschliessen - IMMER, auch bei 0
-    // abgezogenen Personen, sonst bliebe er faelschlich auf "running" stehen.
-    await updateHistoryEntry(historyId, { label: summary, status: cancelled ? "cancelled" : "done" });
-
-    const renderResult = () => renderUnassignAllResultScreen({ summary, cancelled, goBack });
-    // Siehe runRenamePlan: nur automatisch zur Ergebnis-Ansicht wechseln, wenn man JETZT
-    // GERADE noch auf der eigenen Fortschritts-Ansicht dieses Laufs ist.
+    await updateHistoryEntry(historyId, {
+      label: summary,
+      status: cancelled ? "cancelled" : "done"
+    });
+    const renderResult = () => renderUnassignAllResultScreen({
+      summary: summary,
+      cancelled: cancelled,
+      goBack: goBack
+    });
     const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
     if (stillOnOwnProgressScreen) renderResult();
     finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
   }
-
-  function renderUnassignAllResultScreen({ summary, cancelled, goBack }) {
+  function renderUnassignAllResultScreen({summary: summary, cancelled: cancelled, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
     const body = document.getElementById("vehicle-naming-modal-body");
     const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen.</b></p>` : "";
-    body.innerHTML = `
-      ${cancelledNote}
-      <p>
-        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
-        <b>${escapeHtml(summary)}</b>
-      </p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-      </div>
-    `;
+    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${escapeHtml(summary)}</b>\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
   }
-
-  //////////////////////////////////////////////////
-  // Wachen-Bauplaner: Vorlagen, wie eine Wache eines bestimmten Typs ausgebaut/ausgestattet
-  // sein soll (welche Ausbauten, welche Fahrzeuge in welcher Anzahl - Personalbedarf wird
-  // daraus automatisch berechnet, nicht separat gepflegt).
-  // Konzept und Datenmodell (Bauplan-Felder, Verfuegbar/Zugewiesen-Doppelliste fuer Ausbauten)
-  // vom Community-Script "Wachenbaupläne" (BOS-Ernie) uebernommen - die Personal-
-  // Bedarfsrechnung nutzt aber UNSERE getVehicleTypeRequirement() (siehe Fahrzeug-Besatzung
-  // oben), die echte Teil-Anforderungen korrekt beruecksichtigt (das Original-Script rechnet
-  // das laut eigenem Kommentar bewusst nur naeherungsweise).
-  //////////////////////////////////////////////////
-
   function generateBlueprintId() {
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    return Array.from({ length: 8 }, () => characters[Math.floor(Math.random() * characters.length)]).join("");
+    return Array.from({
+      length: 8
+    }, () => characters[Math.floor(Math.random() * characters.length)]).join("");
   }
-
-  // Alle Fahrzeugtypen, die an einem Gebaeude dieses Pseudo-Typs ueberhaupt stationiert
-  // werden koennen (Katalog-Feld possibleBuildings nennt den ECHTEN building_type, nicht den
-  // Pseudo-Typ - Kleinwachen teilen sich daher bewusst denselben Fahrzeug-Pool wie ihr
-  // normales Pendant, das entspricht dem echten Spielverhalten).
   function getVehicleTypesForPseudoId(pseudoId) {
     const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
     if (!pseudo) return [];
-    return Object.entries(vehicleTypeCatalog)
-      .filter(([, v]) => Array.isArray(v.possibleBuildings) && v.possibleBuildings.includes(pseudo.buildingType))
-      .map(([id, v]) => ({ id, name: v.caption }))
-      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+    return Object.entries(vehicleTypeCatalog).filter(([, v]) => Array.isArray(v.possibleBuildings) && v.possibleBuildings.includes(pseudo.buildingType)).map(([id, v]) => ({
+      id: id,
+      name: v.caption
+    })).sort((a, b) => a.name.localeCompare(b.name, "de"));
   }
-
-  // Summiert den Personalbedarf ueber alle Fahrzeuge eines Bauplans (Anzahl * Bedarf pro
-  // Fahrzeug) je Ausbildungs-Slug - geht IMMER von der minimalen Besatzung aus (Bedarf.min aus
-  // getBlueprintTrainingRequirement(), bei "all"-Anforderungen staffMin, sonst die echte
-  // Mindestzahl bzw. 1 bei min:0 wie Dekon-P). So verlangt der Bauplan nicht mehr Personal, als
-  // fuer den Betrieb der Fahrzeuge wirklich noetig ist (vorher: volle Besatzung/staffMax bei
-  // "all"), zeigt aber trotzdem JEDE Ausbildung an, die irgendwo im Account gebraucht wird.
   function computeBlueprintPersonnelRequirements(blueprint) {
-    const totals = new Map();
-    for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
+    const totals = new Map;
+    for (const {vehicleTypeId: vehicleTypeId, quantity: quantity} of blueprint.vehicles) {
       if (!(quantity > 0)) continue;
       const requirement = getBlueprintTrainingRequirement(Number(vehicleTypeId));
       if (!requirement) continue;
@@ -7233,19 +5042,17 @@
     }
     return totals;
   }
-
-  // Wie computeBlueprintPersonnelRequirements(), aber liefert je Ausbildungs-Slug ein {min, max}
-  // Fenster statt einer einzelnen Zahl - Grundlage fuer die Min/Max-Spalten im Bauplan-Editor
-  // (siehe updatePersonnelRequirements). Nur fuer diese Anzeige gedacht, Personal-Check/
-  // Schulungen nutzen weiterhin computeBlueprintPersonnelRequirements() (einzelner Zielwert).
   function computeBlueprintPersonnelRequirementRanges(blueprint) {
-    const totals = new Map();
-    for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
+    const totals = new Map;
+    for (const {vehicleTypeId: vehicleTypeId, quantity: quantity} of blueprint.vehicles) {
       if (!(quantity > 0)) continue;
       const requirement = getBlueprintTrainingRequirement(Number(vehicleTypeId));
       if (!requirement) continue;
       for (const req of requirement.requirements) {
-        const existing = totals.get(req.slug) || { min: 0, max: 0 };
+        const existing = totals.get(req.slug) || {
+          min: 0,
+          max: 0
+        };
         existing.min += req.min * quantity;
         existing.max += req.max * quantity;
         totals.set(req.slug, existing);
@@ -7253,39 +5060,33 @@
     }
     return totals;
   }
-
-  // Zerlegt die Mindest-/Maximalbesatzung EINES Fahrzeugtyps in "geschult" (Summe der
-  // Ausbildungs-Anforderungen, siehe getBlueprintTrainingRequirement) und "ungeschult" (Rest
-  // bis staffMin/staffMax) - Grundlage fuer die Summenzeilen unter der Ausbildungs-Tabelle im
-  // Bauplan-Editor (siehe computeBlueprintPersonnelSummary). Ein Fahrzeug OHNE jede
-  // Ausbildungsanforderung (z.B. normaler RTW/LF) ist komplett "ungeschult".
   function getBlueprintCrewBreakdownForVehicleType(vehicleTypeId) {
     const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
     if (!staff?.max) return null;
     const requirement = getBlueprintTrainingRequirement(vehicleTypeId);
     if (!requirement) {
-      return { trainedMin: 0, trainedMax: 0, untrainedMin: staff.min, untrainedMax: staff.max };
+      return {
+        trainedMin: 0,
+        trainedMax: 0,
+        untrainedMin: staff.min,
+        untrainedMax: staff.max
+      };
     }
     const trainedMin = requirement.requirements.reduce((sum, req) => sum + req.min, 0);
     const trainedMax = requirement.requirements.reduce((sum, req) => sum + req.max, 0);
     return {
-      trainedMin,
-      trainedMax,
+      trainedMin: trainedMin,
+      trainedMax: trainedMax,
       untrainedMin: Math.max(0, staff.min - trainedMin),
-      untrainedMax: Math.max(0, staff.max - trainedMax),
+      untrainedMax: Math.max(0, staff.max - trainedMax)
     };
   }
-
-  // Summiert ueber alle Fahrzeuge eines Bauplans: geschultes Personal (Summe aller Zeilen der
-  // Ausbildungs-Tabelle), ungeschultes Fuellpersonal und beides zusammen (Insgesamt benoetigt) -
-  // je als Min./Max.-Fenster. Ersetzt die fruehere computeBlueprintTotalPersonnelCount() (nur
-  // ein einzelner Wert, keine Aufschluesselung).
   function computeBlueprintPersonnelSummary(blueprint) {
     let trainedMin = 0;
     let trainedMax = 0;
     let untrainedMin = 0;
     let untrainedMax = 0;
-    for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
+    for (const {vehicleTypeId: vehicleTypeId, quantity: quantity} of blueprint.vehicles) {
       if (!(quantity > 0)) continue;
       const breakdown = getBlueprintCrewBreakdownForVehicleType(Number(vehicleTypeId));
       if (!breakdown) continue;
@@ -7295,19 +5096,20 @@
       untrainedMax += breakdown.untrainedMax * quantity;
     }
     return {
-      trained: { min: trainedMin, max: trainedMax },
-      untrained: { min: untrainedMin, max: untrainedMax },
-      total: { min: trainedMin + untrainedMin, max: trainedMax + untrainedMax },
+      trained: {
+        min: trainedMin,
+        max: trainedMax
+      },
+      untrained: {
+        min: untrainedMin,
+        max: untrainedMax
+      },
+      total: {
+        min: trainedMin + untrainedMin,
+        max: trainedMax + untrainedMax
+      }
     };
   }
-
-  // Personal-Anforderung fuer Personal-Check/Schulungen: statt einer separaten, manuell
-  // gepflegten Konfiguration kommt sie jetzt direkt aus dem je Gebaeudetyp AKTIVEN
-  // Wachenbauplan (pro Typ kann nur einer aktiv sein, siehe renderStationBlueprintEditScreen -
-  // automatische Deaktivierung anderer Plaene desselben Typs beim Speichern). Gebaeudetypen
-  // ganz ohne aktiven Bauplan fordern nichts (0) - dieselbe Form wie frueher
-  // PERSONNEL_REQUIREMENTS_KEY ({ [pseudoId]: { [slug]: requiredCount } }), damit
-  // computeTrainingNeeds()/personnelMissingCount() unveraendert bleiben koennen.
   async function computePersonnelRequirementsFromBlueprints() {
     const blueprints = await getStationBlueprints();
     const result = {};
@@ -7320,117 +5122,42 @@
     }
     return result;
   }
-
   function typeNameForPseudoId(pseudoId) {
     const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
     if (!pseudo) return "Unbekannt";
-    const key = getBuildingKey({ building_type: pseudo.buildingType, small_building: pseudo.smallBuilding });
+    const key = getBuildingKey({
+      building_type: pseudo.buildingType,
+      small_building: pseudo.smallBuilding
+    });
     return BUILDING_TYPE_NAMES[key] || `Typ ${key}`;
   }
-
-  // Hauptmenü > "Wachen-Bauplaner": Liste aller Baupläne mit Bearbeiten/
-  // Löschen/Exportieren/Importieren, plus je Bauplan ein direkter Sprung zur Anwenden-
-  // Ansicht (siehe renderStationBlueprintApplyScreen).
   async function renderStationBlueprintsListScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen-Bauplaner");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
-
     const blueprints = await getStationBlueprints();
     let allStations = [];
     try {
       allStations = await loadBuildingsForCheck();
-    } catch {
-      // Mini-Uebersicht ist nur ein Zusatz - schlaegt das Laden der Wachen fehl, wird sie
-      // einfach leer gelassen, statt deswegen den ganzen Bauplan-Bildschirm zu blockieren.
-    }
-
-    // Mini-Uebersicht, wie viele Wachen von jedem Gebaeudetyp es im Account gibt - hilft bei
-    // der Auswahl, fuer welchen Typ ueberhaupt ein Bauplan sinnvoll ist (z.B. sieht man hier
-    // sofort, ob man wirklich eine "Feuerwache (Kleinwache)" besitzt, bevor man dafuer einen
-    // Bauplan anlegt, der sonst 0 Treffer haette).
-    const stationCounts = new Map();
+    } catch {}
+    const stationCounts = new Map;
     for (const s of allStations) {
       const label = s.typeName || "Unbekannter Gebäudetyp";
       stationCounts.set(label, (stationCounts.get(label) || 0) + 1);
     }
-    const stationCountsSummary = [...stationCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([label, count]) => `${count}x ${escapeHtml(label)}`)
-      .join(", ");
-
+    const stationCountsSummary = [ ...stationCounts.entries() ].sort((a, b) => b[1] - a[1]).map(([label, count]) => `${count}x ${escapeHtml(label)}`).join(", ");
     function renderRows() {
       const entries = Object.values(blueprints);
       if (!entries.length) {
         return `<tr><td colspan="6" class="text-muted">Noch keine Baupläne vorhanden.</td></tr>`;
       }
-      return entries
-        .sort((a, b) => a.name.localeCompare(b.name, "de"))
-        .map(bp => {
-          const vehicleCount = bp.vehicles.reduce((sum, v) => sum + v.quantity, 0);
-          return `
-            <tr>
-              <td>${escapeHtml(bp.name)}</td>
-              <td>${escapeHtml(typeNameForPseudoId(bp.pseudoId))}</td>
-              <td><span class="label ${bp.enabled ? "label-success" : "label-default"}">${bp.enabled ? "Ja" : "Nein"}</span></td>
-              <td>${bp.extensions.length}</td>
-              <td>${vehicleCount} (${bp.vehicles.length} Typen)</td>
-              <td>
-                <button type="button" class="btn btn-primary btn-xs vn-bp-apply" data-id="${escapeHtml(bp.id)}" title="Anwenden">
-                  <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="btn btn-default btn-xs vn-bp-edit" data-id="${escapeHtml(bp.id)}" title="Bearbeiten">
-                  <span class="glyphicon glyphicon-pencil" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="btn btn-danger btn-xs vn-bp-delete" data-id="${escapeHtml(bp.id)}" title="Löschen">
-                  <span class="glyphicon glyphicon-trash" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="btn btn-default btn-xs vn-bp-export" data-id="${escapeHtml(bp.id)}" title="Exportieren">
-                  <span class="glyphicon glyphicon-export" aria-hidden="true"></span>
-                </button>
-              </td>
-            </tr>
-          `;
-        })
-        .join("");
+      return entries.sort((a, b) => a.name.localeCompare(b.name, "de")).map(bp => {
+        const vehicleCount = bp.vehicles.reduce((sum, v) => sum + v.quantity, 0);
+        return `\n            <tr>\n              <td>${escapeHtml(bp.name)}</td>\n              <td>${escapeHtml(typeNameForPseudoId(bp.pseudoId))}</td>\n              <td><span class="label ${bp.enabled ? "label-success" : "label-default"}">${bp.enabled ? "Ja" : "Nein"}</span></td>\n              <td>${bp.extensions.length}</td>\n              <td>${vehicleCount} (${bp.vehicles.length} Typen)</td>\n              <td>\n                <button type="button" class="btn btn-primary btn-xs vn-bp-apply" data-id="${escapeHtml(bp.id)}" title="Anwenden">\n                  <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n                </button>\n                <button type="button" class="btn btn-default btn-xs vn-bp-edit" data-id="${escapeHtml(bp.id)}" title="Bearbeiten">\n                  <span class="glyphicon glyphicon-pencil" aria-hidden="true"></span>\n                </button>\n                <button type="button" class="btn btn-danger btn-xs vn-bp-delete" data-id="${escapeHtml(bp.id)}" title="Löschen">\n                  <span class="glyphicon glyphicon-trash" aria-hidden="true"></span>\n                </button>\n                <button type="button" class="btn btn-default btn-xs vn-bp-export" data-id="${escapeHtml(bp.id)}" title="Exportieren">\n                  <span class="glyphicon glyphicon-export" aria-hidden="true"></span>\n                </button>\n              </td>\n            </tr>\n          `;
+      }).join("");
     }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Legt fest, welche Ausbauten und Fahrzeuge (mit Anzahl) eine Wache eines bestimmten Typs
-        haben soll - das benötigte Personal wird automatisch aus den Fahrzeugen berechnet.
-        Anwendbar über den Haken-Button je Bauplan, um zu sehen, welche passenden Wachen wovon
-        noch wie viel brauchen.
-      </p>
-      <p class="text-muted" style="font-size:12px;">
-        <b>Deine Wachen:</b> ${stationCountsSummary || "konnte nicht geladen werden"}
-      </p>
-      <div style="margin-bottom:12px;">
-        <button type="button" id="vn-bp-new" class="btn btn-primary btn-sm">
-          <span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Neuer Bauplan
-        </button>
-        <button type="button" id="vn-bp-import" class="btn btn-default btn-sm">
-          <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Bauplan importieren
-        </button>
-        <input type="file" id="vn-bp-import-file" accept="application/json" style="display:none;">
-      </div>
-      <div style="max-height:50vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px;">
-          <thead>
-            <tr><th>Name</th><th>Gebäudetyp</th><th>Aktiv</th><th>Ausbauten</th><th>Fahrzeuge</th><th>Aktionen</th></tr>
-          </thead>
-          <tbody id="vn-bp-results-body">${renderRows()}</tbody>
-        </table>
-      </div>
-      <div id="vn-bp-list-status" style="margin-top:6px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Legt fest, welche Ausbauten und Fahrzeuge (mit Anzahl) eine Wache eines bestimmten Typs\n        haben soll - das benötigte Personal wird automatisch aus den Fahrzeugen berechnet.\n        Anwendbar über den Haken-Button je Bauplan, um zu sehen, welche passenden Wachen wovon\n        noch wie viel brauchen.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        <b>Deine Wachen:</b> ${stationCountsSummary || "konnte nicht geladen werden"}\n      </p>\n      <div style="margin-bottom:12px;">\n        <button type="button" id="vn-bp-new" class="btn btn-primary btn-sm">\n          <span class="glyphicon glyphicon-plus" aria-hidden="true"></span> Neuer Bauplan\n        </button>\n        <button type="button" id="vn-bp-import" class="btn btn-default btn-sm">\n          <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Bauplan importieren\n        </button>\n        <input type="file" id="vn-bp-import-file" accept="application/json" style="display:none;">\n      </div>\n      <div style="max-height:50vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead>\n            <tr><th>Name</th><th>Gebäudetyp</th><th>Aktiv</th><th>Ausbauten</th><th>Fahrzeuge</th><th>Aktionen</th></tr>\n          </thead>\n          <tbody id="vn-bp-results-body">${renderRows()}</tbody>\n        </table>\n      </div>\n      <div id="vn-bp-list-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-bp-new").addEventListener("click", () => {
       renderStationBlueprintEditScreen(null, () => renderStationBlueprintsListScreen(goBack));
@@ -7457,7 +5184,6 @@
         statusEl.innerHTML = `<span class="text-danger">Fehler beim Importieren: ${escapeHtml(e.message)}</span>`;
       }
     });
-
     body.querySelectorAll(".vn-bp-apply").forEach(btn => {
       btn.addEventListener("click", () => {
         renderStationBlueprintApplyScreen(btn.dataset.id, () => renderStationBlueprintsListScreen(goBack));
@@ -7479,7 +5205,9 @@
       btn.addEventListener("click", () => {
         const blueprint = blueprints[btn.dataset.id];
         if (!blueprint) return;
-        const blob = new Blob([JSON.stringify(blueprint, null, 2)], { type: "application/json" });
+        const blob = new Blob([ JSON.stringify(blueprint, null, 2) ], {
+          type: "application/json"
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -7491,112 +5219,79 @@
       });
     });
   }
-
-  // Eigener Bestaetigungs-Screen statt eines nativen browser confirm() - der sprengt nicht nur
-  // optisch unser Design (Browser-Standarddialog mitten im eigenen dunklen Modal), sondern
-  // blockiert Browser-Automatisierung/KI-Testsessions, die auf DOM-Elemente angewiesen sind
-  // und mit einem nativen Dialog nicht interagieren koennen. Fuer einfache Ja/Nein-Aktionen
-  // OHNE Formulardaten, die bei "Abbrechen" verloren gehen koennten (sonst lieber inline/ohne
-  // Navigation loesen, siehe z.B. den Bauplan-Speichern-Handler bei Namensdopplung).
-  function renderSimpleConfirmScreen({ title, message, confirmLabel, confirmClass = "btn-danger", confirmIcon = "glyphicon-ok", onConfirm, goBack }) {
+  function renderSimpleConfirmScreen({title: title, message: message, confirmLabel: confirmLabel, confirmClass: confirmClass = "btn-danger", confirmIcon: confirmIcon = "glyphicon-ok", onConfirm: onConfirm, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(title);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p class="text-danger"><b>${message}</b></p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-simple-confirm" type="button" class="btn ${confirmClass}">
-          <span class="glyphicon ${confirmIcon}" aria-hidden="true"></span> ${escapeHtml(confirmLabel)}
-        </button>
-      </div>
-    `;
+    body.innerHTML = `\n      <p class="text-danger"><b>${message}</b></p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-simple-confirm" type="button" class="btn ${confirmClass}">\n          <span class="glyphicon ${confirmIcon}" aria-hidden="true"></span> ${escapeHtml(confirmLabel)}\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-simple-confirm").addEventListener("click", async () => {
       await onConfirm();
     });
   }
-
   function renderBlueprintDeleteConfirmScreen(blueprint, goBack) {
     renderSimpleConfirmScreen({
       title: "Wachen-Bauplaner › Löschen",
       message: `Bauplan "${escapeHtml(blueprint.name)}" wirklich löschen? Das kann nicht rückgängig gemacht werden.`,
       confirmLabel: "Löschen",
       confirmIcon: "glyphicon-trash",
-      goBack,
+      goBack: goBack,
       onConfirm: async () => {
         const current = await getStationBlueprints();
         delete current[blueprint.id];
         await saveStationBlueprints(current);
         goBack();
-      },
+      }
     });
   }
-
-  // Erstellen/Bearbeiten eines Bauplans: Gebäudetyp, Name, Ausbauten (Verfügbar/Zugewiesen-
-  // Doppelliste wie beim Vorbild-Script "Wachenbaupläne" (BOS-Ernie), statt einer Reihe
-  // Checkboxen - uebersichtlicher bei vielen Ausbauten), Fahrzeuge+Anzahl (aus dem Fahrzeug-
-  // Katalog gefiltert nach Gebäudetyp) - das benötigte Personal wird daraus automatisch
-  // berechnet und nur ANGEZEIGT (computeBlueprintPersonnelRequirements), nicht mehr manuell
-  // einstellbar (frueher "Sollpersonal"-Eingabefeld - war rein informativ, floss nirgendwo
-  // in echte Berechnungen ein, nur verwirrend neben der ohnehin schon automatisch berechneten
-  // Anforderung). Bewusst OHNE Regex-Namensfilter (gab es im Vorbild-Script) - unnoetige
-  // Komplexitaet, ein Bauplan gilt einfach fuer alle Wachen des gewaehlten Gebäudetyps.
   async function renderStationBlueprintEditScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachen-Bauplaner › Bearbeiten");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
-
     const blueprints = await getStationBlueprints();
     const existing = blueprintId ? blueprints[blueprintId] : null;
     const id = existing?.id || generateBlueprintId();
     const qualifications = await getPersonnelQualifications();
-
-    const pseudoOptions = PSEUDO_BUILDING_TYPES.map(t => ({ id: t.id, name: typeNameForPseudoId(t.id) })).sort(
-      (a, b) => a.name.localeCompare(b.name, "de"),
-    );
-
+    const pseudoOptions = PSEUDO_BUILDING_TYPES.map(t => ({
+      id: t.id,
+      name: typeNameForPseudoId(t.id)
+    })).sort((a, b) => a.name.localeCompare(b.name, "de"));
     function extensionCatalogForPseudoId(pseudoId) {
       if (!pseudoId) return [];
       const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
-      const buildingKey = getBuildingKey({ building_type: pseudo.buildingType, small_building: pseudo.smallBuilding });
+      const buildingKey = getBuildingKey({
+        building_type: pseudo.buildingType,
+        small_building: pseudo.smallBuilding
+      });
       return EXTENSION_CATALOG[buildingKey] || [];
     }
-
     function sortSelectOptions(select) {
-      const opts = [...select.options].sort((a, b) => a.textContent.localeCompare(b.textContent, "de"));
+      const opts = [ ...select.options ].sort((a, b) => a.textContent.localeCompare(b.textContent, "de"));
       opts.forEach(o => select.appendChild(o));
     }
-
-    // Liefert die <option>-Listen fuer die beiden Auswahl-Boxen (Verfuegbar/Zugewiesen) -
-    // getrennt gerendert statt live per DOM-Move, damit ein Gebaeudetyp-Wechsel die Boxen
-    // sauber neu aufbauen kann.
     function extensionListsHtml(pseudoId) {
-      const catalog = [...extensionCatalogForPseudoId(pseudoId)].sort((a, b) => a.name.localeCompare(b.name, "de"));
-      if (!pseudoId) return { available: "", assigned: "" };
-      if (!catalog.length) return { available: "", assigned: "" };
+      const catalog = [ ...extensionCatalogForPseudoId(pseudoId) ].sort((a, b) => a.name.localeCompare(b.name, "de"));
+      if (!pseudoId) return {
+        available: "",
+        assigned: ""
+      };
+      if (!catalog.length) return {
+        available: "",
+        assigned: ""
+      };
       const selectedIds = new Set(existing?.pseudoId === pseudoId ? existing.extensions : []);
       const option = ext => `<option value="${ext.id}">${escapeHtml(ext.name)}</option>`;
       return {
-        available: catalog
-          .filter(e => !selectedIds.has(e.id))
-          .map(option)
-          .join(""),
-        assigned: catalog
-          .filter(e => selectedIds.has(e.id))
-          .map(option)
-          .join(""),
+        available: catalog.filter(e => !selectedIds.has(e.id)).map(option).join(""),
+        assigned: catalog.filter(e => selectedIds.has(e.id)).map(option).join("")
       };
     }
-
     function bindExtensionLists() {
       const availableSelect = document.getElementById("vn-bp-ext-available");
       const assignedSelect = document.getElementById("vn-bp-ext-assigned");
       const moveSelected = (from, to) => {
-        [...from.selectedOptions].forEach(opt => to.appendChild(opt));
+        [ ...from.selectedOptions ].forEach(opt => to.appendChild(opt));
         sortSelectOptions(to);
       };
       document.getElementById("vn-bp-ext-add").addEventListener("click", () => moveSelected(availableSelect, assignedSelect));
@@ -7612,187 +5307,56 @@
         sortSelectOptions(availableSelect);
       });
     }
-
     function vehicleGridHtml(types, quantities) {
-      return `
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:6px;">
-          ${types
-            .map(
-              t => `
-                <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin:0;">
-                  <span style="flex:1;">${escapeHtml(t.name)}</span>
-                  <input type="number" min="0" class="form-control input-sm vn-bp-vehicle-qty" data-vehicle-type-id="${t.id}"
-                         value="${quantities.get(t.id) || 0}" style="width:70px;">
-                </label>
-              `,
-            )
-            .join("")}
-        </div>
-      `;
+      return `\n        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:6px;">\n          ${types.map(t => `\n                <label style="display:flex; align-items:center; gap:6px; font-weight:normal; margin:0;">\n                  <span style="flex:1;">${escapeHtml(t.name)}</span>\n                  <input type="number" min="0" class="form-control input-sm vn-bp-vehicle-qty" data-vehicle-type-id="${t.id}"\n                         value="${quantities.get(t.id) || 0}" style="width:70px;">\n                </label>\n              `).join("")}\n        </div>\n      `;
     }
-
     function vehicleInputsHtml(pseudoId) {
       if (!pseudoId) return `<p class="text-muted">Bitte zuerst Gebäudetyp wählen ...</p>`;
       const types = getVehicleTypesForPseudoId(pseudoId);
       if (!types.length) return `<p class="text-muted">Keine Fahrzeuge für diesen Gebäudetyp bekannt.</p>`;
-      const quantities = new Map(
-        (existing?.pseudoId === pseudoId ? existing.vehicles : []).map(v => [String(v.vehicleTypeId), v.quantity]),
-      );
-
+      const quantities = new Map((existing?.pseudoId === pseudoId ? existing.vehicles : []).map(v => [ String(v.vehicleTypeId), v.quantity ]));
       const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
       if (pseudo?.buildingType !== 0) return vehicleGridHtml(types, quantities);
-
-      // Feuerwehr hat mit Abstand die meisten Fahrzeugtypen - nach Kategorien wie im Spiel
-      // gruppiert statt einem einzigen unuebersichtlichen Grid (siehe categorizeFireVehicleName).
-      const byCategory = new Map();
+      const byCategory = new Map;
       for (const t of types) {
         const category = categorizeFireVehicleName(t.name);
         if (!byCategory.has(category)) byCategory.set(category, []);
         byCategory.get(category).push(t);
       }
-      // <details>/<summary> statt eigenem Klick-Handler: ALLE Kategorien starten eingeklappt,
-      // auch wenn schon Fahrzeuge gewaehlt sind - die Zahl neben dem Namen (Badge) reicht als
-      // Hinweis, ein automatisches Aufklappen war eher verwirrend als hilfreich.
-      return FIRE_VEHICLE_CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map(category => {
-          const categoryTypes = byCategory.get(category);
-          const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
-          return `
-            <details style="margin-bottom:6px;">
-              <summary class="vn-category-heading" style="font-size:11px; font-weight:bold; text-transform:uppercase;">
-                <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
-                ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}
-              </summary>
-              <div style="padding:8px 4px 0;">${vehicleGridHtml(categoryTypes, quantities)}</div>
-            </details>
-          `;
-        })
-        .join("");
+      return FIRE_VEHICLE_CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
+        const categoryTypes = byCategory.get(category);
+        const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
+        return `\n            <details style="margin-bottom:6px;">\n              <summary class="vn-category-heading" style="font-size:11px; font-weight:bold; text-transform:uppercase;">\n                <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>\n                ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}\n              </summary>\n              <div style="padding:8px 4px 0;">${vehicleGridHtml(categoryTypes, quantities)}</div>\n            </details>\n          `;
+      }).join("");
     }
-
     function bindVehicleQuantityInputs() {
       body.querySelectorAll(".vn-bp-vehicle-qty").forEach(input => {
         input.addEventListener("change", updatePersonnelRequirements);
       });
     }
-
     function updatePersonnelRequirements() {
-      const vehicles = [...body.querySelectorAll(".vn-bp-vehicle-qty")].map(input => ({
+      const vehicles = [ ...body.querySelectorAll(".vn-bp-vehicle-qty") ].map(input => ({
         vehicleTypeId: input.dataset.vehicleTypeId,
-        quantity: parseInt(input.value, 10) || 0,
+        quantity: parseInt(input.value, 10) || 0
       }));
-      const ranges = computeBlueprintPersonnelRequirementRanges({ vehicles });
-      const rows = [...ranges.entries()]
-        .sort((a, b) => (qualifications[a[0]] || a[0]).localeCompare(qualifications[b[0]] || b[0], "de"))
-        .map(
-          ([slug, { min, max }]) =>
-            `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`,
-        )
-        .join("");
-
-      const summary = computeBlueprintPersonnelSummary({ vehicles });
-      const summaryRows = `
-        <tr class="text-muted">
-          <td style="border-top:2px solid #888;">${summary.trained.min}</td>
-          <td style="border-top:2px solid #888;">${summary.trained.max}</td>
-          <td style="border-top:2px solid #888;">Geschult (gesamt)</td>
-        </tr>
-        <tr class="text-muted">
-          <td>${summary.untrained.min}</td><td>${summary.untrained.max}</td><td>Ungeschult</td>
-        </tr>
-        <tr><td><b>${summary.total.min}</b></td><td><b>${summary.total.max}</b></td><td><b>Insgesamt benötigt</b></td></tr>
-      `;
-
-      document.getElementById("vn-bp-personnel-body").innerHTML =
-        (rows || `<tr><td colspan="3" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`) + summaryRows;
+      const ranges = computeBlueprintPersonnelRequirementRanges({
+        vehicles: vehicles
+      });
+      const rows = [ ...ranges.entries() ].sort((a, b) => (qualifications[a[0]] || a[0]).localeCompare(qualifications[b[0]] || b[0], "de")).map(([slug, {min: min, max: max}]) => `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`).join("");
+      const summary = computeBlueprintPersonnelSummary({
+        vehicles: vehicles
+      });
+      const summaryRows = `\n        <tr class="text-muted">\n          <td style="border-top:2px solid #888;">${summary.trained.min}</td>\n          <td style="border-top:2px solid #888;">${summary.trained.max}</td>\n          <td style="border-top:2px solid #888;">Geschult (gesamt)</td>\n        </tr>\n        <tr class="text-muted">\n          <td>${summary.untrained.min}</td><td>${summary.untrained.max}</td><td>Ungeschult</td>\n        </tr>\n        <tr><td><b>${summary.total.min}</b></td><td><b>${summary.total.max}</b></td><td><b>Insgesamt benötigt</b></td></tr>\n      `;
+      document.getElementById("vn-bp-personnel-body").innerHTML = (rows || `<tr><td colspan="3" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`) + summaryRows;
     }
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Das benötigte Personal wird automatisch aus den ausgewählten Fahrzeugen berechnet
-        (gleiche Logik wie bei der Fahrzeug-Besatzung).
-      </p>
-      <div class="form-horizontal">
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Name</label>
-          <div class="col-sm-10">
-            <input type="text" id="vn-bp-name" class="form-control" value="${escapeHtml(existing?.name || "")}" placeholder="leer = Gebäudetyp-Name (z.B. Rettungswache)">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Aktiv</label>
-          <div class="col-sm-10">
-            <label class="radio-inline"><input type="radio" name="vn-bp-enabled" value="yes" ${existing?.enabled !== false ? "checked" : ""}> Ja</label>
-            <label class="radio-inline"><input type="radio" name="vn-bp-enabled" value="no" ${existing?.enabled === false ? "checked" : ""}> Nein</label>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Gebäudetyp</label>
-          <div class="col-sm-10">
-            <select id="vn-bp-pseudo-id" class="form-control">
-              <option value="">Bitte wählen ...</option>
-              ${pseudoOptions.map(o => `<option value="${o.id}" ${existing?.pseudoId === o.id ? "selected" : ""}>${escapeHtml(o.name)}</option>`).join("")}
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Ausbauten</label>
-          <div class="col-sm-10" id="vn-bp-extensions">
-            ${(() => {
-              const lists = extensionListsHtml(existing?.pseudoId || "");
-              return `
-                <div style="display:flex; gap:10px; align-items:flex-start;">
-                  <div style="flex:1;">
-                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Verfügbar (Doppelklick zum Hinzufügen)</label>
-                    <select id="vn-bp-ext-available" multiple size="8" class="form-control">${lists.available}</select>
-                  </div>
-                  <div style="display:flex; flex-direction:column; gap:6px; margin-top:20px;">
-                    <button type="button" id="vn-bp-ext-add" class="btn btn-default btn-sm" title="Hinzufügen">
-                      <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" id="vn-bp-ext-remove" class="btn btn-default btn-sm" title="Entfernen">
-                      <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span>
-                    </button>
-                  </div>
-                  <div style="flex:1;">
-                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Zugewiesen (Doppelklick zum Entfernen)</label>
-                    <select id="vn-bp-ext-assigned" multiple size="8" class="form-control">${lists.assigned}</select>
-                  </div>
-                </div>
-              `;
-            })()}
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Fahrzeuge</label>
-          <div class="col-sm-10" id="vn-bp-vehicles">${vehicleInputsHtml(existing?.pseudoId || "")}</div>
-        </div>
-        <div class="form-group">
-          <label class="col-sm-2 control-label">Benötigtes Personal</label>
-          <div class="col-sm-10">
-            <table class="table table-condensed" style="font-size:12px; max-width:400px;">
-              <thead><tr><th>Min.</th><th>Max.</th><th>Ausbildung</th></tr></thead>
-              <tbody id="vn-bp-personnel-body"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div id="vn-bp-edit-status" style="margin-top:6px;"></div>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
-        </button>
-        <button id="vn-bp-save" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
-        </button>
-      </div>
-    `;
-
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Das benötigte Personal wird automatisch aus den ausgewählten Fahrzeugen berechnet\n        (gleiche Logik wie bei der Fahrzeug-Besatzung).\n      </p>\n      <div class="form-horizontal">\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Name</label>\n          <div class="col-sm-10">\n            <input type="text" id="vn-bp-name" class="form-control" value="${escapeHtml(existing?.name || "")}" placeholder="leer = Gebäudetyp-Name (z.B. Rettungswache)">\n          </div>\n        </div>\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Aktiv</label>\n          <div class="col-sm-10">\n            <label class="radio-inline"><input type="radio" name="vn-bp-enabled" value="yes" ${existing?.enabled !== false ? "checked" : ""}> Ja</label>\n            <label class="radio-inline"><input type="radio" name="vn-bp-enabled" value="no" ${existing?.enabled === false ? "checked" : ""}> Nein</label>\n          </div>\n        </div>\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Gebäudetyp</label>\n          <div class="col-sm-10">\n            <select id="vn-bp-pseudo-id" class="form-control">\n              <option value="">Bitte wählen ...</option>\n              ${pseudoOptions.map(o => `<option value="${o.id}" ${existing?.pseudoId === o.id ? "selected" : ""}>${escapeHtml(o.name)}</option>`).join("")}\n            </select>\n          </div>\n        </div>\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Ausbauten</label>\n          <div class="col-sm-10" id="vn-bp-extensions">\n            ${(() => {
+      const lists = extensionListsHtml(existing?.pseudoId || "");
+      return `\n                <div style="display:flex; gap:10px; align-items:flex-start;">\n                  <div style="flex:1;">\n                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Verfügbar (Doppelklick zum Hinzufügen)</label>\n                    <select id="vn-bp-ext-available" multiple size="8" class="form-control">${lists.available}</select>\n                  </div>\n                  <div style="display:flex; flex-direction:column; gap:6px; margin-top:20px;">\n                    <button type="button" id="vn-bp-ext-add" class="btn btn-default btn-sm" title="Hinzufügen">\n                      <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>\n                    </button>\n                    <button type="button" id="vn-bp-ext-remove" class="btn btn-default btn-sm" title="Entfernen">\n                      <span class="glyphicon glyphicon-chevron-left" aria-hidden="true"></span>\n                    </button>\n                  </div>\n                  <div style="flex:1;">\n                    <label class="text-muted" style="font-size:11px; font-weight:normal;">Zugewiesen (Doppelklick zum Entfernen)</label>\n                    <select id="vn-bp-ext-assigned" multiple size="8" class="form-control">${lists.assigned}</select>\n                  </div>\n                </div>\n              `;
+    })()}\n          </div>\n        </div>\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Fahrzeuge</label>\n          <div class="col-sm-10" id="vn-bp-vehicles">${vehicleInputsHtml(existing?.pseudoId || "")}</div>\n        </div>\n        <div class="form-group">\n          <label class="col-sm-2 control-label">Benötigtes Personal</label>\n          <div class="col-sm-10">\n            <table class="table table-condensed" style="font-size:12px; max-width:400px;">\n              <thead><tr><th>Min.</th><th>Max.</th><th>Ausbildung</th></tr></thead>\n              <tbody id="vn-bp-personnel-body"></tbody>\n            </table>\n          </div>\n        </div>\n      </div>\n      <div id="vn-bp-edit-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-bp-save" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindVehicleQuantityInputs();
     bindExtensionLists();
     updatePersonnelRequirements();
-
     document.getElementById("vn-bp-pseudo-id").addEventListener("change", e => {
       const pseudoId = e.target.value;
       const lists = extensionListsHtml(pseudoId);
@@ -7809,25 +5373,16 @@
         statusEl.innerHTML = `<span class="text-danger">Bitte Gebäudetyp angeben.</span>`;
         return;
       }
-      // Leerer Name -> Gebaeudetyp-Name als Standard (z.B. "Feuerwache"), statt einen Namen
-      // zu erzwingen.
       const typedName = document.getElementById("vn-bp-name").value.trim();
       const name = typedName || typeNameForPseudoId(pseudoId);
-
       const enabled = document.querySelector('input[name="vn-bp-enabled"]:checked')?.value !== "no";
-      const extensions = [...document.getElementById("vn-bp-ext-assigned").options].map(opt => Number(opt.value));
-      const vehicles = [...body.querySelectorAll(".vn-bp-vehicle-qty")]
-        .map(input => ({ vehicleTypeId: Number(input.dataset.vehicleTypeId), quantity: parseInt(input.value, 10) || 0 }))
-        .filter(v => v.quantity > 0);
-
+      const extensions = [ ...document.getElementById("vn-bp-ext-assigned").options ].map(opt => Number(opt.value));
+      const vehicles = [ ...body.querySelectorAll(".vn-bp-vehicle-qty") ].map(input => ({
+        vehicleTypeId: Number(input.dataset.vehicleTypeId),
+        quantity: parseInt(input.value, 10) || 0
+      })).filter(v => v.quantity > 0);
       const current = await getStationBlueprints();
-
-      // Namensdopplung (unabhaengig von Gross/Kleinschreibung) mit einem ANDEREN Bauplan -
-      // vorher fragen, ob dieser ersetzt werden soll, statt zwei gleich benannte Plaene
-      // nebeneinander stehen zu haben (kann sonst z.B. beim Anwenden verwirren).
-      const duplicate = Object.values(current).find(
-        bp => bp.id !== id && bp.name.trim().toLowerCase() === name.toLowerCase(),
-      );
+      const duplicate = Object.values(current).find(bp => bp.id !== id && bp.name.trim().toLowerCase() === name.toLowerCase());
       if (duplicate) {
         const confirmed = confirm(`Ein Bauplan mit dem Namen "${name}" existiert bereits. Diesen überschreiben (ersetzen)?`);
         if (!confirmed) {
@@ -7836,31 +5391,25 @@
         }
         delete current[duplicate.id];
       }
-
       current[id] = {
-        id,
-        enabled,
-        pseudoId,
-        name,
-        extensions,
-        vehicles,
+        id: id,
+        enabled: enabled,
+        pseudoId: pseudoId,
+        name: name,
+        extensions: extensions,
+        vehicles: vehicles
       };
-
-      // Pro Gebaeudetyp darf nur EIN Bauplan aktiv sein - dessen Fahrzeuge liefern
-      // automatisch die Personal-Anforderung fuer Personal-Check/Schulungen (siehe
-      // computePersonnelRequirementsFromBlueprints). Wird hier ein Plan aktiviert, alle
-      // ANDEREN aktiven Plaene desselben Typs automatisch deaktivieren, statt das dem
-      // Nutzer manuell zu ueberlassen.
       let deactivated = [];
       if (enabled) {
         deactivated = Object.values(current).filter(bp => bp.id !== id && bp.pseudoId === pseudoId && bp.enabled);
         deactivated.forEach(bp => {
-          current[bp.id] = { ...bp, enabled: false };
+          current[bp.id] = {
+            ...bp,
+            enabled: false
+          };
         });
       }
-
       await saveStationBlueprints(current);
-
       if (deactivated.length) {
         statusEl.innerHTML = `<span class="text-success">Gespeichert. "${escapeHtml(deactivated.map(bp => bp.name).join('", "'))}" wurde automatisch deaktiviert (nur ein aktiver Bauplan je Gebäudetyp).</span>`;
         setTimeout(goBack, 1800);
@@ -7869,186 +5418,111 @@
       }
     });
   }
-
-  // Anwenden eines Bauplans: zeigt alle passenden Wachen (gleicher Gebäudetyp) mit Soll/Ist-
-  // Vergleich fuer Ausbauten, Fahrzeuge und Personal. Ausbauten koennen direkt gebaut werden
-  // (wiederverwendet buildExtension/renderBuildConfirmScreen aus dem Wachen-Check), fehlende
-  // Fahrzeuge direkt gekauft (buyVehicle), Personal-Luecken verweisen auf Fahrzeug-Besatzung/
-  // Schulungen.
   async function renderStationBlueprintApplyScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachen-Bauplaner › Anwenden");
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
-
     const blueprints = await getStationBlueprints();
     const blueprint = blueprints[blueprintId];
     if (!blueprint) {
-      body.innerHTML = `
-        <p class="text-danger">Bauplan nicht gefunden.</p>
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-        </div>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Bauplan nicht gefunden.</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
-
     let allStations, vehicles, scanData, qualifications, scanMeta;
     try {
-      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([
-        loadBuildingsForCheck(),
-        fetchAllVehiclesV2(),
-        getPersonnelScanData(),
-        getPersonnelQualifications(),
-        getPersonnelScanMeta(),
-      ]);
+      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2(), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
     } catch (e) {
-      body.innerHTML = `
-        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>
-        <div class="vn-sticky-footer">
-          <button id="vn-btn-back" type="button" class="btn btn-default">
-            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-          </button>
-        </div>
-      `;
+      body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
-
     const matchingStations = allStations.filter(s => s.pseudoId === blueprint.pseudoId);
-
-    // Je Wache+Typ nicht nur die Anzahl, sondern auch die echten Fahrzeug-ids (fuer den
-    // Direktlink zu einem einzelnen ueberzaehligen Fahrzeug, siehe vehicleCell unten).
-    const vehiclesByStationAndType = new Map();
+    const vehiclesByStationAndType = new Map;
     for (const v of vehicles) {
       const stationId = String(v.building_id ?? v.building);
       const typeId = String(v.vehicle_type ?? v.type);
-      if (!vehiclesByStationAndType.has(stationId)) vehiclesByStationAndType.set(stationId, new Map());
+      if (!vehiclesByStationAndType.has(stationId)) vehiclesByStationAndType.set(stationId, new Map);
       const byType = vehiclesByStationAndType.get(stationId);
       if (!byType.has(typeId)) byType.set(typeId, []);
       byType.get(typeId).push(String(v.id));
     }
-
     const requiredPersonnel = computeBlueprintPersonnelRequirements(blueprint);
-
-    // Liefert neben dem fertigen HTML auch die Sortier-Kennzahlen einer Zeile (siehe
-    // sortableColumns unten) - einmal pro Wache berechnet, nicht bei jedem Klick auf eine
-    // Spaltenueberschrift neu.
     function buildStationRow(station) {
       const missingExtensionIds = blueprint.extensions.filter(extId => !station.extensions.some(e => e.type_id === extId));
       const catalog = EXTENSION_CATALOG[station.buildingKey] || [];
-      const extensionCell = missingExtensionIds.length
-        ? missingExtensionIds
-            .map(extId => {
-              const ext = catalog.find(e => e.id === extId);
-              if (!ext) return `<span class="label label-default">Ausbau ${extId}</span>`;
-              return `
-                <button type="button" class="btn btn-xs btn-warning vn-bp-build-ext" style="margin:1px;"
-                        data-station-id="${station.id}" data-ext-id="${ext.id}" data-name="${escapeHtml(ext.name)}"
-                        data-cost="${ext.cost}" data-coins="${ext.coins}">
-                  ${escapeHtml(ext.name)}
-                </button>
-              `;
-            })
-            .join("")
-        : `<span class="label label-success">alle gebaut</span>`;
-
-      const byType = vehiclesByStationAndType.get(station.id) || new Map();
+      const extensionCell = missingExtensionIds.length ? missingExtensionIds.map(extId => {
+        const ext = catalog.find(e => e.id === extId);
+        if (!ext) return `<span class="label label-default">Ausbau ${extId}</span>`;
+        return `\n                <button type="button" class="btn btn-xs btn-warning vn-bp-build-ext" style="margin:1px;"\n                        data-station-id="${station.id}" data-ext-id="${ext.id}" data-name="${escapeHtml(ext.name)}"\n                        data-cost="${ext.cost}" data-coins="${ext.coins}">\n                  ${escapeHtml(ext.name)}\n                </button>\n              `;
+      }).join("") : `<span class="label label-success">alle gebaut</span>`;
+      const byType = vehiclesByStationAndType.get(station.id) || new Map;
       let vehicleDeficit = 0;
       let vehicleSurplus = 0;
-      const vehicleCell = blueprint.vehicles
-        .map(bv => {
-          const ownIds = byType.get(String(bv.vehicleTypeId)) || [];
-          // API zeigt einen frischen Kauf/Verkauf teils erst nach bis zu einer Minute - bis
-          // dahin optimistisch mit der Vormerkung rechnen (siehe recordPendingVehicleChange),
-          // sonst wuerde hier faelschlich wieder "kaufen"/"zu viel" fuer eine Aktion stehen,
-          // die schon durch ist.
-          const pendingDelta = getPendingVehicleDelta(station.id, bv.vehicleTypeId);
-          const have = Math.max(0, ownIds.length + pendingDelta);
-          const missing = Math.max(bv.quantity - have, 0);
-          const surplus = Math.max(have - bv.quantity, 0);
-          vehicleDeficit += missing;
-          vehicleSurplus += surplus;
-          const name = vehicleTypeCaptions[bv.vehicleTypeId] || `Typ ${bv.vehicleTypeId}`;
-          const cssClass = surplus ? "label-danger" : missing ? "label-warning" : "label-success";
-          const pendingHint = pendingDelta
-            ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="Vorläufig - gleicht sich automatisch mit dem Spiel ab, sobald die Änderung dort sichtbar ist"></span>`
-            : "";
-          const label = `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}${pendingHint}</span>`;
-          if (surplus) {
-            // Bei einer noch vorgemerkten (noch nicht in der API sichtbaren) Aktion kennen wir
-            // die echte id des naechsten ueberzaehligen Fahrzeugs nicht zuverlaessig - Verkaufen
-            // dann sicherheitshalber sperren, statt versehentlich das falsche zu treffen.
-            const excessVehicleId = ownIds[ownIds.length - 1];
-            if (!excessVehicleId) return label;
-            return `${label}
-              <button type="button" class="btn btn-xs btn-danger vn-bp-sell-vehicle" style="margin:1px;"
-                      data-vehicle-id="${excessVehicleId}" data-name="${escapeHtml(name)}" data-station-id="${station.id}"
-                      data-vehicle-type-id="${bv.vehicleTypeId}" title="Verkauft eines der überzähligen Fahrzeuge">
-                <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> ${surplus}x zu viel
-              </button>`;
-          }
-          if (!missing) return label;
-          const catalogEntry = vehicleTypeCatalog[bv.vehicleTypeId];
-          if (!catalogEntry) return label;
-          return `${label}
-            <button type="button" class="btn btn-xs btn-primary vn-bp-buy-vehicle" style="margin:1px;"
-                    data-station-id="${station.id}" data-vehicle-type-id="${bv.vehicleTypeId}" data-name="${escapeHtml(name)}"
-                    data-missing="${missing}" data-cost="${(catalogEntry.credits || 0) * missing}" data-coins="${(catalogEntry.coins || 0) * missing}">
-              <span class="glyphicon glyphicon-shopping-cart" aria-hidden="true"></span> ${missing}x kaufen
-            </button>`;
-        })
-        .join(" ");
-
+      const vehicleCell = blueprint.vehicles.map(bv => {
+        const ownIds = byType.get(String(bv.vehicleTypeId)) || [];
+        const pendingDelta = getPendingVehicleDelta(station.id, bv.vehicleTypeId);
+        const have = Math.max(0, ownIds.length + pendingDelta);
+        const missing = Math.max(bv.quantity - have, 0);
+        const surplus = Math.max(have - bv.quantity, 0);
+        vehicleDeficit += missing;
+        vehicleSurplus += surplus;
+        const name = vehicleTypeCaptions[bv.vehicleTypeId] || `Typ ${bv.vehicleTypeId}`;
+        const cssClass = surplus ? "label-danger" : missing ? "label-warning" : "label-success";
+        const pendingHint = pendingDelta ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="Vorläufig - gleicht sich automatisch mit dem Spiel ab, sobald die Änderung dort sichtbar ist"></span>` : "";
+        const label = `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}${pendingHint}</span>`;
+        if (surplus) {
+          const excessVehicleId = ownIds[ownIds.length - 1];
+          if (!excessVehicleId) return label;
+          return `${label}\n              <button type="button" class="btn btn-xs btn-danger vn-bp-sell-vehicle" style="margin:1px;"\n                      data-vehicle-id="${excessVehicleId}" data-name="${escapeHtml(name)}" data-station-id="${station.id}"\n                      data-vehicle-type-id="${bv.vehicleTypeId}" title="Verkauft eines der überzähligen Fahrzeuge">\n                <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> ${surplus}x zu viel\n              </button>`;
+        }
+        if (!missing) return label;
+        const catalogEntry = vehicleTypeCatalog[bv.vehicleTypeId];
+        if (!catalogEntry) return label;
+        return `${label}\n            <button type="button" class="btn btn-xs btn-primary vn-bp-buy-vehicle" style="margin:1px;"\n                    data-station-id="${station.id}" data-vehicle-type-id="${bv.vehicleTypeId}" data-name="${escapeHtml(name)}"\n                    data-missing="${missing}" data-cost="${(catalogEntry.credits || 0) * missing}" data-coins="${(catalogEntry.coins || 0) * missing}">\n              <span class="glyphicon glyphicon-shopping-cart" aria-hidden="true"></span> ${missing}x kaufen\n            </button>`;
+      }).join(" ");
       const scan = scanData[station.id];
       let personnelDeficit = scan ? 0 : -1;
-      const personnelCell = scan
-        ? [...requiredPersonnel.entries()]
-            .map(([slug, required]) => {
-              const have = scan.counts[slug] || 0;
-              if (have < required) personnelDeficit += required - have;
-              const name = qualifications[slug] || slug;
-              const cssClass = have >= required ? "label-success" : "label-warning";
-              return `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${required}</span>`;
-            })
-            .join(" ") || '<span class="text-muted">keine Anforderung</span>'
-        : '<span class="label label-default">Nicht gescannt</span>';
-
-      const html = `
-        <tr>
-          <td><a href="/buildings/${station.id}" target="_blank">${escapeHtml(station.name)}</a></td>
-          <td>${extensionCell}</td>
-          <td>${vehicleCell}</td>
-          <td>${personnelCell}</td>
-        </tr>
-      `;
+      const personnelCell = scan ? [ ...requiredPersonnel.entries() ].map(([slug, required]) => {
+        const have = scan.counts[slug] || 0;
+        if (have < required) personnelDeficit += required - have;
+        const name = qualifications[slug] || slug;
+        const cssClass = have >= required ? "label-success" : "label-warning";
+        return `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${required}</span>`;
+      }).join(" ") || '<span class="text-muted">keine Anforderung</span>' : '<span class="label label-default">Nicht gescannt</span>';
+      const html = `\n        <tr>\n          <td><a href="/buildings/${station.id}" target="_blank">${escapeHtml(station.name)}</a></td>\n          <td>${extensionCell}</td>\n          <td>${vehicleCell}</td>\n          <td>${personnelCell}</td>\n        </tr>\n      `;
       return {
-        html,
+        html: html,
         sortValues: {
           station: station.name,
           extensions: missingExtensionIds.length,
           vehicles: vehicleDeficit + vehicleSurplus,
-          personnel: personnelDeficit,
-        },
+          personnel: personnelDeficit
+        }
       };
     }
-
     const rows = matchingStations.map(buildStationRow);
-
-    const sortableColumns = [
-      { key: "station", label: "Wache" },
-      { key: "extensions", label: "Fehlende Ausbauten" },
-      { key: "vehicles", label: "Fahrzeuge" },
-      { key: "personnel", label: "Personal" },
-    ];
-    let sortState = { key: "station", dir: "asc" };
-
+    const sortableColumns = [ {
+      key: "station",
+      label: "Wache"
+    }, {
+      key: "extensions",
+      label: "Fehlende Ausbauten"
+    }, {
+      key: "vehicles",
+      label: "Fahrzeuge"
+    }, {
+      key: "personnel",
+      label: "Personal"
+    } ];
+    let sortState = {
+      key: "station",
+      dir: "asc"
+    };
     function sortedRowsHtml() {
-      const { key, dir } = sortState;
-      const sorted = [...rows].sort((a, b) => {
+      const {key: key, dir: dir} = sortState;
+      const sorted = [ ...rows ].sort((a, b) => {
         const av = a.sortValues[key];
         const bv = b.sortValues[key];
         const cmp = typeof av === "string" ? av.localeCompare(bv, "de") : av - bv;
@@ -8056,25 +5530,20 @@
       });
       return sorted.map(r => r.html).join("") || `<tr><td colspan="4" class="text-muted">Keine passenden Wachen gefunden.</td></tr>`;
     }
-
     function theadHtml() {
-      return `
-        <tr>
-          ${sortableColumns
-            .map(col => {
-              const arrow = sortState.key === col.key ? (sortState.dir === "asc" ? " ▲" : " ▼") : "";
-              return `<th class="vn-bp-sort-header" data-key="${col.key}" style="cursor:pointer; user-select:none;">${escapeHtml(col.label)}${arrow}</th>`;
-            })
-            .join("")}
-        </tr>
-      `;
+      return `\n        <tr>\n          ${sortableColumns.map(col => {
+        const arrow = sortState.key === col.key ? sortState.dir === "asc" ? " ▲" : " ▼" : "";
+        return `<th class="vn-bp-sort-header" data-key="${col.key}" style="cursor:pointer; user-select:none;">${escapeHtml(col.label)}${arrow}</th>`;
+      }).join("")}\n        </tr>\n      `;
     }
-
     function bindSortHeaders() {
       body.querySelectorAll(".vn-bp-sort-header").forEach(th => {
         th.addEventListener("click", () => {
           const key = th.dataset.key;
-          sortState = { key, dir: sortState.key === key && sortState.dir === "asc" ? "desc" : "asc" };
+          sortState = {
+            key: key,
+            dir: sortState.key === key && sortState.dir === "asc" ? "desc" : "asc"
+          };
           document.getElementById("vn-bp-apply-thead").innerHTML = theadHtml();
           document.getElementById("vn-bp-apply-tbody").innerHTML = sortedRowsHtml();
           bindSortHeaders();
@@ -8082,7 +5551,6 @@
         });
       });
     }
-
     function bindRowActions() {
       body.querySelectorAll(".vn-bp-build-ext").forEach(btn => {
         btn.addEventListener("click", () => {
@@ -8095,11 +5563,10 @@
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
             historyType: "extension",
             historyLabel: btn.dataset.name,
-            historyStation: stationName,
+            historyStation: stationName
           });
         });
       });
-
       body.querySelectorAll(".vn-bp-buy-vehicle").forEach(btn => {
         btn.addEventListener("click", () => {
           const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
@@ -8118,95 +5585,45 @@
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
             historyType: "vehicle",
             historyLabel: `${missing}x ${btn.dataset.name}`,
-            historyStation: stationName,
+            historyStation: stationName
           });
         });
       });
-
       body.querySelectorAll(".vn-bp-sell-vehicle").forEach(btn => {
         btn.addEventListener("click", () => {
           const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
           renderVehicleSellConfirmScreen({
             vehicleId: btn.dataset.vehicleId,
             vehicleName: btn.dataset.name,
-            stationName,
+            stationName: stationName,
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
             onSold: () => {
               recordPendingVehicleChange(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), -1);
               scheduleVehicleReconcile(blueprintId, goBack);
-            },
+            }
           });
         });
       });
     }
-
-    const lastScanLabel = scanMeta.lastScanAt
-      ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`
-      : "Personal noch nie gescannt";
-
-    // Hilfe zur Selbsthilfe, wenn 0 Wachen passen (z.B. Bauplan fuer "Feuerwache (Kleinwache)"
-    // angelegt, aber alle eigenen Feuerwachen sind normale, keine Kleinwachen) - zeigt, als
-    // welchen Gebaeudetyp FuxTools die eigenen Wachen tatsaechlich erkennt, statt nur
-    // ergebnislos "Keine passenden Wachen gefunden" anzuzeigen.
-    const noMatchHint =
-      matchingStations.length === 0
-        ? (() => {
-            const counts = new Map();
-            for (const s of allStations) {
-              const label = s.typeName || "Unbekannter Gebäudetyp";
-              counts.set(label, (counts.get(label) || 0) + 1);
-            }
-            const breakdown = [...counts.entries()]
-              .sort((a, b) => b[1] - a[1])
-              .map(([label, count]) => `${count}x ${escapeHtml(label)}`)
-              .join(", ");
-            return `
-              <p class="text-danger" style="font-size:12px;">
-                Keine Wache mit Gebäudetyp "${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}" gefunden.
-                Deine Wachen laut FuxTools: ${breakdown || "keine gefunden"}.
-              </p>`;
-          })()
-        : "";
-
-    body.innerHTML = `
-      <p class="text-muted" style="font-size:12px;">
-        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)
-        angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,
-        Personal über Personal-Check/Schulungen/Fahrzeug-Besatzung nachrüsten.
-      </p>
-      ${noMatchHint}
-      <div style="max-height:60vh; overflow:auto;">
-        <table class="table table-condensed table-striped" style="font-size:12px;">
-          <thead id="vn-bp-apply-thead">${theadHtml()}</thead>
-          <tbody id="vn-bp-apply-tbody" data-blueprint-id="${escapeHtml(blueprintId)}">${sortedRowsHtml()}</tbody>
-        </table>
-      </div>
-      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-bp-apply-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
-        </button>
-        <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>
-      </div>
-    `;
-
+    const lastScanLabel = scanMeta.lastScanAt ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}` : "Personal noch nie gescannt";
+    const noMatchHint = matchingStations.length === 0 ? (() => {
+      const counts = new Map;
+      for (const s of allStations) {
+        const label = s.typeName || "Unbekannter Gebäudetyp";
+        counts.set(label, (counts.get(label) || 0) + 1);
+      }
+      const breakdown = [ ...counts.entries() ].sort((a, b) => b[1] - a[1]).map(([label, count]) => `${count}x ${escapeHtml(label)}`).join(", ");
+      return `\n              <p class="text-danger" style="font-size:12px;">\n                Keine Wache mit Gebäudetyp "${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}" gefunden.\n                Deine Wachen laut FuxTools: ${breakdown || "keine gefunden"}.\n              </p>`;
+    })() : "";
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)\n        angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,\n        Personal über Personal-Check/Schulungen/Fahrzeug-Besatzung nachrüsten.\n      </p>\n      ${noMatchHint}\n      <div style="max-height:60vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead id="vn-bp-apply-thead">${theadHtml()}</thead>\n          <tbody id="vn-bp-apply-tbody" data-blueprint-id="${escapeHtml(blueprintId)}">${sortedRowsHtml()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-bp-apply-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n        </button>\n        <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindSortHeaders();
     bindRowActions();
-    // Falls der Screen mit noch frischen Vormerkungen (er)oeffnet wird (z.B. Zurueck-Button
-    // kurz nach einem Kauf) - auch dann automatisch neu laden, sobald sie ablaufen, nicht nur
-    // direkt nach dem Kauf/Verkauf-Klick selbst.
     if (hasFreshPendingVehicleChanges()) scheduleVehicleReconcile(blueprintId, goBack);
-
     document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
       const btn = document.getElementById("vn-bp-apply-refresh");
       btn.disabled = true;
-      body.insertAdjacentHTML(
-        "beforeend",
-        `<p id="vn-bp-apply-refresh-status"><em>Wachen, Fahrzeuge und Personal werden neu geladen ...</em></p>`,
-      );
+      body.insertAdjacentHTML("beforeend", `<p id="vn-bp-apply-refresh-status"><em>Wachen, Fahrzeuge und Personal werden neu geladen ...</em></p>`);
       try {
         await scanAllPersonnel((done, of) => {
           const statusEl = document.getElementById("vn-bp-apply-refresh-status");
@@ -8218,32 +5635,15 @@
       renderStationBlueprintApplyScreen(blueprintId, goBack);
     });
   }
-
-  //////////////////////////////////////////////////
-  // Main
-  //////////////////////////////////////////////////
-
   async function main() {
-    console.log(
-      "%cFuxTools%c by Fuxaro - lizenziert unter CC BY-NC-SA 4.0 (Namensnennung, nicht-kommerziell, Weitergabe unter gleichen Bedingungen). https://creativecommons.org/licenses/by-nc-sa/4.0/",
-      "color:#337ab7; font-weight:bold;",
-      "color:inherit; font-weight:normal;"
-    );
-    // allSettled statt all: initVehicleTypeCaptions() haengt von einer FREMDEN Seite ab
-    // (api.lss-manager.de) und wirft bei jedem Netzwerk-Hakler (Adblocker, CORS, Seite kurz
-    // down) - mit Promise.all wuerde DAS allein addMenuEntry()/checkForUpdateInBackground()
-    // nie erreichen lassen, FuxTools waere dann komplett unsichtbar/unbedienbar. So bleiben
-    // Menuepunkt und Update-Check auch bei fehlgeschlagenem Fahrzeug-Katalog nutzbar
-    // (betroffene Funktionen wie Umbenennen/Wachen-Bauplaner zeigen dann nur leere Daten,
-    // statt das ganze Script lahmzulegen).
-    const initSteps = ["Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher"];
-    const results = await Promise.allSettled([initModal(), initVehicleTypeCaptions(), initNamesStore()]);
+    console.log("%cFuxTools%c by Fuxaro - lizenziert unter CC BY-NC-SA 4.0 (Namensnennung, nicht-kommerziell, Weitergabe unter gleichen Bedingungen). https://creativecommons.org/licenses/by-nc-sa/4.0/", "color:#337ab7; font-weight:bold;", "color:inherit; font-weight:normal;");
+    const initSteps = [ "Modal-Grundgerüst", "Fahrzeug-Katalog", "Namens-Speicher" ];
+    const results = await Promise.allSettled([ initModal(), initVehicleTypeCaptions(), initNamesStore() ]);
     results.forEach((r, i) => {
       if (r.status === "rejected") reportError(`Initialisierung fehlgeschlagen (${initSteps[i]})`, r.reason);
     });
     addMenuEntry();
-    checkForUpdateInBackground(); // gedrosselt, blockiert den Start nicht (kein await)
+    checkForUpdateInBackground();
   }
-
   main();
 })();
