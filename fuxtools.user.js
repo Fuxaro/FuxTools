@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.57
+// @version     0.9.58
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.57";
+  const SCRIPT_VERSION = "0.9.58";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -7138,15 +7138,15 @@
         if (!byCategory.has(category)) byCategory.set(category, []);
         byCategory.get(category).push(t);
       }
-      // <details>/<summary> statt eigenem Klick-Handler: Kategorien mit bereits gewaehlten
-      // Fahrzeugen (z.B. beim Bearbeiten eines bestehenden Bauplans) starten aufgeklappt,
-      // alle anderen eingeklappt - deutlich uebersichtlicher als alle 16 auf einmal offen.
+      // <details>/<summary> statt eigenem Klick-Handler: ALLE Kategorien starten eingeklappt,
+      // auch wenn schon Fahrzeuge gewaehlt sind - die Zahl neben dem Namen (Badge) reicht als
+      // Hinweis, ein automatisches Aufklappen war eher verwirrend als hilfreich.
       return FIRE_VEHICLE_CATEGORY_ORDER.filter(cat => byCategory.has(cat))
         .map(category => {
           const categoryTypes = byCategory.get(category);
           const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
           return `
-            <details style="margin-bottom:6px;" ${selectedCount ? "open" : ""}>
+            <details style="margin-bottom:6px;">
               <summary class="vn-category-heading" style="font-size:11px; font-weight:bold; text-transform:uppercase;">
                 <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
                 ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}

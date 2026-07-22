@@ -63,6 +63,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Kategorie-Hervorhebung war durch einen CSS-Konflikt mit dem Seiten-Design unsichtbar, jetzt
   behoben. Umsortieren klappt aufgeklappte Kategorien nicht mehr zu und verwirft auch keine
   bereits eingetippten neuen Namen mehr.
+- **Wachen-Bauplaner**: Feuerwehr-Kategorien starten beim Bearbeiten eines bestehenden Bauplans
+  jetzt immer eingeklappt, auch wenn schon Fahrzeuge gewählt sind - die Zahl neben dem Namen
+  zeigt das schon an.
 
 ## Stable (v0.5.1)
 
