@@ -66,6 +66,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Wachen-Bauplaner**: Feuerwehr-Kategorien starten beim Bearbeiten eines bestehenden Bauplans
   jetzt immer eingeklappt, auch wenn schon Fahrzeuge gewählt sind - die Zahl neben dem Namen
   zeigt das schon an.
+- "Zurück"-Buttons hatten in jedem Menü keinen Abstand zum Fensterrand - behoben.
+- Große "Aktualisieren"/"Scan jetzt starten"-Buttons (Wachenausbau, Personal-Check,
+  Schulungen, Wachen-Bauplaner "Anwenden") durch einheitliche kleine Icon-Buttons direkt neben
+  dem Zeitstempel ersetzt.
 
 ## Stable (v0.5.1)
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.58
+// @version     0.9.59
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.58";
+  const SCRIPT_VERSION = "0.9.59";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1637,6 +1637,11 @@
       }
       #vehicle-naming-modal-actions {
         flex-shrink: 0;
+        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf
+           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier
+           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit
+           Abstand zum Rand. */
+        padding: 0 15px;
       }
       #vehicle-naming-modal-actions:empty {
         display: none;
@@ -4436,8 +4441,8 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
-        <button id="vn-station-check-refresh" type="button" class="btn btn-primary">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Aktualisieren
+        <button id="vn-station-check-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
         </button>
         <span class="label label-default" style="font-size:12px;">Stand: ${escapeHtml(new Date(lastLoadedAt).toLocaleString("de-DE"))}</span>
       </div>
@@ -4812,8 +4817,8 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
-        <button type="button" id="vn-personnel-scan-btn" class="btn btn-primary">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan jetzt starten
+        <button type="button" id="vn-personnel-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
         </button>
         <span class="label label-default" id="vn-personnel-scan-status" style="font-size:12px;">
           ${escapeHtml(lastScanLabel())}
@@ -5392,11 +5397,11 @@
           <button id="vn-btn-back" type="button" class="btn btn-default">
             <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
           </button>
-          <button type="button" id="vn-schooling-scan-btn" class="btn btn-primary">
-            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Scan jetzt starten
-          </button>
           <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">
             <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten
+          </button>
+          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">
+            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
           </button>
           <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">
             ${
@@ -7673,8 +7678,8 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
-        <button id="vn-bp-apply-refresh" type="button" class="btn btn-primary">
-          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Aktualisieren
+        <button id="vn-bp-apply-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">
+          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>
         </button>
         <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>
       </div>
