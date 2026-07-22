@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.51
+// @version     0.9.52
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.51";
+  const SCRIPT_VERSION = "0.9.52";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -6254,30 +6254,28 @@
         Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale
         Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt).
       </p>
-      <div class="form-inline" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <label style="font-size:12px; margin:0;">Bei Teil-Anforderungen (z.B. GRTW/NAW) zuweisen:</label>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min">
-            Nur Minimum (spart Personal)
+          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"
+                  title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">
+            Nur Minimum
           </button>
-          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full">
+          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full"
+                  title="Belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.">
             Volle Besatzung
           </button>
         </div>
-      </div>
-      <p id="vn-crew-mode-status" class="text-muted" style="font-size:11px; margin-bottom:10px;"></p>
-      <div class="form-inline" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
-        <label style="font-size:12px; margin:0; font-weight:normal;">
-          <input type="checkbox" id="vn-crew-include-normal" ${includeNormal ? "checked" : ""}>
-          Normale Fahrzeuge (ohne Ausbildungsanforderung) einbeziehen
-        </label>
-      </div>
-      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-        <label style="font-size:12px; margin:0; font-weight:normal;">
-          <input type="checkbox" id="vn-crew-untrained-only" ${untrainedOnly ? "checked" : ""}>
-          Nur ungeschultes Personal zuweisen (ignoriert jede Ausbildungsanforderung, z.B. für
-          BePol/THW/SEG, deren Spezialisten sich bei Alarmierung selbst zuordnen)
-        </label>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"
+                  title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">
+            Normale Fahrzeuge einbeziehen
+          </button>
+          <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"
+                  title="Ignoriert jede Ausbildungsanforderung, z.B. für BePol/THW/SEG, deren Spezialisten sich bei Alarmierung selbst zuordnen.">
+            Nur ungeschultes Personal zuweisen
+          </button>
+        </div>
       </div>
       <div id="vn-crew-groups">${renderGroups()}</div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">
@@ -6310,15 +6308,6 @@
     });
     bindProblemsRowButtons();
 
-    function updateModeStatus() {
-      const statusEl = document.getElementById("vn-crew-mode-status");
-      statusEl.innerHTML =
-        staffingMode === "full"
-          ? `<span class="text-danger"><b>Aktiv: Volle Besatzung</b> - belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.</span>`
-          : `<b>Aktiv: Nur Minimum</b> - spart Personal für andere Fahrzeuge, belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.`;
-    }
-    updateModeStatus();
-
     document.getElementById("vn-btn-clear-problems").addEventListener("click", () => {
       if (!problemsById.size) return;
       renderSimpleConfirmScreen({
@@ -6345,7 +6334,6 @@
           b.classList.toggle("btn-danger", active && staffingMode === "full");
           b.classList.toggle("btn-default", !active);
         });
-        updateModeStatus();
       });
     });
 
@@ -6448,16 +6436,20 @@
     }
     bindCategoryButtons();
 
-    document.getElementById("vn-crew-include-normal").addEventListener("change", async e => {
-      includeNormal = e.target.checked;
+    document.getElementById("vn-crew-include-normal").addEventListener("click", async e => {
+      includeNormal = !includeNormal;
+      e.target.classList.toggle("btn-primary", includeNormal);
+      e.target.classList.toggle("btn-default", !includeNormal);
       await storeData(includeNormal, VEHICLE_CREW_INCLUDE_NORMAL_KEY);
       recomputeVisibleVehicles();
       document.getElementById("vn-crew-groups").innerHTML = renderGroups();
       bindCategoryButtons();
     });
 
-    document.getElementById("vn-crew-untrained-only").addEventListener("change", async e => {
-      untrainedOnly = e.target.checked;
+    document.getElementById("vn-crew-untrained-only").addEventListener("click", async e => {
+      untrainedOnly = !untrainedOnly;
+      e.target.classList.toggle("btn-primary", untrainedOnly);
+      e.target.classList.toggle("btn-default", !untrainedOnly);
       await storeData(untrainedOnly, VEHICLE_CREW_UNTRAINED_ONLY_KEY);
     });
   }
