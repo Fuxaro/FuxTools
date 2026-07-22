@@ -114,7 +114,14 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - "Schließen" (je Bildschirm) und "Beenden" (dauerhaft unten im Fenster) waren doppelt - taten
   exakt dasselbe. "Schließen" entfernt, "Beenden" reicht dafür.
 - Das drehende Symbol am Task-Center-Eintrag "eierte" sichtbar statt sauber auf der Stelle zu
-  rotieren (Drehpunkt lag bei der geringen Größe leicht neben der optischen Mitte) - behoben.
+  rotieren - Ursache war der farbige Kreis dahinter, der jede kleinste Rasterungs-Abweichung der
+  Glyphe sichtbar machte. Kreis entfernt, drehen (läuft) vs. stillstehen (fertig/Leerlauf)
+  reicht als Signal.
+- **Task-Center**: Fortschrittsbalken/-text (Umbenennen wie Fahrzeug-Besatzung) blieben stehen,
+  solange man den Bildschirm offen ließ - erst Schließen und neu Öffnen zeigte den aktuellen
+  Stand, teils schon "fertig". Aktualisiert sich jetzt live, auch während man draufschaut.
+- **Verlauf**: erfolgreich abgeschlossene Einträge zeigen jetzt ebenfalls einen Status
+  ("abgeschlossen"), nicht nur laufende/abgebrochene.
 
 ## Stable (v0.5.1)
 

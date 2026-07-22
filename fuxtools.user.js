@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.67
+// @version     0.9.68
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.67";
+  const SCRIPT_VERSION = "0.9.68";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -129,19 +129,18 @@
     taskCenterEntryEl.style.display = "";
     if (isBackgroundTaskSlotBusy()) {
       const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
-      // Dreht sich NUR, waehrend wirklich etwas laeuft.
+      // Dreht sich NUR, waehrend wirklich etwas laeuft - kein Farb-Unterschied mehr noetig,
+      // drehen (laeuft) vs. stillstehen (fertig/Leerlauf) reicht als Signal.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
-      backgroundTaskBadgeEl.style.background = "#337ab7";
       taskCenterEntryEl.title =
         total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
     } else if (finishedBackgroundTask || finishedCrewCategoryRuns.size > 0) {
       // Fertig: dasselbe Icon bleibt STEHEN (keine Animation mehr) statt zu einem anderen
-      // Symbol zu wechseln - gruener Hintergrund statt blau zeigt "fertig, bitte ansehen".
+      // Symbol zu wechseln.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
-      backgroundTaskBadgeEl.style.background = "#5cb85c";
       taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
     } else {
-      // Leerlauf: neutrales Icon/Farbe statt komplett zu verschwinden.
+      // Leerlauf: gleiches Icon, still stehend.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
       backgroundTaskBadgeEl.style.background = "#777";
       taskCenterEntryEl.title = "FuxTools - Aufgaben-Übersicht (nichts aktiv)";
@@ -149,9 +148,11 @@
   }
 
   // Aktualisiert den Fortschritt eines laufenden Tasks - fasst NUR den Zustand an, die
-  // eigentlichen DOM-Elemente (falls die Fortschritts-Ansicht gerade sichtbar ist) werden
-  // separat aktualisiert (siehe renderBackgroundTaskProgressScreen) - so geht bei
-  // geschlossenem Fenster oder einer inzwischen anders belegten Modal-Ansicht nichts kaputt.
+  // eigentlichen DOM-Elemente werden separat aktualisiert, je nachdem welcher Bildschirm
+  // GERADE sichtbar ist (eigene Fortschritts-Ansicht ODER Task-Center - siehe
+  // renderBackgroundTaskProgressScreen/renderTaskCenterScreen) - so geht bei geschlossenem
+  // Fenster oder einer inzwischen anders belegten Modal-Ansicht nichts kaputt, und die
+  // Anzeige "friert" nicht mehr ein, waehrend man das Task-Center offen laesst.
   function updateBackgroundTaskProgress(percent, text) {
     if (!activeBackgroundTask) return;
     activeBackgroundTask.percent = percent;
@@ -160,6 +161,10 @@
     const txt = document.getElementById("vn-exec-progress-text");
     if (bar) bar.style.width = `${percent}%`;
     if (txt) txt.textContent = text;
+    const tcBar = document.getElementById("vn-tc-rename-bar");
+    const tcTxt = document.getElementById("vn-tc-rename-text");
+    if (tcBar) tcBar.style.width = `${percent}%`;
+    if (tcTxt) tcTxt.textContent = text;
   }
 
   function renderBackgroundTaskProgressScreen() {
@@ -211,29 +216,22 @@
     activeBackgroundTask = { title, percent: 0, progressText: "", cancel };
     finishedBackgroundTask = null;
     updateBackgroundTaskBadge();
-  }
-
-  // Ob das FuxTools-Fenster GERADE sichtbar ist (Bootstrap-Klasse "in"/"show" je nach
-  // Bootstrap-Version) - wenn ja UND der Task direkt (nicht ueber die Warteschlange)
-  // gestartet wurde, sieht der Nutzer das Ergebnis sowieso sofort live (renderResult() wird
-  // dann vom Aufrufer aufgerufen), der Badge muss dann nicht zusaetzlich noch "ungesehen"
-  // gruen blinken.
-  function isModalOpen() {
-    const modal = document.getElementById(modalId);
-    return !!modal && (modal.classList.contains("in") || modal.classList.contains("show"));
+    refreshTaskCenterIfVisible();
   }
 
   // renderResult() wird spaeter aufgerufen (Klick auf Badge/Task-Center oder erneutes
-  // Oeffnen), falls das Fenster beim Abschluss geschlossen war ODER der Task automatisch aus
-  // der Warteschlange gestartet ist (viaQueue) - dann koennte der Nutzer laengst in einem
-  // ganz anderen Menue unterwegs sein, ein ungefragter Bildschirmwechsel waere dort
-  // ueberraschend. Laeuft der naechste Task aus der Warteschlange, wird dessen Fortschritt
-  // bevorzugt gezeigt statt des alten Ergebnisses.
-  function finishBackgroundTask(title, renderResult, viaQueue) {
+  // Oeffnen), falls der Nutzer bei Abschluss NICHT mehr auf der eigenen Fortschritts-Ansicht
+  // dieses Laufs war (shownLive false - siehe Aufrufer: prueft per DOM, ob genau dieser
+  // Bildschirm gerade sichtbar ist, NICHT nur "irgendein FuxTools-Fenster offen") - dann
+  // koennte der Nutzer laengst in einem ganz anderen Menue (z.B. Task-Center) unterwegs sein,
+  // ein ungefragter Bildschirmwechsel waere dort ueberraschend. Laeuft der naechste Task aus
+  // der Warteschlange, wird dessen Fortschritt bevorzugt gezeigt statt des alten Ergebnisses.
+  function finishBackgroundTask(title, renderResult, shownLive) {
     activeBackgroundTask = null;
-    finishedBackgroundTask = !viaQueue && isModalOpen() ? null : { title, renderResult };
+    finishedBackgroundTask = shownLive ? null : { title, renderResult };
     updateBackgroundTaskBadge();
     tryStartNextQueuedBackgroundTask();
+    refreshTaskCenterIfVisible();
   }
 
   function renderBackgroundTaskQueuedScreen(title, goBack) {
@@ -259,8 +257,13 @@
   // Eigener Bildschirm ueber den Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon):
   // zeigt ALLE laufenden/wartenden Hintergrund-Aufgaben auf einen Blick statt nur die eine
   // "aktive" (Umbenennen) oder eine einzelne Fahrzeug-Besatzung-Kategorie - mit Fortschritt
-  // und eigenem Abbrechen je Eintrag. Kein Live-Refresh (keine Notwendigkeit fuer Polling);
-  // ein erneuter Klick auf den Navbar-Eintrag zeigt den jeweils aktuellen Stand.
+  // und eigenem Abbrechen je Eintrag. Fortschritts-Balken/Text werden per ID/Klasse+data-
+  // category live nachgetragen (siehe updateBackgroundTaskProgress/setCategoryStatusText) -
+  // vorher blieb die Ansicht ein reines Schnappschuss-Rendering und "eingefroren" stehen,
+  // solange man auf diesem Bildschirm blieb (erst ein erneutes Oeffnen zeigte den aktuellen
+  // Stand). Bei tatsaechlichem Start/Abschluss (nicht nur Fortschritts-Ticks) wird komplett
+  // neu gerendert (siehe refreshTaskCenterIfVisible()), damit z.B. ein fertig gewordener
+  // Lauf sofort in den "fertig"-Block wandert, statt bis zum naechsten Oeffnen dort zu bleiben.
   function renderTaskCenterScreen() {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("FuxTools-Aufgaben");
@@ -278,9 +281,9 @@
             </button>
           </div>
           <div class="progress" style="margin:6px 0 2px; height:16px;">
-            <div class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
+            <div id="vn-tc-rename-bar" class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
           </div>
-          <div class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
+          <div id="vn-tc-rename-text" class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
         </div>
       `);
     }
@@ -296,9 +299,9 @@
             </button>
           </div>
           <div class="progress" style="margin:6px 0 2px; height:16px;">
-            <div class="progress-bar" style="width:${percent}%;"></div>
+            <div class="progress-bar vn-tc-crew-bar" data-category="${escapeHtml(category)}" style="width:${percent}%;"></div>
           </div>
-          <div class="text-muted" style="font-size:11px;">${escapeHtml(state.statusText || "läuft ...")}</div>
+          <div class="text-muted vn-tc-crew-text" data-category="${escapeHtml(category)}" style="font-size:11px;">${escapeHtml(state.statusText || "läuft ...")}</div>
         </div>
       `);
     }
@@ -341,6 +344,7 @@
         : "";
 
     body.innerHTML = `
+      <div id="vn-task-center-marker" style="display:none;"></div>
       <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>
       ${finishedBlocks.join("")}
       ${items.join("")}
@@ -377,6 +381,15 @@
         btn.innerHTML = `<span class="glyphicon glyphicon-hourglass" aria-hidden="true"></span> Wird beendet ...`;
       });
     });
+  }
+
+  // Bei einem echten Struktur-Wechsel (Task fertig/gestartet/aus der Warteschlange gezogen -
+  // nicht nur ein Fortschritts-Tick) muss das Task-Center komplett neu gerendert werden, DAMIT
+  // z.B. ein fertig gewordener Lauf sofort in den "fertig"-Block wandert, statt erst nach
+  // Schliessen+Wiederoeffnen. Kein Effekt, wenn gerade ein anderer Bildschirm offen ist (siehe
+  // Marker in renderTaskCenterScreen()).
+  function refreshTaskCenterIfVisible() {
+    if (document.getElementById("vn-task-center-marker")) renderTaskCenterScreen();
   }
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
@@ -1601,14 +1614,16 @@
 
     const renderResult = () =>
       renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
-    // Nur bei direktem Start sofort anzeigen (bei offenem Fenster live sichtbar), DANACH
-    // finishBackgroundTask() - die zieht ggf. sofort den naechsten Warteschlangen-Task und
-    // ueberschreibt damit die Ansicht erneut (gewollt: automatischer Uebergang zum naechsten
-    // Fortschritt). Lief dieser Task selbst schon ueber die Warteschlange (viaQueue), koennte
-    // der Nutzer laengst woanders im Menue sein - dann nicht ungefragt hierher umschalten,
-    // das Ergebnis bleibt ueber Badge/Task-Center abrufbar (siehe finishBackgroundTask).
-    if (!viaQueue) renderResult();
-    finishBackgroundTask(title, renderResult, viaQueue);
+    // Nur automatisch zur Ergebnis-Ansicht wechseln, wenn der Nutzer JETZT GERADE noch auf der
+    // eigenen Fortschritts-Ansicht dieses Laufs ist (erkennbar am Progress-Bar-Element) - ist
+    // er inzwischen woanders (Task-Center, Hauptmenue, Fenster zu), NICHT ungefragt dorthin
+    // umschalten (egal ob der Lauf direkt oder ueber die Warteschlange gestartet wurde - das
+    // kann sich waehrend der Laufzeit aendern). Sichtbarkeit dann nur ueber Badge/Task-Center
+    // (siehe finishBackgroundTask). Laeuft danach sofort der naechste Warteschlangen-Task,
+    // ueberschreibt dessen eigener Start die Ansicht ohnehin erneut (gewollter Uebergang).
+    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
+    if (stillOnOwnProgressScreen) renderResult();
+    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
   }
 
   function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
@@ -2721,7 +2736,7 @@
             ? `<span class="label label-warning">läuft/unterbrochen ...</span>`
             : entry.status === "cancelled"
               ? `<span class="label label-default">abgebrochen</span>`
-              : "";
+              : `<span class="label label-success">abgeschlossen</span>`;
         return `
           <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
             <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
@@ -2856,13 +2871,8 @@
   function injectCustomStyles() {
     const style = document.createElement("style");
     style.textContent = `
-      /* Ohne feste Breite/Hoehe + Zeilenhoehe liegt der Drehpunkt (Boxmitte) bei so einem
-         kleinen Icon (9px) leicht neben der optischen Mitte der Glyphe - das Icon "eiert"
-         dann sichtbar statt sauber auf der Stelle zu rotieren. */
       .vn-task-spin {
         display:inline-block;
-        width:9px; height:9px; line-height:9px;
-        text-align:center;
         animation: vn-task-spin 1s linear infinite;
       }
       @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -2964,10 +2974,13 @@
     taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px;";
     taskCenterLogo.addEventListener("error", () => taskCenterLogo.remove());
     taskCenterIconWrap.appendChild(taskCenterLogo);
+    // Bewusst KEIN farbiger Kreis mehr dahinter (siehe updateBackgroundTaskBadge()) - der
+    // machte ein Zentrierungs-/Rasterungs-Artefakt der drehenden Glyphe erst sichtbar
+    // ("eiern"). Drehen (laeuft) vs. Stillstehen (fertig/Leerlauf) reicht als Signal.
     backgroundTaskBadgeEl = document.createElement("span");
     backgroundTaskBadgeEl.style.cssText =
-      "position:absolute; bottom:-5px; right:-6px; width:14px; height:14px; border-radius:50%; " +
-      "background:#333; display:flex; align-items:center; justify-content:center; font-size:9px;";
+      "position:absolute; bottom:-4px; right:-6px; font-size:12px; line-height:1; color:#fff; " +
+      "text-shadow:0 0 2px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);";
     taskCenterIconWrap.appendChild(backgroundTaskBadgeEl);
 
     const taskCenterLink = document.createElement("a");
@@ -6841,6 +6854,15 @@
       if (bar && state && state.total > 0) {
         bar.style.width = `${Math.round((state.done / state.total) * 100)}%`;
       }
+      // Dieselbe Kategorie kann statt hier auch im Task-Center sichtbar sein (anderer
+      // Bildschirm, gleicher DOM-Knoten #vehicle-naming-modal-body) - dort ebenfalls
+      // aktualisieren, sonst "friert" der Fortschritt dort ein, waehrend man hinschaut.
+      const tcText = document.querySelector(`.vn-tc-crew-text[data-category="${category}"]`);
+      if (tcText) tcText.textContent = text;
+      const tcBar = document.querySelector(`.vn-tc-crew-bar[data-category="${category}"]`);
+      if (tcBar && state && state.total > 0) {
+        tcBar.style.width = `${Math.round((state.done / state.total) * 100)}%`;
+      }
     }
 
     function bindCategoryButtons() {
@@ -6952,6 +6974,11 @@
           updateBackgroundTaskBadge();
           tryStartNextQueuedBackgroundTask();
           setCategoryRunningUI(category, false);
+          // Ist inzwischen (der Lauf kann Minuten dauern) das Task-Center der sichtbare
+          // Bildschirm statt dieser Fahrzeug-Besatzung-Ansicht hier, komplett neu rendern -
+          // sonst bliebe die Kategorie dort faelschlich als "laeuft" mit Abbrechen-Button
+          // stehen, bis man den Bildschirm einmal schliesst und neu oeffnet.
+          refreshTaskCenterIfVisible();
         });
       });
     }
