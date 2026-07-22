@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.60
+// @version     0.9.61
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.60";
+  const SCRIPT_VERSION = "0.9.61";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -4508,8 +4508,9 @@
       });
   }
 
-  // Liest jede Personal-Zeile aus der HTML-Personalseite einer Wache aus: Name, die
-  // Ausbildungs-Slugs (data-filterable-by), den Klartext-Namen der Ausbildung (Spalte
+  // Liest jede Personal-Zeile aus der HTML-Personalseite einer Wache aus: Personal-ID (Wert
+  // der "personal-delete-checkbox" in der ersten Spalte, per Live-Diagnose bestaetigt), Name,
+  // die Ausbildungs-Slugs (data-filterable-by), den Klartext-Namen der Ausbildung (Spalte
   // "Ausbildung" - nur eindeutig, wenn die Person genau einen Slug hat) und den Status
   // (Spalte "Status", z.B. "Verfügbar" oder "Im Unterricht"). Liefert ALLE Zeilen, auch
   // Personen ganz ohne Ausbildung, damit sich Gesamtzahlen berechnen lassen.
@@ -4525,10 +4526,11 @@
         slugs = [];
       }
       if (!Array.isArray(slugs)) slugs = [];
+      const id = row.querySelector("input.personal-delete-checkbox")?.value || null;
       const name = row.children[1]?.textContent.trim() || "";
       const educationText = row.children[2]?.textContent.trim() || "";
       const statusText = row.children[4]?.textContent.trim() || "";
-      entries.push({ slugs, name, educationText, statusText });
+      entries.push({ id, slugs, name, educationText, statusText });
     });
     return entries;
   }
@@ -5058,16 +5060,18 @@
   // (per Live-Test bestaetigt: genau das fuehrte dazu, dass eine Person mit bereits einer
   // Ausbildung zusaetzlich fuer eine zweite eingeteilt wurde). Deshalb zusaetzlich die normale
   // Personal-Seite derselben Wache abfragen (parsePersonalPageHtml, dieselbe Quelle wie beim
-  // Personal-Check-Scan) und ueber den NAMEN abgleichen: nur wer dort GAR KEINE Ausbildung hat
-  // UND als "Verfuegbar" gilt, bleibt uebrig. Kein Treffer beim Namensabgleich (z.B. durch
-  // Sonderzeichen) schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
+  // Personal-Check-Scan) und ueber die Personal-ID abgleichen (beide Checkboxen - "schooling_
+  // checkbox" hier und "personal-delete-checkbox" auf der Personal-Seite - tragen dieselbe
+  // echte Personal-ID als value, per Live-Diagnose bestaetigt): nur wer dort GAR KEINE
+  // Ausbildung hat UND als "Verfuegbar" gilt, bleibt uebrig. Keine passende ID gefunden
+  // schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
   async function fetchAvailablePersonnelForEducation(stationId, slug) {
     const [selectRes, personalHtml] = await Promise.all([
       fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" }),
       fetchPersonalPage(stationId),
     ]);
     if (!selectRes.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${selectRes.status}).`);
-    const statusByName = new Map(parsePersonalPageHtml(personalHtml).map(e => [e.name, e]));
+    const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [e.id, e]));
 
     const doc = new DOMParser().parseFromString(await selectRes.text(), "text/html");
     return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
@@ -5077,7 +5081,7 @@
         name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value,
       }))
       .filter(p => {
-        const entry = statusByName.get(p.name);
+        const entry = statusById.get(p.id);
         return !!entry && entry.slugs.length === 0 && entry.statusText.trim() === "Verfügbar";
       });
   }

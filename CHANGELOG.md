@@ -73,7 +73,7 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Schulungen**: Bugfix - Personal, das bereits eine andere Ausbildung hat oder gerade "Im
   Unterricht"/"Im Einsatz" ist, wird jetzt nicht mehr zusätzlich für einen neuen Lehrgang
   eingeteilt (die bisherige Auswahl kannte nur die eine gerade gesuchte Ausbildung, nicht den
-  restlichen Status der Person).
+  restlichen Status der Person). Abgleich läuft über die echte Personal-ID statt über den Namen.
 
 ## Stable (v0.5.1)
 
