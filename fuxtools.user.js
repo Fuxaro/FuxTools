@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.53
+// @version     0.9.54
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.53";
+  const SCRIPT_VERSION = "0.9.54";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -986,6 +986,19 @@
     return !!(await retrieveData(VEHICLE_CREW_UNTRAINED_ONLY_KEY));
   }
 
+  // Ob ueberzaehliges/nicht mehr passendes Personal beim Pruefen wieder ENTFERNT werden darf
+  // (siehe trimVehicleCrewToStaffMin in checkAndFixVehicleCrew) - Standard AN, das entspricht
+  // dem bisherigen Verhalten (Wechsel von Voll- auf Minimum-Besatzung raeumt automatisch auf).
+  // Auf "Nur ergaenzen" gestellt, fasst ein Lauf NIE bereits zugewiesenes Personal an, egal mit
+  // welchen Einstellungen es frueher zugewiesen wurde - dafuer bleibt z.B. eine alte
+  // Ueberbesetzung nach einem Wechsel zurueck auf "Minimum" einfach stehen.
+  const VEHICLE_CREW_TRIM_KEY = "vehicleCrewTrimEnabled";
+
+  async function getVehicleCrewTrimEnabled() {
+    const stored = await retrieveData(VEHICLE_CREW_TRIM_KEY);
+    return stored === undefined ? true : !!stored;
+  }
+
   // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> {message, since}) ueber
   // Schliessen/Wiederoeffnen des Fahrzeug-Besatzung-Screens hinweg, damit nicht nach jedem
   // Oeffnen alle Kategorien neu geprueft werden muessen. Beim Oeffnen wird das mit der
@@ -1058,6 +1071,8 @@
     VEHICLE_CREW_STAFFING_MODE_KEY,
     VEHICLE_CREW_PROBLEMS_KEY,
     VEHICLE_CREW_INCLUDE_NORMAL_KEY,
+    VEHICLE_CREW_UNTRAINED_ONLY_KEY,
+    VEHICLE_CREW_TRIM_KEY,
   ];
 
   // Loescht alle von FuxTools angelegten GM-Speicher-Eintraege (Namen/Bausteine-
@@ -2646,7 +2661,7 @@
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
 
-  function injectBackgroundTaskStyles() {
+  function injectCustomStyles() {
     const style = document.createElement("style");
     style.textContent = `
       .vn-task-spin { display:inline-block; animation: vn-task-spin 1s linear infinite; }
@@ -2656,12 +2671,20 @@
         animation: vn-task-blink 1s ease-in-out infinite;
       }
       @keyframes vn-task-blink { 0%, 100% { opacity:1; } 50% { opacity:0.25; } }
+      .vn-fire-category-summary {
+        cursor:pointer; list-style:none; background:rgba(128,128,128,0.15);
+        border-left:3px solid #337ab7; border-radius:3px; padding:6px 10px; margin-bottom:2px;
+      }
+      .vn-fire-category-summary::-webkit-details-marker { display:none; }
+      .vn-fire-category-summary:hover { background:rgba(128,128,128,0.28); }
+      .vn-fire-category-summary .glyphicon-chevron-right { font-size:10px; transition:transform 0.15s; }
+      details[open] > .vn-fire-category-summary .glyphicon-chevron-right { transform:rotate(90deg); }
     `;
     document.head.appendChild(style);
   }
 
   function addMenuEntry() {
-    injectBackgroundTaskStyles();
+    injectCustomStyles();
     const logoImg = document.createElement("img");
     logoImg.src = LOGO_URL;
     logoImg.alt = "";
@@ -5897,7 +5920,7 @@
     return removed;
   }
 
-  async function checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly = false) {
+  async function checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly = false, trimEnabled = true) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
@@ -5936,8 +5959,10 @@
     // Wechsel von "Volle Besatzung" zurueck auf "Minimum": ueberzaehliges Personal (aus einem
     // frueheren Voll-Lauf) wird jetzt wieder abgezogen statt nur stehen zu bleiben - so wird
     // es fuer andere Fahrzeuge wieder frei. Nicht bei Anforderungen, die immer auf staffMax
-    // zielen (min:null).
-    if (staffingMode !== "full" && !hasFullRequirement) {
+    // zielen (min:null), und nur wenn "Vollstaendig anwenden" aktiv ist - bei "Nur ergaenzen"
+    // (trimEnabled = false) wird NIE etwas entfernt, egal mit welchen Einstellungen frueher
+    // zugewiesen wurde.
+    if (staffingMode !== "full" && !hasFullRequirement && trimEnabled) {
       await trimVehicleCrewToStaffMin(vehicle);
     }
 
@@ -6139,6 +6164,7 @@
     let staffingMode = await getVehicleCrewStaffingMode();
     let includeNormal = await getVehicleCrewIncludeNormal();
     let untrainedOnly = await getVehicleCrewUntrainedOnly();
+    let trimEnabled = await getVehicleCrewTrimEnabled();
 
     // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von Leitstellen-Auswahl UND
     // includeNormal ab) - wird beim Umschalten der Checkbox neu berechnet, ohne die
@@ -6280,6 +6306,16 @@
             Nur ungeschultes Personal zuweisen
           </button>
         </div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"
+                  title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">
+            Nur ergänzen
+          </button>
+          <button type="button" class="btn btn-sm ${trimEnabled ? "btn-danger" : "btn-default"} vn-crew-trim" data-trim="on"
+                  title="Gleicht die Besatzung komplett an die aktuellen Einstellungen an - entfernt auch überzähliges Personal (z.B. beim Wechsel von Voll- auf Minimum-Besatzung) oder gibt einen Spezialisten frei, der auf einem Fahrzeug ohne eigene Anforderung sitzt.">
+            Vollständig anwenden
+          </button>
+        </div>
       </div>
       <div id="vn-crew-groups">${renderGroups()}</div>
       <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">
@@ -6341,6 +6377,19 @@
       });
     });
 
+    body.querySelectorAll(".vn-crew-trim").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        trimEnabled = btn.dataset.trim === "on";
+        await storeData(trimEnabled, VEHICLE_CREW_TRIM_KEY);
+        body.querySelectorAll(".vn-crew-trim").forEach(b => {
+          const active = b.dataset.trim === (trimEnabled ? "on" : "off");
+          b.classList.toggle("btn-primary", active && !trimEnabled);
+          b.classList.toggle("btn-danger", active && trimEnabled);
+          b.classList.toggle("btn-default", !active);
+        });
+      });
+    });
+
     // category -> laufender Abbrechen-Zustand ({cancelled:false}), solange ein Lauf aktiv ist.
     // Ein zweiter Klick auf denselben (jetzt rot/"Abbrechen" beschrifteten) Button bricht den
     // laufenden Durchlauf ab, statt einen zweiten parallel zu starten.
@@ -6396,7 +6445,7 @@
               for (const vehicle of stationVehicles) {
                 if (state.cancelled) return;
                 try {
-                  const result = await checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly);
+                  const result = await checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly, trimEnabled);
                   if (result.fullyStaffed) {
                     ok++;
                     problemsById.delete(vehicle.id);
@@ -6613,35 +6662,51 @@
     return totals;
   }
 
-  // Wie computeBlueprintPersonnelRequirements(), aber als EIN Gesamtwert (nicht pro Ausbildungs-
-  // Slug) - zaehlt zusaetzlich generisches, nicht speziell ausgebildetes Fuellpersonal bis
-  // staffMin mit. computeBlueprintPersonnelRequirements() zeigt bewusst NUR echte Ausbildungs-
-  // Anforderungen (Grundlage fuer Personal-Check/Schulungen, die nur Ausbildungen kennen -
-  // eine Ausbildungs-Zeile fuer "gar keine Ausbildung" wuerde dort faelschlich einen Mangel
-  // an einer nicht existierenden Ausbildung anzeigen). Ein Fahrzeug OHNE jede Ausbildungs-
-  // anforderung (z.B. normaler RTW/LF) trug dort deshalb bisher NULL zum Gesamtbedarf bei,
-  // obwohl es trotzdem eine Mindestbesatzung (staffMin) braucht - genau das hat im Bauplan-
-  // Editor zu einem irrefuehrenden "Insgesamt benoetigt: 0 Person(en)" gefuehrt. Nur fuer
-  // diese Gesamt-Anzeige gedacht, NICHT fuer Personal-Check/Schulungen.
-  function computeBlueprintTotalPersonnelCount(blueprint) {
-    let total = 0;
+  // Zerlegt die Mindest-/Maximalbesatzung EINES Fahrzeugtyps in "geschult" (Summe der
+  // Ausbildungs-Anforderungen, siehe getBlueprintTrainingRequirement) und "ungeschult" (Rest
+  // bis staffMin/staffMax) - Grundlage fuer die Summenzeilen unter der Ausbildungs-Tabelle im
+  // Bauplan-Editor (siehe computeBlueprintPersonnelSummary). Ein Fahrzeug OHNE jede
+  // Ausbildungsanforderung (z.B. normaler RTW/LF) ist komplett "ungeschult".
+  function getBlueprintCrewBreakdownForVehicleType(vehicleTypeId) {
+    const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
+    if (!staff?.max) return null;
+    const requirement = getBlueprintTrainingRequirement(vehicleTypeId);
+    if (!requirement) {
+      return { trainedMin: 0, trainedMax: 0, untrainedMin: staff.min, untrainedMax: staff.max };
+    }
+    const trainedMin = requirement.requirements.reduce((sum, req) => sum + req.min, 0);
+    const trainedMax = requirement.requirements.reduce((sum, req) => sum + req.max, 0);
+    return {
+      trainedMin,
+      trainedMax,
+      untrainedMin: Math.max(0, staff.min - trainedMin),
+      untrainedMax: Math.max(0, staff.max - trainedMax),
+    };
+  }
+
+  // Summiert ueber alle Fahrzeuge eines Bauplans: geschultes Personal (Summe aller Zeilen der
+  // Ausbildungs-Tabelle), ungeschultes Fuellpersonal und beides zusammen (Insgesamt benoetigt) -
+  // je als Min./Max.-Fenster. Ersetzt die fruehere computeBlueprintTotalPersonnelCount() (nur
+  // ein einzelner Wert, keine Aufschluesselung).
+  function computeBlueprintPersonnelSummary(blueprint) {
+    let trainedMin = 0;
+    let trainedMax = 0;
+    let untrainedMin = 0;
+    let untrainedMax = 0;
     for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
       if (!(quantity > 0)) continue;
-      const target = getVehicleTypeCrewTarget(Number(vehicleTypeId));
-      if (!target) continue;
-      if (!target.requirements.length) {
-        total += target.staffMin * quantity;
-        continue;
-      }
-      const hasFullRequirement = target.requirements.some(req => req.min === null);
-      if (hasFullRequirement) {
-        total += target.staffMin * quantity;
-        continue;
-      }
-      const trainedSum = target.requirements.reduce((sum, req) => sum + req.min, 0);
-      total += Math.max(trainedSum, target.staffMin) * quantity;
+      const breakdown = getBlueprintCrewBreakdownForVehicleType(Number(vehicleTypeId));
+      if (!breakdown) continue;
+      trainedMin += breakdown.trainedMin * quantity;
+      trainedMax += breakdown.trainedMax * quantity;
+      untrainedMin += breakdown.untrainedMin * quantity;
+      untrainedMax += breakdown.untrainedMax * quantity;
     }
-    return total;
+    return {
+      trained: { min: trainedMin, max: trainedMax },
+      untrained: { min: untrainedMin, max: untrainedMax },
+      total: { min: trainedMin + untrainedMin, max: trainedMax + untrainedMax },
+    };
   }
 
   // Personal-Anforderung fuer Personal-Check/Schulungen: statt einer separaten, manuell
@@ -7002,10 +7067,11 @@
           const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
           return `
             <details style="margin-bottom:6px;" ${selectedCount ? "open" : ""}>
-              <summary style="cursor:pointer; font-size:11px; font-weight:bold; text-transform:uppercase; padding:4px 0;">
+              <summary class="vn-fire-category-summary" style="font-size:11px; font-weight:bold; text-transform:uppercase;">
+                <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
                 ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}
               </summary>
-              ${vehicleGridHtml(categoryTypes, quantities)}
+              <div style="padding:8px 4px 0;">${vehicleGridHtml(categoryTypes, quantities)}</div>
             </details>
           `;
         })
@@ -7031,11 +7097,22 @@
             `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`,
         )
         .join("");
-      document.getElementById("vn-bp-personnel-body").innerHTML =
-        rows || `<tr><td colspan="3" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`;
 
-      const totalCount = computeBlueprintTotalPersonnelCount({ vehicles });
-      document.getElementById("vn-bp-personnel-total").textContent = `Insgesamt benötigt: ${totalCount} Person(en).`;
+      const summary = computeBlueprintPersonnelSummary({ vehicles });
+      const summaryRows = `
+        <tr class="text-muted">
+          <td style="border-top:2px solid #888;">${summary.trained.min}</td>
+          <td style="border-top:2px solid #888;">${summary.trained.max}</td>
+          <td style="border-top:2px solid #888;">Geschult (gesamt)</td>
+        </tr>
+        <tr class="text-muted">
+          <td>${summary.untrained.min}</td><td>${summary.untrained.max}</td><td>Ungeschult</td>
+        </tr>
+        <tr><td><b>${summary.total.min}</b></td><td><b>${summary.total.max}</b></td><td><b>Insgesamt benötigt</b></td></tr>
+      `;
+
+      document.getElementById("vn-bp-personnel-body").innerHTML =
+        (rows || `<tr><td colspan="3" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`) + summaryRows;
     }
 
     body.innerHTML = `
@@ -7105,7 +7182,6 @@
               <thead><tr><th>Min.</th><th>Max.</th><th>Ausbildung</th></tr></thead>
               <tbody id="vn-bp-personnel-body"></tbody>
             </table>
-            <div id="vn-bp-personnel-total" class="text-muted" style="font-size:11px;"></div>
           </div>
         </div>
       </div>

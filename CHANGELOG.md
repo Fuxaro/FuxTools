@@ -50,6 +50,12 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   FuxTools-Menüpunkt zeigt den Fortschritt (blinkt grün bei Fertigstellung), erneutes Öffnen
   zeigt wieder den laufenden/fertigen Task. Ein währenddessen gestarteter zweiter Task landet
   in einer Warteschlange, statt parallel zu laufen.
+- **Wachen-Bauplaner**: Feuerwehr-Kategorien deutlicher als aufklappbar erkennbar (Hintergrund,
+  Pfeil-Symbol). "Benötigtes Personal" zeigt zusätzlich Summenzeilen (Geschult/Ungeschult/
+  Insgesamt benötigt) direkt in der Tabelle statt als separatem Text.
+- **Fahrzeug-Besatzung**: neuer Schalter "Nur ergänzen" / "Vollständig anwenden" - legt fest,
+  ob ein Lauf bereits zugewiesenes Personal wieder entfernen darf (z.B. beim Rückbau von
+  Voll- auf Minimum-Besatzung), oder nur fehlendes Personal ergänzt und nie etwas antastet.
 
 ## Stable (v0.5.1)
 
