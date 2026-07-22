@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.65
+// @version     0.9.66
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.65";
+  const SCRIPT_VERSION = "0.9.66";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -123,6 +123,10 @@
 
   function updateBackgroundTaskBadge() {
     if (!backgroundTaskBadgeEl || !taskCenterEntryEl) return;
+    // Immer sichtbar (nicht mehr nur bei aktiven/fertigen Aufgaben versteckt) - man soll
+    // die Aufgaben-Uebersicht jederzeit oeffnen koennen, auch um zu sehen, dass gerade
+    // nichts laeuft/wartet, statt raten zu muessen, ob der Eintrag aus einem Grund fehlt.
+    taskCenterEntryEl.style.display = "";
     if (isBackgroundTaskSlotBusy()) {
       const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
       // Dreht sich NUR, waehrend wirklich etwas laeuft.
@@ -130,16 +134,17 @@
       backgroundTaskBadgeEl.style.background = "#337ab7";
       taskCenterEntryEl.title =
         total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
-      taskCenterEntryEl.style.display = "";
     } else if (finishedBackgroundTask || finishedCrewCategoryRuns.size > 0) {
       // Fertig: dasselbe Icon bleibt STEHEN (keine Animation mehr) statt zu einem anderen
       // Symbol zu wechseln - gruener Hintergrund statt blau zeigt "fertig, bitte ansehen".
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
       backgroundTaskBadgeEl.style.background = "#5cb85c";
       taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
-      taskCenterEntryEl.style.display = "";
     } else {
-      taskCenterEntryEl.style.display = "none";
+      // Leerlauf: neutrales Icon/Farbe statt komplett zu verschwinden.
+      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
+      backgroundTaskBadgeEl.style.background = "#777";
+      taskCenterEntryEl.title = "FuxTools - Aufgaben-Übersicht (nichts aktiv)";
     }
   }
 
@@ -181,19 +186,25 @@
   // laeuft (auch eine laufende Fahrzeug-Besatzung zaehlt, siehe isBackgroundTaskSlotBusy) -
   // "start" bekommt KEINE Argumente und muss selbst activeBackgroundTask setzen (siehe
   // beginBackgroundTask()) sowie am Ende finishBackgroundTask() aufrufen.
+  // "start" bekommt jetzt ein viaQueue-Flag: false beim direkten, synchronen Klick-Start
+  // (Nutzer ist gerade auf diesem Bildschirm - Fortschritt/Ergebnis darf den Bildschirm
+  // wechseln), true beim automatischen Weiterlaufen aus der Warteschlange (Nutzer ist
+  // moeglicherweise laengst woanders im Menue unterwegs - dann NICHT ungefragt dorthin
+  // umschalten, siehe runRenamePlan/finishBackgroundTask). Sichtbarkeit laeuft in dem Fall
+  // nur noch ueber den Navbar-Badge und das Task-Center.
   function runOrQueueBackgroundTask(title, start) {
     if (isBackgroundTaskSlotBusy()) {
       backgroundTaskQueue.push({ title, start });
       return "queued";
     }
-    start();
+    start(false);
     return "started";
   }
 
   function tryStartNextQueuedBackgroundTask() {
     if (isBackgroundTaskSlotBusy() || !backgroundTaskQueue.length) return;
     const next = backgroundTaskQueue.shift();
-    next.start();
+    next.start(true);
   }
 
   function beginBackgroundTask(title, cancel) {
@@ -203,20 +214,24 @@
   }
 
   // Ob das FuxTools-Fenster GERADE sichtbar ist (Bootstrap-Klasse "in"/"show" je nach
-  // Bootstrap-Version) - wenn ja, sieht der Nutzer das Ergebnis sowieso sofort live
-  // (renderResult() wird trotzdem IMMER aufgerufen, siehe Aufrufer), der Badge muss dann
-  // nicht zusaetzlich noch "ungesehen" gruen blinken.
+  // Bootstrap-Version) - wenn ja UND der Task direkt (nicht ueber die Warteschlange)
+  // gestartet wurde, sieht der Nutzer das Ergebnis sowieso sofort live (renderResult() wird
+  // dann vom Aufrufer aufgerufen), der Badge muss dann nicht zusaetzlich noch "ungesehen"
+  // gruen blinken.
   function isModalOpen() {
     const modal = document.getElementById(modalId);
     return !!modal && (modal.classList.contains("in") || modal.classList.contains("show"));
   }
 
-  // renderResult() wird spaeter aufgerufen (Klick auf Badge oder erneutes Oeffnen), falls
-  // das Fenster beim Abschluss geschlossen war - laeuft der naechste Task aus der
-  // Warteschlange, wird dessen Fortschritt bevorzugt gezeigt statt des alten Ergebnisses.
-  function finishBackgroundTask(title, renderResult) {
+  // renderResult() wird spaeter aufgerufen (Klick auf Badge/Task-Center oder erneutes
+  // Oeffnen), falls das Fenster beim Abschluss geschlossen war ODER der Task automatisch aus
+  // der Warteschlange gestartet ist (viaQueue) - dann koennte der Nutzer laengst in einem
+  // ganz anderen Menue unterwegs sein, ein ungefragter Bildschirmwechsel waere dort
+  // ueberraschend. Laeuft der naechste Task aus der Warteschlange, wird dessen Fortschritt
+  // bevorzugt gezeigt statt des alten Ergebnisses.
+  function finishBackgroundTask(title, renderResult, viaQueue) {
     activeBackgroundTask = null;
-    finishedBackgroundTask = isModalOpen() ? null : { title, renderResult };
+    finishedBackgroundTask = !viaQueue && isModalOpen() ? null : { title, renderResult };
     updateBackgroundTaskBadge();
     tryStartNextQueuedBackgroundTask();
   }
@@ -324,7 +339,7 @@
 
     const emptyState =
       !items.length && !finishedBlocks.length
-        ? `<p class="text-muted">Nichts aktiv - keine Hintergrund-Aufgaben gerade am Laufen.</p>`
+        ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>`
         : "";
 
     body.innerHTML = `
@@ -333,10 +348,14 @@
       ${items.join("")}
       ${emptyState}
       <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf
+        </button>
         <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
 
+    document.getElementById("vn-btn-back").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -1511,13 +1530,18 @@
   // anderer Task (Umbenennen oder Fahrzeug-Besatzung) laeuft - siehe runOrQueueBackgroundTask().
   function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
     const title = `${itemNoun} ${verb === "umbenannt" ? "umbenennen" : "zurücksetzen"}`;
-    const queued = runOrQueueBackgroundTask(title, () =>
-      runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title),
+    const queued = runOrQueueBackgroundTask(title, viaQueue =>
+      runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue),
     );
     if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
   }
 
-  async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title) {
+  // viaQueue: true, wenn dieser Lauf automatisch aus der Warteschlange gestartet wurde
+  // (nicht durch einen direkten Klick gerade eben) - dann NICHT ungefragt auf den
+  // Fortschritts-/Ergebnis-Bildschirm umschalten, falls der Nutzer laengst woanders im Menue
+  // ist (siehe runOrQueueBackgroundTask/finishBackgroundTask). Sichtbarkeit laeuft in dem
+  // Fall nur ueber den Navbar-Badge und das Task-Center.
+  async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue) {
     renameCancelled = false;
     // Verlaufs-Eintrag schon JETZT anlegen (status "running"), nicht erst am Ende - bleibt er
     // so stehen (z.B. durch F5/Schliessen mitten im Lauf unterbrochen), sieht man das im
@@ -1532,7 +1556,7 @@
       renameCancelled = true;
       updateHistoryEntry(historyId, { status: "cancelled", label: "Abbruch angefordert ..." });
     });
-    renderBackgroundTaskProgressScreen();
+    if (!viaQueue) renderBackgroundTaskProgressScreen();
 
     let done = 0;
     let finished = 0;
@@ -1581,11 +1605,14 @@
 
     const renderResult = () =>
       renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
-    // Erst anzeigen (bei offenem Fenster sofort sichtbar), DANACH finishBackgroundTask() -
-    // die zieht ggf. sofort den naechsten Warteschlangen-Task und ueberschreibt damit die
-    // Ansicht erneut (gewollt: automatischer Uebergang zum naechsten Fortschritt).
-    renderResult();
-    finishBackgroundTask(title, renderResult);
+    // Nur bei direktem Start sofort anzeigen (bei offenem Fenster live sichtbar), DANACH
+    // finishBackgroundTask() - die zieht ggf. sofort den naechsten Warteschlangen-Task und
+    // ueberschreibt damit die Ansicht erneut (gewollt: automatischer Uebergang zum naechsten
+    // Fortschritt). Lief dieser Task selbst schon ueber die Warteschlange (viaQueue), koennte
+    // der Nutzer laengst woanders im Menue sein - dann nicht ungefragt hierher umschalten,
+    // das Ergebnis bleibt ueber Badge/Task-Center abrufbar (siehe finishBackgroundTask).
+    if (!viaQueue) renderResult();
+    finishBackgroundTask(title, renderResult, viaQueue);
   }
 
   function renderCompletionScreen({ verb, done, failed, plan, errors, failedItems, goBack, cancelled, itemNoun = "Fahrzeug(e)", renameFn = renameVehicle }) {
@@ -2925,7 +2952,7 @@
     // man ohne Umweg direkt ins normale Menue kommt, waehrend im Hintergrund etwas laeuft.
     // Fox-Logo bleibt voll sichtbar, das drehende Icon sitzt als kleines Abzeichen an der
     // Ecke (NICHT mittig ueberlagert - sonst verdeckt es das Logo komplett) - so bleibt der
-    // Zusammenhang zu FuxTools erkennbar. Per Default versteckt (display:none), siehe
+    // Zusammenhang zu FuxTools erkennbar. Immer sichtbar (auch im Leerlauf), siehe
     // updateBackgroundTaskBadge().
     const taskCenterIconWrap = document.createElement("span");
     taskCenterIconWrap.style.cssText = "position:relative; display:inline-block; width:22px; height:22px;";
@@ -2951,12 +2978,12 @@
     taskCenterLi.id = "vn-task-center-entry";
     taskCenterLi.role = "presentation";
     taskCenterLi.className = profileLi.className;
-    taskCenterLi.style.display = "none";
     taskCenterLi.setAttribute("data-toggle", "modal");
     taskCenterLi.setAttribute("data-target", `#${modalId}`);
     taskCenterLi.appendChild(taskCenterLink);
     profileLi.parentNode.insertBefore(taskCenterLi, profileLi);
     taskCenterEntryEl = taskCenterLi;
+    updateBackgroundTaskBadge(); // sofort in den (jetzt immer sichtbaren) Leerlauf-Zustand setzen
   }
 
   //////////////////////////////////////////////////
@@ -6642,8 +6669,9 @@
           const btnLabel = running
             ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
             : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+          const percent = running && running.total > 0 ? Math.round((running.done / running.total) * 100) : 0;
           return `
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
               <span style="display:inline-block; min-width:140px;">
                 <b>${escapeHtml(category)}</b>
                 <span class="text-muted" style="font-size:11px;">(${byCategory.get(category).length})</span>
@@ -6651,6 +6679,13 @@
               <button type="button" class="btn ${btnClass} btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">
                 ${btnLabel}
               </button>
+              <div class="vn-crew-category-progress-wrap" data-category="${escapeHtml(category)}"
+                   style="flex:1; min-width:160px; display:${running ? "block" : "none"};">
+                <div class="progress" style="margin:0; height:16px;">
+                  <div class="progress-bar vn-crew-category-progress-bar" data-category="${escapeHtml(category)}"
+                       style="width:${percent}%;"></div>
+                </div>
+              </div>
               <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}">${escapeHtml(running?.statusText || "")}</small>
             </div>
           `;
@@ -6783,8 +6818,12 @@
       btn.innerHTML = running
         ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
         : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+      const wrap = body.querySelector(`.vn-crew-category-progress-wrap[data-category="${category}"]`);
+      if (wrap) wrap.style.display = running ? "block" : "none";
     }
 
+    // Ladebalken im selben Design wie beim Umbenennen (Task-Center-Fortschrittsbalken) -
+    // vorher gab es hier nur den Text ("12/50 geprüft ..."), keinen visuellen Fortschritt.
     function setCategoryStatusText(category, text, done, total) {
       const el = body.querySelector(`.vn-crew-category-status[data-category="${category}"]`);
       if (el) el.textContent = text;
@@ -6795,6 +6834,10 @@
           state.done = done;
           state.total = total;
         }
+      }
+      const bar = body.querySelector(`.vn-crew-category-progress-bar[data-category="${category}"]`);
+      if (bar && state && state.total > 0) {
+        bar.style.width = `${Math.round((state.done / state.total) * 100)}%`;
       }
     }
 

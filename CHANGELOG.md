@@ -102,6 +102,15 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   ein. "Alle Zuweisungen rückgängig machen" landet jetzt ebenfalls im Verlauf.
 - **Schulungen**: Verlauf-Eintrag zeigt jetzt die Personal-Nummern statt der Namen, damit sich
   die Zuordnung eindeutig überprüfen lässt.
+- Startete ein Umbenennen-Vorgang automatisch aus der Warteschlange (weil vorher schon ein
+  anderer Task lief), wechselte der Bildschirm ungefragt zur Fortschritts-/Ergebnis-Ansicht -
+  auch wenn man inzwischen längst in einem ganz anderen Menü war. Passiert jetzt nicht mehr;
+  der Fortschritt läuft in dem Fall nur noch über den Navbar-Badge und das Task-Center.
+- **Task-Center**: Navbar-Eintrag bleibt jetzt immer sichtbar (auch im Leerlauf, statt zu
+  verschwinden) - zeigt bei nichts Laufendem eine kurze Meldung ("Nichts in der
+  Warteschlange ...") statt eines leeren Bildschirms, plus Button direkt zum Verlauf.
+- **Fahrzeug-Besatzung**: Kategorien zeigen jetzt einen echten Ladebalken (gleiches Design wie
+  beim Umbenennen) statt nur eines Textstatus - sowohl direkt im Menü als auch im Task-Center.
 
 ## Stable (v0.5.1)
 
