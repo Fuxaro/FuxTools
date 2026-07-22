@@ -89,6 +89,19 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   mitzubenutzen - der normale Eintrag öffnet immer ganz normal das Hauptmenü. Ein Klick auf den
   neuen Eintrag zeigt alle laufenden/wartenden Aufgaben mit Fortschrittsbalken und eigenem
   Abbrechen-Button je Eintrag.
+- **Hintergrund-Aufgaben**: Symbol drehte sich vorher über dem Fox-Logo und verdeckte es
+  komplett - dreht sich jetzt daneben als kleines Icon, damit der Zusammenhang zu FuxTools
+  erkennbar bleibt. Dreht sich nur noch, während wirklich etwas läuft; nach Abschluss bleibt
+  das gleiche Symbol einfach stehen (Farbe zeigt fertig/läuft), statt komplett zu verschwinden.
+  Abgeschlossene Fahrzeug-Besatzung-Läufe waren dadurch bisher gar nicht mehr auffindbar - jetzt
+  bleiben sie im Task-Center sichtbar (mit Ergebnis), bis man sie bestätigt.
+- **Verlauf**: Umbenennen und Fahrzeug-Besatzung erzeugen jetzt schon beim Start einen Eintrag
+  und bestätigen ihn in derselben Zeile bei Abschluss - so ist erkennbar, ob ein Lauf wirklich
+  fertig wurde oder z.B. durch F5/Fenster schließen unterbrochen wurde (bleibt dann auf
+  "läuft/unterbrochen" stehen). Abbrechen über den eigenen Stop-Button trägt sofort "abgebrochen"
+  ein. "Alle Zuweisungen rückgängig machen" landet jetzt ebenfalls im Verlauf.
+- **Schulungen**: Verlauf-Eintrag zeigt jetzt die Personal-Nummern statt der Namen, damit sich
+  die Zuordnung eindeutig überprüfen lässt.
 
 ## Stable (v0.5.1)
 

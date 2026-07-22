@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.64
+// @version     0.9.65
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.64";
+  const SCRIPT_VERSION = "0.9.65";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -111,6 +111,12 @@
   // laufender Worker-Loop nach einem Neu-Rendern die jeweils AKTUELLEN Elemente wieder.
   const runningCategoryRuns = new Map();
 
+  // category -> {summary, finishedAt} fuer gerade fertig gewordene Kategorien, bis sie im
+  // Task-Center angesehen/verworfen wurden (siehe renderTaskCenterScreen) - ohne das wuerde
+  // der Navbar-Hinweis sofort nach Fertigstellung wieder verschwinden, ohne dass man das
+  // Ergebnis je zu sehen bekommt.
+  const finishedCrewCategoryRuns = new Map();
+
   function isBackgroundTaskSlotBusy() {
     return !!activeBackgroundTask || activeCrewCategoryRunCount > 0;
   }
@@ -119,14 +125,17 @@
     if (!backgroundTaskBadgeEl || !taskCenterEntryEl) return;
     if (isBackgroundTaskSlotBusy()) {
       const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
-      backgroundTaskBadgeEl.innerHTML = `
-        <span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>
-        ${total > 1 ? `<span class="vn-task-count-badge">${total}</span>` : ""}
-      `;
-      taskCenterEntryEl.title = "FuxTools - Aufgaben laufen im Hintergrund";
+      // Dreht sich NUR, waehrend wirklich etwas laeuft.
+      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
+      backgroundTaskBadgeEl.style.background = "#337ab7";
+      taskCenterEntryEl.title =
+        total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
       taskCenterEntryEl.style.display = "";
-    } else if (finishedBackgroundTask) {
-      backgroundTaskBadgeEl.innerHTML = `<span class="vn-task-done-dot"></span>`;
+    } else if (finishedBackgroundTask || finishedCrewCategoryRuns.size > 0) {
+      // Fertig: dasselbe Icon bleibt STEHEN (keine Animation mehr) statt zu einem anderen
+      // Symbol zu wechseln - gruener Hintergrund statt blau zeigt "fertig, bitte ansehen".
+      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
+      backgroundTaskBadgeEl.style.background = "#5cb85c";
       taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
       taskCenterEntryEl.style.display = "";
     } else {
@@ -289,8 +298,9 @@
       `);
     }
 
-    const finishedBlock = finishedBackgroundTask
-      ? `
+    const finishedBlocks = [];
+    if (finishedBackgroundTask) {
+      finishedBlocks.push(`
         <div class="vn-task-center-item">
           <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
           <b>${escapeHtml(finishedBackgroundTask.title)}</b> ist fertig.
@@ -298,15 +308,28 @@
             Ergebnis ansehen
           </button>
         </div>
-      `
-      : "";
+      `);
+    }
+    for (const [category, info] of finishedCrewCategoryRuns) {
+      finishedBlocks.push(`
+        <div class="vn-task-center-item">
+          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
+          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}
+          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">
+            Gesehen
+          </button>
+        </div>
+      `);
+    }
 
     const emptyState =
-      !items.length && !finishedBlock ? `<p class="text-muted">Nichts aktiv - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
+      !items.length && !finishedBlocks.length
+        ? `<p class="text-muted">Nichts aktiv - keine Hintergrund-Aufgaben gerade am Laufen.</p>`
+        : "";
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>
-      ${finishedBlock}
+      ${finishedBlocks.join("")}
       ${items.join("")}
       ${emptyState}
       <div class="vn-sticky-footer">
@@ -315,6 +338,13 @@
     `;
 
     document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+    body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
+      btn.addEventListener("click", () => {
+        finishedCrewCategoryRuns.delete(btn.dataset.category);
+        updateBackgroundTaskBadge();
+        renderTaskCenterScreen();
+      });
+    });
     document.getElementById("vn-task-center-view-result")?.addEventListener("click", () => {
       finishedBackgroundTask.renderResult();
       finishedBackgroundTask = null;
@@ -993,6 +1023,8 @@
     required_extensions_config: "Geforderte Ausbauten",
     personnel_requirements_config: "Personal-Standard",
     schooling_start: "Schulung gestartet",
+    crew_assignment: "Fahrzeug-Besatzung",
+    crew_unassign_all: "Besatzung abgezogen",
   };
 
   async function getHistory() {
@@ -1001,8 +1033,32 @@
 
   async function logHistoryEntry(entry) {
     const history = await getHistory();
-    history.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, ...entry });
+    history.unshift({ timestamp: Date.now(), version: SCRIPT_VERSION, status: "done", ...entry });
     if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
+    await storeData(history, HISTORY_STORAGE_KEY);
+  }
+
+  // Fuer lang laufende Aktionen (Umbenennen, Fahrzeug-Besatzung, Besatzung abziehen): Eintrag
+  // schon beim START anlegen (status "running"), nicht erst am Ende - so bleibt sichtbar, ob
+  // ein Lauf tatsaechlich normal fertig wurde oder z.B. durch F5/Schliessen mitten drin
+  // unterbrochen wurde (der Eintrag bleibt dann einfach auf "running" stehen, da niemand mehr
+  // da ist, um ihn zu aktualisieren). finishHistoryEntry() aktualisiert DENSELBEN Eintrag per
+  // id, statt einen zweiten anzulegen.
+  async function startHistoryEntry(entry) {
+    const history = await getHistory();
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    history.unshift({ id, timestamp: Date.now(), version: SCRIPT_VERSION, status: "running", ...entry });
+    if (history.length > HISTORY_MAX_ENTRIES) history.length = HISTORY_MAX_ENTRIES;
+    await storeData(history, HISTORY_STORAGE_KEY);
+    return id;
+  }
+
+  async function updateHistoryEntry(id, updates) {
+    if (!id) return;
+    const history = await getHistory();
+    const entry = history.find(e => e.id === id);
+    if (!entry) return; // z.B. durch HISTORY_MAX_ENTRIES schon rausgefallen - kein Fehler
+    Object.assign(entry, updates);
     await storeData(history, HISTORY_STORAGE_KEY);
   }
 
@@ -1463,8 +1519,18 @@
 
   async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title) {
     renameCancelled = false;
+    // Verlaufs-Eintrag schon JETZT anlegen (status "running"), nicht erst am Ende - bleibt er
+    // so stehen (z.B. durch F5/Schliessen mitten im Lauf unterbrochen), sieht man das im
+    // Verlauf direkt statt eines fehlenden Eintrags. Der Abbrechen-Klick selbst schreibt
+    // sofort "wird abgebrochen" rein (siehe cancel-Callback unten), falls die Seite danach
+    // ebenfalls verlassen wird, bevor der Lauf sein eigenes Ende protokollieren kann.
+    const historyId = await startHistoryEntry({
+      type: renameHistoryType(itemNoun, verb),
+      label: `0/${plan.length} gestartet ...`,
+    });
     beginBackgroundTask(title, () => {
       renameCancelled = true;
+      updateHistoryEntry(historyId, { status: "cancelled", label: "Abbruch angefordert ..." });
     });
     renderBackgroundTaskProgressScreen();
 
@@ -1506,14 +1572,12 @@
     const workerCount = Math.min(RENAME_CONCURRENCY, plan.length);
     await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-    // Ein zusammengefasster Verlaufs-Eintrag pro Lauf (Typ + Anzahl), keine
-    // Einzeleintraege pro Fahrzeug/Wache - siehe Kommentar bei HISTORY_STORAGE_KEY.
-    if (done > 0) {
-      await logHistoryEntry({
-        type: renameHistoryType(itemNoun, verb),
-        label: `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`,
-      });
-    }
+    // Denselben beim Start angelegten Eintrag jetzt mit dem echten Ergebnis abschliessen
+    // (siehe startHistoryEntry oben) statt einen zweiten Eintrag anzulegen.
+    await updateHistoryEntry(historyId, {
+      label: `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`,
+      status: cancelled ? "cancelled" : "done",
+    });
 
     const renderResult = () =>
       renderCompletionScreen({ verb, done, failed: failedItems.length, plan, errors, failedItems, goBack, cancelled, itemNoun, renameFn });
@@ -2631,12 +2695,18 @@
               ? `${entry.cost.toLocaleString("de-DE")} Coins`
               : `${entry.cost.toLocaleString("de-DE")} Credits`;
         const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
+        const statusBadge =
+          entry.status === "running"
+            ? `<span class="label label-warning">läuft/unterbrochen ...</span>`
+            : entry.status === "cancelled"
+              ? `<span class="label label-default">abgebrochen</span>`
+              : "";
         return `
           <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
             <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
             <td>${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
             <td>
-              ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}
+              ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")} ${statusBadge}
               <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>
             </td>
             <td>${escapeHtml(costLabel)}</td>
@@ -2664,6 +2734,8 @@
           <option value="required_extensions_config">Geforderte Ausbauten</option>
           <option value="personnel_requirements_config">Personal-Standard</option>
           <option value="schooling_start">Schulung gestartet</option>
+          <option value="crew_assignment">Fahrzeug-Besatzung</option>
+          <option value="crew_unassign_all">Besatzung abgezogen</option>
         </select>
         <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">
       </div>
@@ -2765,11 +2837,6 @@
     style.textContent = `
       .vn-task-spin { display:inline-block; animation: vn-task-spin 1s linear infinite; }
       @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      .vn-task-done-dot {
-        display:inline-block; width:10px; height:10px; border-radius:50%; background:#5cb85c;
-        animation: vn-task-blink 1s ease-in-out infinite;
-      }
-      @keyframes vn-task-blink { 0%, 100% { opacity:1; } 50% { opacity:0.25; } }
       /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-
          Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -
          blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */
@@ -2803,12 +2870,6 @@
       .vn-task-center-item {
         border:1px solid rgba(128,128,128,0.3); border-radius:4px;
         padding:8px 10px; margin-bottom:8px;
-      }
-      /* Zaehler-Badge am Task-Center-Navbar-Icon, wenn mehr als eine Aufgabe laeuft/wartet. */
-      .vn-task-count-badge {
-        position:absolute; top:-6px; right:-8px; background:#d9534f; color:#fff;
-        border-radius:50%; font-size:9px; line-height:14px; width:14px; height:14px;
-        text-align:center; font-weight:bold;
       }
     `;
     document.head.appendChild(style);
@@ -2862,20 +2923,22 @@
     // Eigener, SEPARATER Navbar-Eintrag nur fuer Hintergrund-Tasks (siehe Hintergrund-Task-
     // System oben) - bewusst NICHT derselbe Klick-Ziel wie der normale FuxTools-Eintrag, damit
     // man ohne Umweg direkt ins normale Menue kommt, waehrend im Hintergrund etwas laeuft.
-    // Fox-Logo als Hintergrund + drehendes Icon davor macht auf einen Blick klar, dass der
-    // Punkt zu FuxTools gehoert. Per Default versteckt (display:none), siehe
+    // Fox-Logo bleibt voll sichtbar, das drehende Icon sitzt als kleines Abzeichen an der
+    // Ecke (NICHT mittig ueberlagert - sonst verdeckt es das Logo komplett) - so bleibt der
+    // Zusammenhang zu FuxTools erkennbar. Per Default versteckt (display:none), siehe
     // updateBackgroundTaskBadge().
     const taskCenterIconWrap = document.createElement("span");
     taskCenterIconWrap.style.cssText = "position:relative; display:inline-block; width:22px; height:22px;";
     const taskCenterLogo = document.createElement("img");
     taskCenterLogo.src = LOGO_URL;
     taskCenterLogo.alt = "";
-    taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px; opacity:0.55;";
+    taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px;";
     taskCenterLogo.addEventListener("error", () => taskCenterLogo.remove());
     taskCenterIconWrap.appendChild(taskCenterLogo);
     backgroundTaskBadgeEl = document.createElement("span");
     backgroundTaskBadgeEl.style.cssText =
-      "position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:14px; filter:drop-shadow(0 0 2px #000);";
+      "position:absolute; bottom:-5px; right:-6px; width:14px; height:14px; border-radius:50%; " +
+      "background:#333; display:flex; align-items:center; justify-content:center; font-size:9px;";
     taskCenterIconWrap.appendChild(backgroundTaskBadgeEl);
 
     const taskCenterLink = document.createElement("a");
@@ -5376,7 +5439,9 @@
         await logHistoryEntry({
           type: "schooling_start",
           label: qualificationName,
-          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.name).join(", ")})`,
+          // Personal-ID statt Name, damit der Nutzer die Zuweisung im Spiel (/personals/{id})
+          // direkt nachpruefen kann.
+          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`,
         });
         statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
         setTimeout(goBack, 600);
@@ -6740,14 +6805,21 @@
           const running = runningCategoryRuns.get(category);
           if (running) {
             running.cancelled = true;
+            updateHistoryEntry(running.historyId, { status: "cancelled", label: `${category}: Abbruch angefordert ...` });
             return;
           }
 
-          const state = { cancelled: false, statusText: "" };
+          const categoryVehicles = byCategory.get(category) || [];
+          // Verlaufs-Eintrag schon JETZT anlegen (status "running") - siehe Kommentar bei
+          // startHistoryEntry/runRenamePlan, gleiches Prinzip fuer Fahrzeug-Besatzung.
+          const historyId = await startHistoryEntry({
+            type: "crew_assignment",
+            label: `${category}: 0/${categoryVehicles.length} gestartet ...`,
+          });
+          const state = { cancelled: false, statusText: "", historyId };
           runningCategoryRuns.set(category, state);
           activeCrewCategoryRunCount++;
           updateBackgroundTaskBadge();
-          const categoryVehicles = byCategory.get(category) || [];
           setCategoryRunningUI(category, true);
 
           let done = 0;
@@ -6816,9 +6888,20 @@
           const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
           await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-          if (state.cancelled) {
-            setCategoryStatusText(category, `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`);
-          }
+          const summary = state.cancelled
+            ? `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`
+            : `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+          setCategoryStatusText(category, summary);
+          // Merkt sich das Ergebnis als "fertig, noch nicht angesehen" (siehe
+          // renderTaskCenterScreen) - sonst verschwindet der Navbar-Hinweis sofort wieder,
+          // ohne dass man das Ergebnis je zu sehen bekommt.
+          finishedCrewCategoryRuns.set(category, { summary, finishedAt: Date.now() });
+          // Denselben beim Start angelegten Eintrag abschliessen statt einen zweiten anzulegen -
+          // IMMER, auch bei 0 Treffern, sonst bliebe der Eintrag faelschlich auf "running" stehen.
+          await updateHistoryEntry(state.historyId, {
+            label: `${category}: ${summary}`,
+            status: state.cancelled ? "cancelled" : "done",
+          });
           runningCategoryRuns.delete(category);
           activeCrewCategoryRunCount--;
           updateBackgroundTaskBadge();
@@ -6926,7 +7009,11 @@
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
       const cancelSuffix = state.cancelled ? " (abgebrochen)" : "";
-      statusEl.innerHTML = `<span class="text-success">Fertig${cancelSuffix}: ${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}.</span>`;
+      const summary = `${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}${cancelSuffix}`;
+      statusEl.innerHTML = `<span class="text-success">Fertig: ${escapeHtml(summary)}</span>`;
+      if (removedTotal > 0) {
+        await logHistoryEntry({ type: "crew_unassign_all", label: summary });
+      }
       cancelRun = null;
       confirmBtn.disabled = true;
       confirmBtn.innerHTML = `<span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Erledigt`;
