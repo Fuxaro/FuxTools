@@ -61,7 +61,8 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Wachen umbenennen**: jetzt als echte Tabelle (Wachen-ID, Name, Neuer Name als Spalten) -
   Sortierung per Klick auf die Spaltenüberschrift statt separater Buttons. Blaue
   Kategorie-Hervorhebung war durch einen CSS-Konflikt mit dem Seiten-Design unsichtbar, jetzt
-  behoben.
+  behoben. Umsortieren klappt aufgeklappte Kategorien nicht mehr zu und verwirft auch keine
+  bereits eingetippten neuen Namen mehr.
 
 ## Stable (v0.5.1)
 

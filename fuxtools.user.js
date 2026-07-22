@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.56
+// @version     0.9.57
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.56";
+  const SCRIPT_VERSION = "0.9.57";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -3503,6 +3503,10 @@
     // erneut vom Server zu laden.
     let sortMode = "id";
 
+    // Welche Kategorien gerade aufgeklappt sind - render() baut bei jedem Sortieren das
+    // komplette HTML neu auf, ohne dieses Set wuerden dabei alle Panels wieder zuklappen.
+    const openCategories = new Set();
+
     // Spaltenkopf ueber der gesamten Liste (nicht pro Kategorie wiederholt) - Klick auf
     // "Wachen-ID"/"Name" sortiert wie bei einer echten Tabelle, ein Pfeil zeigt die aktive
     // Spalte + Richtung an. Die Breiten muessen exakt zu den <col>-Elementen der Tabellen
@@ -3519,6 +3523,14 @@
     }
 
     function render() {
+      // Bereits eingetippte neue Namen retten - render() baut beim Sortieren das komplette
+      // HTML neu auf, ohne das wuerden unbestaetigte Eingaben stillschweigend verloren gehen.
+      const previousValues = new Map();
+      body.querySelectorAll(".vn-building-row").forEach(row => {
+        const val = row.querySelector(".vn-building-name-input")?.value;
+        if (val) previousValues.set(row.dataset.id, val);
+      });
+
       const byCategory = new Map();
       for (const s of stations) {
         if (!byCategory.has(s.category)) byCategory.set(s.category, []);
@@ -3531,6 +3543,7 @@
         .map((cat, idx) => {
           const catStations = [...byCategory.get(cat)].sort(comparator);
           const collapseId = `vn-wache-cat-collapse-${idx}`;
+          const isOpen = openCategories.has(cat);
           const rows = catStations
             .map(
               s => `
@@ -3538,18 +3551,19 @@
               <td class="text-muted">${escapeHtml(s.id)}</td>
               <td>${escapeHtml(s.name)}</td>
               <td>
-                <input type="text" class="form-control input-sm vn-building-name-input" placeholder="leer = keine Änderung">
+                <input type="text" class="form-control input-sm vn-building-name-input" placeholder="leer = keine Änderung"
+                       value="${escapeHtml(previousValues.get(s.id) || "")}">
               </td>
             </tr>`
             )
             .join("");
           return `
           <div class="panel panel-default" style="margin-bottom: 8px;">
-            <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">
-              <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
+            <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}" data-category="${escapeHtml(cat)}">
+              <span class="glyphicon glyphicon-triangle-right ${isOpen ? "vn-rotated" : ""}" aria-hidden="true"></span>
               <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
             </div>
-            <div id="${collapseId}" class="panel-collapse collapse">
+            <div id="${collapseId}" class="panel-collapse collapse${isOpen ? " in" : ""}">
               <table class="table table-condensed" style="font-size:12px; margin-bottom:0;">
                 <colgroup><col style="width:18%;"><col><col></colgroup>
                 <tbody>${rows}</tbody>
@@ -3580,7 +3594,13 @@
         });
       });
       body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
-        icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
+        const heading = icon.closest(".vn-category-heading");
+        heading.addEventListener("click", () => {
+          icon.classList.toggle("vn-rotated");
+          const cat = heading.dataset.category;
+          if (openCategories.has(cat)) openCategories.delete(cat);
+          else openCategories.add(cat);
+        });
       });
 
       document.getElementById("vn-btn-back").addEventListener("click", renderStationRenameLeitstelleSelection);
