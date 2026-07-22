@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.66
+// @version     0.9.67
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.66";
+  const SCRIPT_VERSION = "0.9.67";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -251,11 +251,9 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
   }
 
   // Eigener Bildschirm ueber den Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon):
@@ -351,12 +349,10 @@
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf
         </button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderHistoryScreen);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
       btn.addEventListener("click", () => {
         finishedCrewCategoryRuns.delete(btn.dataset.category);
@@ -1664,13 +1660,11 @@
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
         </button>
         <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
       </div>
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
     if (failedItems && failedItems.length) {
       document.getElementById("vn-btn-retry").addEventListener("click", () => {
         executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
@@ -2862,7 +2856,15 @@
   function injectCustomStyles() {
     const style = document.createElement("style");
     style.textContent = `
-      .vn-task-spin { display:inline-block; animation: vn-task-spin 1s linear infinite; }
+      /* Ohne feste Breite/Hoehe + Zeilenhoehe liegt der Drehpunkt (Boxmitte) bei so einem
+         kleinen Icon (9px) leicht neben der optischen Mitte der Glyphe - das Icon "eiert"
+         dann sichtbar statt sauber auf der Stelle zu rotieren. */
+      .vn-task-spin {
+        display:inline-block;
+        width:9px; height:9px; line-height:9px;
+        text-align:center;
+        animation: vn-task-spin 1s linear infinite;
+      }
       @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-
          Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -

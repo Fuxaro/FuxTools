@@ -111,6 +111,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Warteschlange ...") statt eines leeren Bildschirms, plus Button direkt zum Verlauf.
 - **Fahrzeug-Besatzung**: Kategorien zeigen jetzt einen echten Ladebalken (gleiches Design wie
   beim Umbenennen) statt nur eines Textstatus - sowohl direkt im Menü als auch im Task-Center.
+- "Schließen" (je Bildschirm) und "Beenden" (dauerhaft unten im Fenster) waren doppelt - taten
+  exakt dasselbe. "Schließen" entfernt, "Beenden" reicht dafür.
+- Das drehende Symbol am Task-Center-Eintrag "eierte" sichtbar statt sauber auf der Stelle zu
+  rotieren (Drehpunkt lag bei der geringen Größe leicht neben der optischen Mitte) - behoben.
 
 ## Stable (v0.5.1)
 
