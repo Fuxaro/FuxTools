@@ -56,6 +56,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Fahrzeug-Besatzung**: neuer Schalter "Nur ergänzen" / "Vollständig anwenden" - legt fest,
   ob ein Lauf bereits zugewiesenes Personal wieder entfernen darf (z.B. beim Rückbau von
   Voll- auf Minimum-Besatzung), oder nur fehlendes Personal ergänzt und nie etwas antastet.
+- Einheitliches Design für aufklappbare Kategorien (blauer Rand, Hintergrund, drehender Pfeil)
+  jetzt auch bei Fahrzeuge/Wachen umbenennen, nicht nur im Wachen-Bauplaner.
+- **Wachen umbenennen**: Wachen-ID wird direkt mit angezeigt, Reihenfolge innerhalb der
+  Kategorien wahlweise nach Wachen-ID oder Name sortierbar.
 
 ## Stable (v0.5.1)
 

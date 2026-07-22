@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.54
+// @version     0.9.55
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.54";
+  const SCRIPT_VERSION = "0.9.55";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2671,14 +2671,21 @@
         animation: vn-task-blink 1s ease-in-out infinite;
       }
       @keyframes vn-task-blink { 0%, 100% { opacity:1; } 50% { opacity:0.25; } }
-      .vn-fire-category-summary {
-        cursor:pointer; list-style:none; background:rgba(128,128,128,0.15);
-        border-left:3px solid #337ab7; border-radius:3px; padding:6px 10px; margin-bottom:2px;
+      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-
+         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -
+         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */
+      .vn-category-heading {
+        cursor:pointer; background:rgba(128,128,128,0.15); border-left:3px solid #337ab7;
+        border-radius:3px; padding:6px 10px; margin-bottom:2px;
       }
-      .vn-fire-category-summary::-webkit-details-marker { display:none; }
-      .vn-fire-category-summary:hover { background:rgba(128,128,128,0.28); }
-      .vn-fire-category-summary .glyphicon-chevron-right { font-size:10px; transition:transform 0.15s; }
-      details[open] > .vn-fire-category-summary .glyphicon-chevron-right { transform:rotate(90deg); }
+      .vn-category-heading:hover { background:rgba(128,128,128,0.28); }
+      .vn-category-heading .glyphicon-chevron-right,
+      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }
+      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }
+      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */
+      summary.vn-category-heading { list-style:none; }
+      summary.vn-category-heading::-webkit-details-marker { display:none; }
+      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }
     `;
     document.head.appendChild(style);
   }
@@ -2873,7 +2880,7 @@
           .join("");
         return `
         <div class="panel panel-default" style="margin-bottom: 8px;">
-          <div class="panel-heading" style="padding:8px 12px; cursor:pointer;" data-toggle="collapse" data-target="#${collapseId}">
+          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">
             <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
             <b>${escapeHtml(cat)}</b>
             <span class="text-muted">(${catStations.length} Wachen)</span>
@@ -2907,6 +2914,13 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", renderLeitstelleSelection);
+
+    // Pfeil-Symbol dreht sich beim Auf-/Zuklappen (Bootstrap-Collapse aendert selbst keine
+    // Klasse am Header, daher optimistisch bei jedem Klick umschalten statt auf ein
+    // shown/hidden.bs.collapse-Event zu warten).
+    body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
+      icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
+    });
 
     // "alle auswaehlen" Checkbox pro Kategorie
     body.querySelectorAll(".vn-category-master").forEach(master => {
@@ -3480,71 +3494,105 @@
       stations = stations.filter(s => selectedLeitstelleIds.includes(s.leitstelleId));
     }
 
-    const byCategory = new Map();
-    for (const s of stations) {
-      if (!byCategory.has(s.category)) byCategory.set(s.category, []);
-      byCategory.get(s.category).push(s);
-    }
+    // Sortierung INNERHALB jeder Kategorie waehlbar - "id" behaelt die Reihenfolge aus
+    // loadAllBuildings() (bereits nach Wachen-ID), "name" sortiert clientseitig um, ohne
+    // erneut vom Server zu laden.
+    let sortMode = "id";
 
-    const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-      .map((cat, idx) => {
-        const catStations = byCategory.get(cat);
-        const collapseId = `vn-wache-cat-collapse-${idx}`;
-        const rows = catStations
-          .map(
-            s => `
-          <div class="form-group vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-            <label style="flex: 0 0 45%; margin:0;">${escapeHtml(s.name)}</label>
-            <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
-            <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
-          </div>`
-          )
-          .join("");
-        return `
-        <div class="panel panel-default" style="margin-bottom: 8px;">
-          <div class="panel-heading" style="padding:8px 12px; cursor:pointer;" data-toggle="collapse" data-target="#${collapseId}">
-            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
-            <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
+    function render() {
+      const byCategory = new Map();
+      for (const s of stations) {
+        if (!byCategory.has(s.category)) byCategory.set(s.category, []);
+        byCategory.get(s.category).push(s);
+      }
+      const comparator =
+        sortMode === "name" ? (a, b) => a.name.localeCompare(b.name, "de") : (a, b) => Number(a.id) - Number(b.id);
+
+      const categoryBlocks = CATEGORY_ORDER.filter(cat => byCategory.has(cat))
+        .map((cat, idx) => {
+          const catStations = [...byCategory.get(cat)].sort(comparator);
+          const collapseId = `vn-wache-cat-collapse-${idx}`;
+          const rows = catStations
+            .map(
+              s => `
+            <div class="form-group vn-building-row" data-id="${s.id}" data-category="${escapeHtml(cat)}" data-name="${escapeHtml(s.name)}" style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+              <label style="flex: 0 0 45%; margin:0;">
+                ${escapeHtml(s.name)} <span class="text-muted" style="font-size:11px;">(ID ${escapeHtml(s.id)})</span>
+              </label>
+              <span class="glyphicon glyphicon-arrow-right" aria-hidden="true" style="color:#999;"></span>
+              <input type="text" class="form-control vn-building-name-input" placeholder="leer = keine Änderung" style="flex:1;">
+            </div>`
+            )
+            .join("");
+          return `
+          <div class="panel panel-default" style="margin-bottom: 8px;">
+            <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">
+              <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>
+              <b>${escapeHtml(cat)}</b> <span class="text-muted">(${catStations.length} Wachen)</span>
+            </div>
+            <div id="${collapseId}" class="panel-collapse collapse">
+              <div class="panel-body">${rows}</div>
+            </div>
+          </div>`;
+        })
+        .join("");
+
+      body.innerHTML = `
+        <div class="form-inline" style="margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+          <label style="font-size:12px; margin:0;">Sortierung innerhalb der Kategorien:</label>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-sm ${sortMode === "id" ? "btn-primary" : "btn-default"} vn-wache-sort" data-sort="id">
+              Nach Wachen-ID
+            </button>
+            <button type="button" class="btn btn-sm ${sortMode === "name" ? "btn-primary" : "btn-default"} vn-wache-sort" data-sort="name">
+              Nach Name
+            </button>
           </div>
-          <div id="${collapseId}" class="panel-collapse collapse">
-            <div class="panel-body">${rows}</div>
-          </div>
-        </div>`;
-      })
-      .join("");
+        </div>
+        <p class="text-muted">Aktueller Name → neuer Name. Leeres Feld = keine Änderung.</p>
+        ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
+        <div class="vn-sticky-footer">
+          <button id="vn-btn-back" type="button" class="btn btn-default">
+            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+          </button>
+          <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
+            <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
+          </button>
+        </div>
+      `;
 
-    body.innerHTML = `
-      <p class="text-muted">Aktueller Name → neuer Name, nach Art sortiert. Leeres Feld = keine Änderung.</p>
-      ${categoryBlocks || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-back" type="button" class="btn btn-default">
-          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
-        </button>
-        <button id="vn-btn-save-buildings" type="button" class="btn btn-success">
-          <span class="glyphicon glyphicon-floppy-disk" aria-hidden="true"></span> Speichern
-        </button>
-      </div>
-    `;
-
-    document.getElementById("vn-btn-back").addEventListener("click", renderStationRenameLeitstelleSelection);
-    document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
-      const plan = [];
-      body.querySelectorAll(".vn-building-row").forEach(row => {
-        const newName = row.querySelector(".vn-building-name-input").value.trim();
-        if (!newName) return;
-        plan.push({
-          id: row.dataset.id,
-          oldName: row.querySelector("label").textContent,
-          newName,
-          station: row.dataset.category,
+      body.querySelectorAll(".vn-wache-sort").forEach(btn => {
+        btn.addEventListener("click", () => {
+          sortMode = btn.dataset.sort;
+          render();
         });
       });
-      if (!plan.length) {
-        alert("Kein neuer Name eingetragen.");
-        return;
-      }
-      renderBuildingRenameConfirm(plan, "umbenannt", () => renderStationRenameScreen(selectedLeitstelleIds), "Wache(n)");
-    });
+      body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
+        icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
+      });
+
+      document.getElementById("vn-btn-back").addEventListener("click", renderStationRenameLeitstelleSelection);
+      document.getElementById("vn-btn-save-buildings").addEventListener("click", () => {
+        const plan = [];
+        body.querySelectorAll(".vn-building-row").forEach(row => {
+          const newName = row.querySelector(".vn-building-name-input").value.trim();
+          if (!newName) return;
+          plan.push({
+            id: row.dataset.id,
+            oldName: row.dataset.name,
+            newName,
+            station: row.dataset.category,
+          });
+        });
+        if (!plan.length) {
+          alert("Kein neuer Name eingetragen.");
+          return;
+        }
+        renderBuildingRenameConfirm(plan, "umbenannt", () => renderStationRenameScreen(selectedLeitstelleIds), "Wache(n)");
+      });
+    }
+
+    render();
   }
 
   async function renderLeitstelleRenameScreen() {
@@ -7067,7 +7115,7 @@
           const selectedCount = categoryTypes.filter(t => (quantities.get(t.id) || 0) > 0).length;
           return `
             <details style="margin-bottom:6px;" ${selectedCount ? "open" : ""}>
-              <summary class="vn-fire-category-summary" style="font-size:11px; font-weight:bold; text-transform:uppercase;">
+              <summary class="vn-category-heading" style="font-size:11px; font-weight:bold; text-transform:uppercase;">
                 <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>
                 ${escapeHtml(category)}${selectedCount ? ` <span class="badge">${selectedCount}</span>` : ""}
               </summary>
