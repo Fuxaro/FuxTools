@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.70
+// @version     0.9.71
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.70";
+  const SCRIPT_VERSION = "0.9.71";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -2719,36 +2719,101 @@
       searchField: "search",
     });
 
-    const rows = history
-      .map(entry => {
-        const date = new Date(entry.timestamp);
-        const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
-        const costLabel =
-          entry.cost == null
-            ? "-"
-            : entry.currency === "coins"
-              ? `${entry.cost.toLocaleString("de-DE")} Coins`
-              : `${entry.cost.toLocaleString("de-DE")} Credits`;
-        const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
-        const statusBadge =
-          entry.status === "running"
-            ? `<span class="label label-warning">läuft/unterbrochen ...</span>`
-            : entry.status === "cancelled"
-              ? `<span class="label label-default">abgebrochen</span>`
-              : `<span class="label label-success">abgeschlossen</span>`;
-        return `
-          <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
-            <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
-            <td>${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
-            <td>
-              ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")} ${statusBadge}
-              <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>
-            </td>
-            <td>${escapeHtml(costLabel)}</td>
-          </tr>
-        `;
-      })
-      .join("");
+    // Sortierung per Klick auf die Spaltenueberschrift (gleiches Prinzip wie bei "Wachen
+    // umbenennen"/Fahrzeug-Besatzung-Fehlerliste) - erneuter Klick auf dieselbe Spalte dreht
+    // die Richtung um. Datum/Uhrzeit sortieren beide nach dem echten Zeitstempel (nicht dem
+    // formatierten Text), Status nach Dringlichkeit (laeuft/unterbrochen zuerst).
+    const historySort = { column: "date", asc: false };
+    const STATUS_RANK = { running: 0, cancelled: 1 };
+    const STATUS_LABEL = {
+      running: "läuft/unterbrochen ...",
+      cancelled: "abgebrochen",
+    };
+
+    function historySortKey(column, entry) {
+      switch (column) {
+        case "status":
+          return STATUS_RANK[entry.status] ?? 2;
+        case "function":
+          return `${HISTORY_TYPE_LABELS[entry.type] || entry.type || ""}: ${entry.label || ""}`.toLowerCase();
+        case "cost":
+          return entry.cost == null ? -1 : entry.cost;
+        case "date":
+        default:
+          return entry.timestamp;
+      }
+    }
+
+    function renderHistoryRows() {
+      const dir = historySort.asc ? 1 : -1;
+      const sorted = [...history].sort((a, b) => {
+        const ka = historySortKey(historySort.column, a);
+        const kb = historySortKey(historySort.column, b);
+        if (typeof ka === "number" && typeof kb === "number") return dir * (ka - kb);
+        return dir * String(ka).localeCompare(String(kb), "de");
+      });
+      return sorted
+        .map(entry => {
+          const date = new Date(entry.timestamp);
+          const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
+          const costLabel =
+            entry.cost == null
+              ? "-"
+              : entry.currency === "coins"
+                ? `${entry.cost.toLocaleString("de-DE")} Coins`
+                : `${entry.cost.toLocaleString("de-DE")} Credits`;
+          const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
+          const statusBadge = STATUS_LABEL[entry.status]
+            ? `<span class="label ${entry.status === "running" ? "label-warning" : "label-default"}">${STATUS_LABEL[entry.status]}</span>`
+            : `<span class="label label-success">abgeschlossen</span>`;
+          return `
+            <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">
+              <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>
+              <td>${escapeHtml(date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }))}</td>
+              <td>${statusBadge}</td>
+              <td>
+                ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}
+                <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>
+              </td>
+              <td>${escapeHtml(costLabel)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    }
+
+    function historyHeaderHtml() {
+      const arrow = col =>
+        historySort.column === col
+          ? `<span class="glyphicon glyphicon-triangle-${historySort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>`
+          : "";
+      const th = (col, label) =>
+        `<th class="vn-history-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
+      return `${th("date", "Datum")}${th("date", "Uhrzeit")}${th("status", "Status")}${th("function", "Funktion")}${th("cost", "Kosten")}`;
+    }
+
+    function bindHistorySortHeaders() {
+      body.querySelectorAll(".vn-history-sort-th").forEach(th => {
+        th.addEventListener("click", () => {
+          const col = th.dataset.sort;
+          if (historySort.column === col) historySort.asc = !historySort.asc;
+          else {
+            historySort.column = col;
+            historySort.asc = true;
+          }
+          updateHistoryTable();
+        });
+      });
+    }
+
+    function updateHistoryTable() {
+      const headRow = document.getElementById("vn-history-head");
+      if (headRow) headRow.innerHTML = historyHeaderHtml();
+      document.getElementById("vn-history-body").innerHTML =
+        renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>';
+      bindHistorySortHeaders();
+      applyRowVisibility();
+    }
 
     body.innerHTML = `
       <p class="text-muted" style="font-size:12px;">
@@ -2777,21 +2842,17 @@
       <div style="max-height:55vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">
           <colgroup>
+            <col style="width:12%;">
+            <col style="width:10%;">
             <col style="width:14%;">
-            <col style="width:11%;">
-            <col style="width:55%;">
+            <col style="width:44%;">
             <col style="width:20%;">
           </colgroup>
           <thead>
-            <tr>
-              <th>Datum</th>
-              <th>Uhrzeit</th>
-              <th>Funktion</th>
-              <th>Kosten</th>
-            </tr>
+            <tr id="vn-history-head">${historyHeaderHtml()}</tr>
           </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="4" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}
+          <tbody id="vn-history-body">
+            ${renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -2805,6 +2866,7 @@
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-history-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-history-type-filter").addEventListener("change", applyRowVisibility);
+    bindHistorySortHeaders();
   }
 
   // Fehlerprotokoll direkt im Script anzeigen, statt es nur als Datei herunterladen zu

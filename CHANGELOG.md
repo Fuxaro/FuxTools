@@ -130,6 +130,9 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Abbrechen-Button, taucht im Task-Center auf, landet in einer Warteschlange statt parallel zu
   laufen, falls schon ein anderer Task aktiv ist, und wird im Verlauf jetzt zweistufig
   protokolliert (Start sofort sichtbar, Abschluss/Abbruch bestätigt in derselben Zeile).
+- **Verlauf**: eigene Status-Spalte (statt Label mitten im Funktions-Text) - jetzt außerdem
+  alle Spalten (Datum, Uhrzeit, Status, Funktion, Kosten) per Klick auf die Spaltenüberschrift
+  sortierbar, wie bei den anderen Tabellen im Tool.
 
 ## Stable (v0.5.1)
 
