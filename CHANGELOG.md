@@ -122,6 +122,8 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Stand, teils schon "fertig". Aktualisiert sich jetzt live, auch während man draufschaut.
 - **Verlauf**: erfolgreich abgeschlossene Einträge zeigen jetzt ebenfalls einen Status
   ("abgeschlossen"), nicht nur laufende/abgebrochene.
+- Statt des entfernten Farbkreises blieb versehentlich ein grauer, eckiger Hintergrund am
+  Task-Center-Symbol übrig (Rest einer alten Zuweisung) - jetzt wirklich ganz ohne Hintergrund.
 
 ## Stable (v0.5.1)
 

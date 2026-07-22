@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.68
+// @version     0.9.69
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.68";
+  const SCRIPT_VERSION = "0.9.69";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -140,9 +140,8 @@
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
       taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
     } else {
-      // Leerlauf: gleiches Icon, still stehend.
+      // Leerlauf: gleiches Icon, still stehend, kein Hintergrund.
       backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
-      backgroundTaskBadgeEl.style.background = "#777";
       taskCenterEntryEl.title = "FuxTools - Aufgaben-Übersicht (nichts aktiv)";
     }
   }
