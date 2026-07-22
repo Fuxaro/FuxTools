@@ -84,6 +84,11 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   jetzt in einem grauen Kasten, damit erkennbar ist, was zusammengehört.
 - **Fahrzeug-Besatzung**: Fehler-Liste (Kategorie/Wache/Fahrzeug/Status/Seit) jetzt per Klick
   auf die Spaltenüberschrift sortierbar.
+- **Hintergrund-Aufgaben** haben jetzt einen eigenen Navbar-Eintrag (Fox-Logo mit drehendem
+  Symbol davor, Zähler bei mehreren gleichzeitig) statt den normalen FuxTools-Menüpunkt
+  mitzubenutzen - der normale Eintrag öffnet immer ganz normal das Hauptmenü. Ein Klick auf den
+  neuen Eintrag zeigt alle laufenden/wartenden Aufgaben mit Fortschrittsbalken und eigenem
+  Abbrechen-Button je Eintrag.
 
 ## Stable (v0.5.1)
 

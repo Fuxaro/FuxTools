@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.63
+// @version     0.9.64
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.63";
+  const SCRIPT_VERSION = "0.9.64";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -90,7 +90,8 @@
   // (z.B. erst Personalzuweisung, dann Umbenennen) landet in einer Warteschlange und startet
   // automatisch, sobald der vorherige fertig ist, statt parallel zu laufen.
   //////////////////////////////////////////////////
-  let backgroundTaskBadgeEl = null; // im Navbar-Eintrag, siehe addMenuEntry()
+  let backgroundTaskBadgeEl = null; // Icon-Overlay im eigenen Task-Center-Navbar-Eintrag
+  let taskCenterEntryEl = null; // das <li> selbst, siehe addMenuEntry()
   const backgroundTaskQueue = []; // { title, start() } - start() rendert+laeuft den Task
   let activeBackgroundTask = null; // { title, percent, progressText, cancel() }
   let finishedBackgroundTask = null; // { title, renderResult() } - bis angeschaut/reopened
@@ -115,17 +116,21 @@
   }
 
   function updateBackgroundTaskBadge() {
-    if (!backgroundTaskBadgeEl) return;
+    if (!backgroundTaskBadgeEl || !taskCenterEntryEl) return;
     if (isBackgroundTaskSlotBusy()) {
-      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
-      backgroundTaskBadgeEl.title = `${activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung"} läuft im Hintergrund ...`;
-      backgroundTaskBadgeEl.style.display = "";
+      const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
+      backgroundTaskBadgeEl.innerHTML = `
+        <span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>
+        ${total > 1 ? `<span class="vn-task-count-badge">${total}</span>` : ""}
+      `;
+      taskCenterEntryEl.title = "FuxTools - Aufgaben laufen im Hintergrund";
+      taskCenterEntryEl.style.display = "";
     } else if (finishedBackgroundTask) {
       backgroundTaskBadgeEl.innerHTML = `<span class="vn-task-done-dot"></span>`;
-      backgroundTaskBadgeEl.title = `${finishedBackgroundTask.title}: fertig - klicken zum Ansehen`;
-      backgroundTaskBadgeEl.style.display = "";
+      taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
+      taskCenterEntryEl.style.display = "";
     } else {
-      backgroundTaskBadgeEl.style.display = "none";
+      taskCenterEntryEl.style.display = "none";
     }
   }
 
@@ -227,6 +232,106 @@
     `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+  }
+
+  // Eigener Bildschirm ueber den Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon):
+  // zeigt ALLE laufenden/wartenden Hintergrund-Aufgaben auf einen Blick statt nur die eine
+  // "aktive" (Umbenennen) oder eine einzelne Fahrzeug-Besatzung-Kategorie - mit Fortschritt
+  // und eigenem Abbrechen je Eintrag. Kein Live-Refresh (keine Notwendigkeit fuer Polling);
+  // ein erneuter Klick auf den Navbar-Eintrag zeigt den jeweils aktuellen Stand.
+  function renderTaskCenterScreen() {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("FuxTools-Aufgaben");
+    const body = document.getElementById("vehicle-naming-modal-body");
+
+    const items = [];
+
+    if (activeBackgroundTask) {
+      items.push(`
+        <div class="vn-task-center-item">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <b>${escapeHtml(activeBackgroundTask.title)}</b>
+            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="rename">
+              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+            </button>
+          </div>
+          <div class="progress" style="margin:6px 0 2px; height:16px;">
+            <div class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>
+          </div>
+          <div class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>
+        </div>
+      `);
+    }
+
+    for (const [category, state] of runningCategoryRuns) {
+      const percent = state.total > 0 ? Math.round((state.done / state.total) * 100) : 0;
+      items.push(`
+        <div class="vn-task-center-item">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b>
+            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="crew" data-category="${escapeHtml(category)}">
+              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen
+            </button>
+          </div>
+          <div class="progress" style="margin:6px 0 2px; height:16px;">
+            <div class="progress-bar" style="width:${percent}%;"></div>
+          </div>
+          <div class="text-muted" style="font-size:11px;">${escapeHtml(state.statusText || "läuft ...")}</div>
+        </div>
+      `);
+    }
+
+    for (const queued of backgroundTaskQueue) {
+      items.push(`
+        <div class="vn-task-center-item text-muted">
+          <span class="glyphicon glyphicon-time" aria-hidden="true"></span> ${escapeHtml(queued.title)} - wartet, bis Platz frei ist ...
+        </div>
+      `);
+    }
+
+    const finishedBlock = finishedBackgroundTask
+      ? `
+        <div class="vn-task-center-item">
+          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
+          <b>${escapeHtml(finishedBackgroundTask.title)}</b> ist fertig.
+          <button type="button" id="vn-task-center-view-result" class="btn btn-primary btn-xs" style="margin-left:8px;">
+            Ergebnis ansehen
+          </button>
+        </div>
+      `
+      : "";
+
+    const emptyState =
+      !items.length && !finishedBlock ? `<p class="text-muted">Nichts aktiv - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
+
+    body.innerHTML = `
+      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>
+      ${finishedBlock}
+      ${items.join("")}
+      ${emptyState}
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
+      </div>
+    `;
+
+    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
+    document.getElementById("vn-task-center-view-result")?.addEventListener("click", () => {
+      finishedBackgroundTask.renderResult();
+      finishedBackgroundTask = null;
+      updateBackgroundTaskBadge();
+    });
+    body.querySelectorAll(".vn-task-center-cancel").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.kind === "rename") {
+          activeBackgroundTask?.cancel();
+        } else {
+          const state = runningCategoryRuns.get(btn.dataset.category);
+          if (state) state.cancelled = true;
+        }
+        btn.disabled = true;
+        btn.innerHTML = `<span class="glyphicon glyphicon-hourglass" aria-hidden="true"></span> Wird beendet ...`;
+      });
+    });
   }
 
   // Fenster-Breite je Bildschirm-Typ: schmal fuer reine Menue-/Formular-Bildschirme,
@@ -1792,7 +1897,7 @@
     // Seiten-jQuery ueber unsafeWindow: seit @grant nicht mehr "none" ist, laeuft das
     // Script in einer Sandbox und sieht das von der Seite geladene $/jQuery nicht direkt.
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
-    pageJQuery(modal).on("show.bs.modal", () => {
+    pageJQuery(modal).on("show.bs.modal", e => {
       // Falls seit dem letzten Oeffnen ein Update-Tab geoeffnet wurde (siehe
       // pendingReloadAfterUpdate), bleibt der Neuladen-Bildschirm bestehen statt des
       // Hauptmenues - kein automatischer Reload, der Nutzer klickt bewusst selbst.
@@ -1800,17 +1905,12 @@
         renderUpdateRequiredScreen();
         return;
       }
-      // Ein laufender/gerade fertiger Hintergrund-Task (siehe Hintergrund-Task-System oben)
-      // hat Vorrang vor dem Hauptmenue - man landet beim erneuten Oeffnen wieder genau dort,
-      // wo man das Fenster geschlossen hat, statt den Fortschritt neu suchen zu muessen.
-      if (activeBackgroundTask) {
-        renderBackgroundTaskProgressScreen();
-        return;
-      }
-      if (finishedBackgroundTask) {
-        finishedBackgroundTask.renderResult();
-        finishedBackgroundTask = null;
-        updateBackgroundTaskBadge();
+      // Ueber den eigenen Task-Center-Navbar-Eintrag (Fox-Logo + drehendes Icon) geoeffnet?
+      // e.relatedTarget ist bei Bootstraps data-toggle="modal" das tatsaechlich angeklickte
+      // Element - so bleibt der NORMALE FuxTools-Eintrag immer beim gewohnten Hauptmenue,
+      // waehrend der Task-Center-Eintrag gezielt die laufenden/wartenden Aufgaben zeigt.
+      if (e.relatedTarget?.closest?.("#vn-task-center-entry")) {
+        renderTaskCenterScreen();
         return;
       }
       renderMainMenu();
@@ -2698,6 +2798,18 @@
         padding:5px 8px; background:rgba(128,128,128,0.08);
       }
       .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }
+      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/
+         wartender Aufgabe. */
+      .vn-task-center-item {
+        border:1px solid rgba(128,128,128,0.3); border-radius:4px;
+        padding:8px 10px; margin-bottom:8px;
+      }
+      /* Zaehler-Badge am Task-Center-Navbar-Icon, wenn mehr als eine Aufgabe laeuft/wartet. */
+      .vn-task-count-badge {
+        position:absolute; top:-6px; right:-8px; background:#d9534f; color:#fff;
+        border-radius:50%; font-size:9px; line-height:14px; width:14px; height:14px;
+        text-align:center; font-weight:bold;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -2725,14 +2837,6 @@
     a.appendChild(logoImg);
     a.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
 
-    // Fortschritts-Icon fuer Hintergrund-Tasks (siehe Hintergrund-Task-System oben) - per
-    // Default versteckt, wird von updateBackgroundTaskBadge() ein-/ausgeblendet. Klick oeffnet
-    // ganz normal das Modal (data-toggle am <li>), der show.bs.modal-Handler zeigt dann den
-    // laufenden/fertigen Task statt des Hauptmenues.
-    backgroundTaskBadgeEl = document.createElement("span");
-    backgroundTaskBadgeEl.style.cssText = "margin-left:6px; display:none;";
-    a.appendChild(backgroundTaskBadgeEl);
-
     const li = document.createElement("li");
     li.role = "presentation";
     li.setAttribute("data-toggle", "modal");
@@ -2754,6 +2858,42 @@
     }
     li.className = profileLi.className;
     profileLi.parentNode.insertBefore(li, profileLi);
+
+    // Eigener, SEPARATER Navbar-Eintrag nur fuer Hintergrund-Tasks (siehe Hintergrund-Task-
+    // System oben) - bewusst NICHT derselbe Klick-Ziel wie der normale FuxTools-Eintrag, damit
+    // man ohne Umweg direkt ins normale Menue kommt, waehrend im Hintergrund etwas laeuft.
+    // Fox-Logo als Hintergrund + drehendes Icon davor macht auf einen Blick klar, dass der
+    // Punkt zu FuxTools gehoert. Per Default versteckt (display:none), siehe
+    // updateBackgroundTaskBadge().
+    const taskCenterIconWrap = document.createElement("span");
+    taskCenterIconWrap.style.cssText = "position:relative; display:inline-block; width:22px; height:22px;";
+    const taskCenterLogo = document.createElement("img");
+    taskCenterLogo.src = LOGO_URL;
+    taskCenterLogo.alt = "";
+    taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px; opacity:0.55;";
+    taskCenterLogo.addEventListener("error", () => taskCenterLogo.remove());
+    taskCenterIconWrap.appendChild(taskCenterLogo);
+    backgroundTaskBadgeEl = document.createElement("span");
+    backgroundTaskBadgeEl.style.cssText =
+      "position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:14px; filter:drop-shadow(0 0 2px #000);";
+    taskCenterIconWrap.appendChild(backgroundTaskBadgeEl);
+
+    const taskCenterLink = document.createElement("a");
+    taskCenterLink.href = "#";
+    taskCenterLink.title = "FuxTools - laufende Aufgaben";
+    taskCenterLink.style.cssText = "display:flex; align-items:center; height:100%; padding:15px 12px;";
+    taskCenterLink.appendChild(taskCenterIconWrap);
+
+    const taskCenterLi = document.createElement("li");
+    taskCenterLi.id = "vn-task-center-entry";
+    taskCenterLi.role = "presentation";
+    taskCenterLi.className = profileLi.className;
+    taskCenterLi.style.display = "none";
+    taskCenterLi.setAttribute("data-toggle", "modal");
+    taskCenterLi.setAttribute("data-target", `#${modalId}`);
+    taskCenterLi.appendChild(taskCenterLink);
+    profileLi.parentNode.insertBefore(taskCenterLi, profileLi);
+    taskCenterEntryEl = taskCenterLi;
   }
 
   //////////////////////////////////////////////////
@@ -6580,11 +6720,17 @@
         : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
     }
 
-    function setCategoryStatusText(category, text) {
+    function setCategoryStatusText(category, text, done, total) {
       const el = body.querySelector(`.vn-crew-category-status[data-category="${category}"]`);
       if (el) el.textContent = text;
       const state = runningCategoryRuns.get(category);
-      if (state) state.statusText = text; // ueberlebt ein Neu-Rendern zwischendurch
+      if (state) {
+        state.statusText = text; // ueberlebt ein Neu-Rendern zwischendurch
+        if (total > 0) {
+          state.done = done;
+          state.total = total;
+        }
+      }
     }
 
     function bindCategoryButtons() {
@@ -6607,7 +6753,7 @@
           let done = 0;
           let ok = 0;
           let failed = 0;
-          setCategoryStatusText(category, `0/${categoryVehicles.length} geprüft ...`);
+          setCategoryStatusText(category, `0/${categoryVehicles.length} geprüft ...`, 0, categoryVehicles.length);
 
           // WICHTIG: Faehrzeuge DERSELBEN Wache duerfen nie parallel von zwei Workern
           // bearbeitet werden - fetchVehicleAssignmentPage() zeigt den STATIONS-weiten
@@ -6652,7 +6798,12 @@
                   problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
                 }
                 done++;
-                setCategoryStatusText(category, `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`);
+                setCategoryStatusText(
+                  category,
+                  `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`,
+                  done,
+                  categoryVehicles.length,
+                );
                 const problemsBody = document.getElementById("vn-crew-problems-body");
                 if (problemsBody) {
                   problemsBody.innerHTML = renderProblemsRows();
