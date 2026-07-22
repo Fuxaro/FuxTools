@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.69
+// @version     0.9.70
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.69";
+  const SCRIPT_VERSION = "0.9.70";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -7016,7 +7016,6 @@
         Betrifft alle Fahrzeuge der aktuellen Leitstellen-Auswahl. Sofort wirksam im Spiel,
         nicht per Klick rückgängig zu machen. Fahrzeuge im Einsatz werden übersprungen.
       </p>
-      <div id="vn-crew-unassign-confirm-status" style="margin-top:10px;"></div>
       <div class="vn-sticky-footer">
         <button id="vn-btn-back" type="button" class="btn btn-default">
           <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen
@@ -7028,68 +7027,101 @@
     `;
 
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-unassign-confirm").addEventListener("click", () => {
+      executeUnassignAllPlan(vehicles, goBack);
+    });
+  }
 
-    const confirmBtn = document.getElementById("vn-btn-unassign-confirm");
-    const statusEl = document.getElementById("vn-crew-unassign-confirm-status");
+  // Laeuft wie Umbenennen/Fahrzeug-Besatzung-Kategorien ueber das gemeinsame Hintergrund-
+  // Task-System (Ladebalken, Abbrechen, Task-Center, Warteschlange falls schon etwas anderes
+  // laeuft, zweistufiges Verlauf-Logging) statt einer eigenen, bisher rein textuellen
+  // Fortschrittsanzeige direkt auf dem Bestaetigungs-Bildschirm.
+  function executeUnassignAllPlan(vehicles, goBack) {
+    const title = "Alle Zuweisungen rückgängig machen";
+    const queued = runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue));
+    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+  }
 
-    let cancelRun = null;
-    confirmBtn.addEventListener("click", async () => {
-      // Waehrend des Laufs wird aus dem Bestaetigen- ein Abbrechen-Button - bei vielen
-      // Fahrzeugen kann das eine Weile dauern, ohne Abbrechen muesste man sonst warten.
-      if (cancelRun) {
-        cancelRun.cancelled = true;
-        return;
-      }
-      const state = { cancelled: false };
-      cancelRun = state;
-      confirmBtn.classList.remove("btn-danger");
-      confirmBtn.classList.add("btn-default");
-      confirmBtn.innerHTML = `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`;
-      document.getElementById("vn-btn-back").disabled = true;
+  async function runUnassignAllPlan(vehicles, goBack, title, viaQueue) {
+    const historyId = await startHistoryEntry({
+      type: "crew_unassign_all",
+      label: `0/${vehicles.length} gestartet ...`,
+    });
+    let cancelled = false;
+    beginBackgroundTask(title, () => {
+      cancelled = true;
+      updateHistoryEntry(historyId, { status: "cancelled", label: "Abbruch angefordert ..." });
+    });
+    if (!viaQueue) renderBackgroundTaskProgressScreen();
 
-      // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
-      // den Personal-Pool), verschiedene Wachen parallel.
-      const stationGroups = new Map();
-      for (const v of vehicles) {
-        if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
-        stationGroups.get(v.stationId).push(v);
-      }
-      const stationQueue = [...stationGroups.values()];
+    // Wie beim Kategorie-Check: Fahrzeuge DERSELBEN Wache strikt nacheinander (teilen sich
+    // den Personal-Pool), verschiedene Wachen parallel.
+    const stationGroups = new Map();
+    for (const v of vehicles) {
+      if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
+      stationGroups.get(v.stationId).push(v);
+    }
+    const stationQueue = [...stationGroups.values()];
 
-      let done = 0;
-      let removedTotal = 0;
-      let failed = 0;
-      let nextStationIndex = 0;
-      async function worker() {
-        while (nextStationIndex < stationQueue.length) {
-          if (state.cancelled) return;
-          const stationVehicles = stationQueue[nextStationIndex++];
-          for (const vehicle of stationVehicles) {
-            if (state.cancelled) return;
-            try {
-              removedTotal += await clearVehicleCrew(vehicle);
-            } catch {
-              failed++;
-            }
-            done++;
-            statusEl.innerHTML = `<em>${done}/${vehicles.length} Fahrzeuge bearbeitet (${removedTotal} Personen abgezogen${failed ? `, ${failed} übersprungen/Fehler` : ""}) ...</em>`;
+    let done = 0;
+    let removedTotal = 0;
+    let failed = 0;
+    let nextStationIndex = 0;
+    async function worker() {
+      while (nextStationIndex < stationQueue.length) {
+        if (cancelled) return;
+        const stationVehicles = stationQueue[nextStationIndex++];
+        for (const vehicle of stationVehicles) {
+          if (cancelled) return;
+          try {
+            removedTotal += await clearVehicleCrew(vehicle);
+          } catch {
+            failed++;
           }
+          done++;
+          updateBackgroundTaskProgress(
+            Math.round((done / vehicles.length) * 100),
+            `${done}/${vehicles.length} Fahrzeuge bearbeitet (${removedTotal} Personen abgezogen${failed ? `, ${failed} übersprungen/Fehler` : ""}) ...`,
+          );
         }
       }
-      const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
-      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+    }
+    const workerCount = Math.min(VEHICLE_CREW_CHECK_CONCURRENCY, stationQueue.length);
+    await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-      const cancelSuffix = state.cancelled ? " (abgebrochen)" : "";
-      const summary = `${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}${cancelSuffix}`;
-      statusEl.innerHTML = `<span class="text-success">Fertig: ${escapeHtml(summary)}</span>`;
-      if (removedTotal > 0) {
-        await logHistoryEntry({ type: "crew_unassign_all", label: summary });
-      }
-      cancelRun = null;
-      confirmBtn.disabled = true;
-      confirmBtn.innerHTML = `<span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Erledigt`;
-      document.getElementById("vn-btn-back").disabled = false;
-    });
+    const summary = `${removedTotal} Personen von ${done}/${vehicles.length} Fahrzeugen abgezogen${failed ? ` (${failed} übersprungen/Fehler)` : ""}`;
+    // Denselben beim Start angelegten Eintrag jetzt abschliessen - IMMER, auch bei 0
+    // abgezogenen Personen, sonst bliebe er faelschlich auf "running" stehen.
+    await updateHistoryEntry(historyId, { label: summary, status: cancelled ? "cancelled" : "done" });
+
+    const renderResult = () => renderUnassignAllResultScreen({ summary, cancelled, goBack });
+    // Siehe runRenamePlan: nur automatisch zur Ergebnis-Ansicht wechseln, wenn man JETZT
+    // GERADE noch auf der eigenen Fortschritts-Ansicht dieses Laufs ist.
+    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
+    if (stillOnOwnProgressScreen) renderResult();
+    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
+  }
+
+  function renderUnassignAllResultScreen({ summary, cancelled, goBack }) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen.</b></p>` : "";
+    body.innerHTML = `
+      ${cancelledNote}
+      <p>
+        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>
+        <b>${escapeHtml(summary)}</b>
+      </p>
+      <div class="vn-sticky-footer">
+        <button id="vn-btn-back" type="button" class="btn btn-default">
+          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück
+        </button>
+        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>
+      </div>
+    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
   }
 
   //////////////////////////////////////////////////

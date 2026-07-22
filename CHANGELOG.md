@@ -124,6 +124,12 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   ("abgeschlossen"), nicht nur laufende/abgebrochene.
 - Statt des entfernten Farbkreises blieb versehentlich ein grauer, eckiger Hintergrund am
   Task-Center-Symbol übrig (Rest einer alten Zuweisung) - jetzt wirklich ganz ohne Hintergrund.
+- **Fahrzeug-Besatzung "Alle Zuweisungen rückgängig machen"**: läuft jetzt wie Umbenennen und
+  die Kategorie-Läufe über das gemeinsame Hintergrund-Task-System - echter Ladebalken statt
+  reinem Text, läuft im Hintergrund weiter (auch bei geschlossenem Fenster), eigener
+  Abbrechen-Button, taucht im Task-Center auf, landet in einer Warteschlange statt parallel zu
+  laufen, falls schon ein anderer Task aktiv ist, und wird im Verlauf jetzt zweistufig
+  protokolliert (Start sofort sichtbar, Abschluss/Abbruch bestätigt in derselben Zeile).
 
 ## Stable (v0.5.1)
 
