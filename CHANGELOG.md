@@ -33,6 +33,14 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   vor (Uhr-Symbol als Hinweis) und gleicht das automatisch mit dem echten Stand ab, sobald die
   Änderung im Spiel sichtbar ist. Funktioniert auch bei mehreren gleichzeitigen Käufen/
   Verkäufen an verschiedenen Wachen/Fahrzeugtypen.
+- **Wachen-Bauplaner**: "Benötigtes Personal" zeigt jetzt Min./Max.-Spalten statt einer
+  einzelnen Zahl, inkl. Fahrzeugtypen wie Dekon-P, die vorher trotz eigener Ausbildungsanforderung
+  komplett fehlten (betraf auch Personal-Check & Schulungen).
+- **Fahrzeug-Besatzung**: neuer Schalter "Nur ungeschultes Personal zuweisen" - ignoriert jede
+  Ausbildungsanforderung, praktisch für BePol/THW/SEG, deren Spezialisten sich bei Alarmierung
+  ohnehin selbst zuordnen.
+- **Wachen umbenennen**: Liste jetzt nach Wachen-ID statt Name sortiert, für eine vom aktuellen
+  Namen unabhängige, stabile Reihenfolge.
 
 ## Stable (v0.5.1)
 

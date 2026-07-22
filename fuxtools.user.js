@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.49
+// @version     0.9.50
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.49";
+  const SCRIPT_VERSION = "0.9.50";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -234,6 +234,89 @@
       t => t.buildingType === building.building_type && t.smallBuilding === !!building.small_building,
     );
     return entry ? entry.id : null;
+  }
+
+  // Kategorisierung der Feuerwehr-Fahrzeugliste im Bauplan-Editor (siehe vehicleInputsHtml),
+  // nachgebaut von der "Fahrzeug kaufen"-Seite im Spiel - nur Feuerwehr (buildingType 0) hat
+  // eine so grosse/unuebersichtliche Fahrzeugliste, dass sich das lohnt. Bewusst eine EXAKTE
+  // Namens-Zuordnung statt Muster-Erkennung, weil sich Praefixe sonst falsch ueberschneiden
+  // wuerden (z.B. WLF vs. AB-*, LF vs. HLF vs. TLF) - Zusammenstellung von einem Tester.
+  const FIRE_VEHICLE_CATEGORY_ORDER = [
+    "Löschfahrzeuge",
+    "Tanklöschfahrzeuge",
+    "Schlauchwagen",
+    "Andere Fahrzeuge",
+    "Rettungsdienst",
+    "Wasserrettung",
+    "Werkfeuerwehr",
+    "Flughafen",
+    "Logistik-Fahrzeuge",
+    "Netzersatzanlagen",
+    "Lüfter",
+    "Drohnen",
+    "Verpflegungsdienst",
+    "Bahnrettung",
+    "Sonderlöschmittel",
+    "Abrollbehälter",
+  ];
+
+  const FIRE_VEHICLE_NAME_CATEGORIES = {
+    "Löschfahrzeuge": ["HLF10", "HLF20", "LF20", "LF10", "TSF-W", "KLF", "MLF", "LF8/6", "LF20/16", "LF10/6", "LF16-TS"],
+    "Tanklöschfahrzeuge": ["PTLF4000", "GTLF"],
+    Schlauchwagen: ["GW-L2-Wasser", "SW1000", "SW2000", "SW2000-Tr", "SW-KatS", "Anh Schlauch"],
+    "Andere Fahrzeuge": [
+      "DLK23",
+      "ELW1",
+      "RW",
+      "GW-A",
+      "GW-Öl",
+      "GW-Messtechnik",
+      "GW-Gefahrgut",
+      "GW-Höhenrettung",
+      "ELW2",
+      "MTW",
+      "Dekon-P",
+      "FwK",
+      "Kleintankwagen",
+      "Tankwagen",
+    ],
+    Rettungsdienst: ["RTW", "NEF", "KTW", "GRTW", "NAW", "ITW"],
+    Wasserrettung: ["GW-Taucher", "GW-Wasserrettung", "MZB"],
+    Werkfeuerwehr: ["GW-Werkfeuerwehr", "ULF mit Löscharm", "TM50", "Turbolöscher"],
+    Flughafen: ["FLF", "Rettungstreppe"],
+    "Logistik-Fahrzeuge": ["GW-L1", "GW-L2", "MTF-L", "LF-L", "AB-L"],
+    Netzersatzanlagen: ["NEA50", "NEA200", "AB-NEA50", "AB-NEA200"],
+    "Lüfter": ["GW-Lüfter", "Anh Lüfter", "AB-Lüfter"],
+    Drohnen: ["MTF-Drohne", "ELW-Drohne", "ELW2-Drohne"],
+    Verpflegungsdienst: ["GW-Verpflegung", "GW-Küche", "MTW-Verpflegung", "FKH"],
+    Bahnrettung: ["RW-Schiene", "HLF-Schiene", "AB-Schiene"],
+    "Sonderlöschmittel": ["SLF", "Anh Sonderlöschmittel", "AB-Sonderlöschmittel", "AB-Wasser/Schaum"],
+    "Abrollbehälter": ["WLF"],
+  };
+
+  function normalizeFireVehicleName(name) {
+    return String(name || "")
+      .toUpperCase()
+      .replace(/\s+/g, "");
+  }
+
+  const FIRE_VEHICLE_NAME_LOOKUP = new Map();
+  for (const [category, names] of Object.entries(FIRE_VEHICLE_NAME_CATEGORIES)) {
+    for (const name of names) FIRE_VEHICLE_NAME_LOOKUP.set(normalizeFireVehicleName(name), category);
+  }
+
+  // Fuer Namen, die nicht 1:1 in der Liste stehen: die beiden Sammelkategorien, die der
+  // Tester ausdruecklich als Praefix-Regel genannt hat ("alle TLF", "alle AB-") - greifen nur,
+  // wenn der Name NICHT schon exakt einer anderen Kategorie zugeordnet ist (z.B. AB-Lüfter,
+  // AB-NEA50, AB-L sind trotz "AB-"-Praefix bewusst anders einsortiert, siehe oben). Alles
+  // andere (unbekannte/neue Fahrzeugtypen) landet in "Andere Fahrzeuge".
+  function categorizeFireVehicleName(name) {
+    const normalized = normalizeFireVehicleName(name);
+    const exact = FIRE_VEHICLE_NAME_LOOKUP.get(normalized);
+    if (exact) return exact;
+    if (normalized.startsWith("TLF")) return "Tanklöschfahrzeuge";
+    if (normalized.startsWith("AB-")) return "Abrollbehälter";
+    return "Andere Fahrzeuge";
   }
 
   // Lesbare Gebaeudetyp-Namen, unabhaengig vom (frei waehlbaren) Wachen-Namen - wichtig
@@ -726,6 +809,18 @@
 
   async function getVehicleCrewIncludeNormal() {
     return !!(await retrieveData(VEHICLE_CREW_INCLUDE_NORMAL_KEY));
+  }
+
+  // Ob JEDE Ausbildungsanforderung ignoriert und stattdessen fuer ALLE Fahrzeuge nur
+  // beliebiges/ungeschultes Personal zugewiesen wird (assignAnyPersonnelToVehicle statt
+  // assignQualifiedPersonnelToVehicleForSlug, siehe checkAndFixVehicleCrew) - fuer Nutzer,
+  // deren spezialisiertes Personal (z.B. BePol/THW/SEG) sich bei Alarmierung ohnehin selbst
+  // zuordnet, wodurch eine Vorbelegung mit genau diesem Personal ueberfluessig ist. Standard
+  // AUS, damit sich am bisherigen Verhalten nichts aendert, bis bewusst aktiviert.
+  const VEHICLE_CREW_UNTRAINED_ONLY_KEY = "vehicleCrewUntrainedOnly";
+
+  async function getVehicleCrewUntrainedOnly() {
+    return !!(await retrieveData(VEHICLE_CREW_UNTRAINED_ONLY_KEY));
   }
 
   // Merkt sich die zuletzt bekannten Besatzungs-Probleme (Fahrzeug-id -> {message, since}) ueber
@@ -3048,7 +3143,10 @@
           leitstelleName: leitstelleId ? leitstelleBuilding?.caption || `Leitstelle ${leitstelleId}` : "Ohne Leitstelle",
         };
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      // Nach Wachen-ID statt Name sortiert (auf Tester-Wunsch): wer seine Wachen mit
+      // eigenen Praefixen/Nummern durchbenennt, braucht eine vom aktuellen Namen
+      // unabhaengige, stabile Reihenfolge.
+      .sort((a, b) => Number(a.id) - Number(b.id));
 
     return { leitstellen, stations };
   }
@@ -5259,6 +5357,43 @@
     return { requirements, staffMin: staff.min, staffMax: staff.max };
   }
 
+  // Wie getVehicleTypeRequirement(), aber fuer die BAUPLAN-PERSONALPLANUNG (Personal-Check/
+  // Schulungen, "Benoetigtes Personal" im Bauplan-Editor) statt die echte Fahrzeug-Besatzung:
+  // eine Anforderung mit min:0 (z.B. Dekon-P - die Ausbildung wird an der Schule gebraucht,
+  // nicht in der eigenen Besatzung) bedeutet fuer die eigene Besatzung zwar "keine Pflicht",
+  // im Account muss trotzdem MINDESTENS eine ausgebildete Person vorhanden sein - deshalb hier
+  // min:1 statt komplettem Wegfall, mit staffMax als Obergrenze (statt wie bei
+  // getVehicleTypeRequirement() ganz zu verschwinden). "all"-Anforderungen (min:null) liefern
+  // ein Fenster von staffMin bis staffMax, echte Teil-Anforderungen (min:N>0) bleiben fest bei N.
+  function getBlueprintTrainingRequirement(vehicleTypeId) {
+    const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
+    if (!staff?.training || !staff.max) return null;
+
+    const requirements = [];
+    for (const categoryTrainings of Object.values(staff.training)) {
+      for (const [slug, spec] of Object.entries(categoryTrainings)) {
+        let min, max;
+        if (spec.all) {
+          min = staff.min;
+          max = staff.max;
+        } else {
+          const rawMin = Number(spec.min) || 0;
+          min = rawMin || 1;
+          max = rawMin || staff.max;
+        }
+        const existing = requirements.find(r => r.slug === slug);
+        if (!existing) requirements.push({ slug, min, max });
+        else {
+          existing.min = Math.max(existing.min, min);
+          existing.max = Math.max(existing.max, max);
+        }
+      }
+    }
+    if (!requirements.length) return null;
+
+    return { requirements };
+  }
+
   // FMS-Stati, bei denen ein Fahrzeug "an der Wache" ist (einsatzbereit auf Wache/Funk, oder
   // schon als nicht besetzt markiert) - NUR in diesem Zustand wird je eingegriffen. Alles
   // andere (Anfahrt, am Einsatzort, Patiententransport, ...) wird NIE angefasst, damit nie
@@ -5554,12 +5689,17 @@
     return removed;
   }
 
-  async function checkAndFixVehicleCrew(vehicle, staffingMode) {
+  async function checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly = false) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
       throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
     }
+
+    // "Nur ungeschultes Personal": Fahrzeug wird ab hier wie eines OHNE Ausbildungsanforderung
+    // behandelt (leere requirements) - dieselbe Logik wie fuer normale Fahrzeuge weiter unten
+    // (assignAnyPersonnelToVehicle statt assignQualifiedPersonnelToVehicleForSlug).
+    vehicle = untrainedOnly ? { ...vehicle, requirements: [] } : vehicle;
 
     let assignedNow = 0;
     const targetByRequirement = new Map();
@@ -5791,6 +5931,7 @@
 
     let staffingMode = await getVehicleCrewStaffingMode();
     let includeNormal = await getVehicleCrewIncludeNormal();
+    let untrainedOnly = await getVehicleCrewUntrainedOnly();
 
     // "vehicles" ist immer die aktuell SICHTBARE Teilmenge (haengt von Leitstellen-Auswahl UND
     // includeNormal ab) - wird beim Umschalten der Checkbox neu berechnet, ohne die
@@ -5922,10 +6063,17 @@
         </div>
       </div>
       <p id="vn-crew-mode-status" class="text-muted" style="font-size:11px; margin-bottom:10px;"></p>
-      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+      <div class="form-inline" style="margin-bottom:4px; display:flex; align-items:center; gap:8px;">
         <label style="font-size:12px; margin:0; font-weight:normal;">
           <input type="checkbox" id="vn-crew-include-normal" ${includeNormal ? "checked" : ""}>
           Normale Fahrzeuge (ohne Ausbildungsanforderung) einbeziehen
+        </label>
+      </div>
+      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+        <label style="font-size:12px; margin:0; font-weight:normal;">
+          <input type="checkbox" id="vn-crew-untrained-only" ${untrainedOnly ? "checked" : ""}>
+          Nur ungeschultes Personal zuweisen (ignoriert jede Ausbildungsanforderung, z.B. für
+          BePol/THW/SEG, deren Spezialisten sich bei Alarmierung selbst zuordnen)
         </label>
       </div>
       <div id="vn-crew-groups">${renderGroups()}</div>
@@ -6051,7 +6199,7 @@
               for (const vehicle of stationVehicles) {
                 if (state.cancelled) return;
                 try {
-                  const result = await checkAndFixVehicleCrew(vehicle, staffingMode);
+                  const result = await checkAndFixVehicleCrew(vehicle, staffingMode, untrainedOnly);
                   if (result.fullyStaffed) {
                     ok++;
                     problemsById.delete(vehicle.id);
@@ -6098,6 +6246,11 @@
       recomputeVisibleVehicles();
       document.getElementById("vn-crew-groups").innerHTML = renderGroups();
       bindCategoryButtons();
+    });
+
+    document.getElementById("vn-crew-untrained-only").addEventListener("change", async e => {
+      untrainedOnly = e.target.checked;
+      await storeData(untrainedOnly, VEHICLE_CREW_UNTRAINED_ONLY_KEY);
     });
   }
 
@@ -6218,20 +6371,39 @@
   }
 
   // Summiert den Personalbedarf ueber alle Fahrzeuge eines Bauplans (Anzahl * Bedarf pro
-  // Fahrzeug) je Ausbildungs-Slug - geht IMMER von der minimalen Besatzung aus (staffMin), wie
-  // sie auch die Fahrzeug-Besatzung im Minimum-Modus zuweist: bei "all"-Anforderungen muessen
-  // dann alle staffMin Personen die Ausbildung haben, bei "min"-Anforderungen weiterhin deren
-  // tatsaechliche Mindestzahl. So verlangt der Bauplan nicht mehr Personal, als fuer den
-  // Betrieb der Fahrzeuge wirklich noetig ist (vorher: volle Besatzung/staffMax bei "all").
+  // Fahrzeug) je Ausbildungs-Slug - geht IMMER von der minimalen Besatzung aus (Bedarf.min aus
+  // getBlueprintTrainingRequirement(), bei "all"-Anforderungen staffMin, sonst die echte
+  // Mindestzahl bzw. 1 bei min:0 wie Dekon-P). So verlangt der Bauplan nicht mehr Personal, als
+  // fuer den Betrieb der Fahrzeuge wirklich noetig ist (vorher: volle Besatzung/staffMax bei
+  // "all"), zeigt aber trotzdem JEDE Ausbildung an, die irgendwo im Account gebraucht wird.
   function computeBlueprintPersonnelRequirements(blueprint) {
     const totals = new Map();
     for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
       if (!(quantity > 0)) continue;
-      const requirement = getVehicleTypeRequirement(Number(vehicleTypeId));
+      const requirement = getBlueprintTrainingRequirement(Number(vehicleTypeId));
       if (!requirement) continue;
       for (const req of requirement.requirements) {
-        const perVehicle = req.min === null ? requirement.staffMin : req.min;
-        totals.set(req.slug, (totals.get(req.slug) || 0) + perVehicle * quantity);
+        totals.set(req.slug, (totals.get(req.slug) || 0) + req.min * quantity);
+      }
+    }
+    return totals;
+  }
+
+  // Wie computeBlueprintPersonnelRequirements(), aber liefert je Ausbildungs-Slug ein {min, max}
+  // Fenster statt einer einzelnen Zahl - Grundlage fuer die Min/Max-Spalten im Bauplan-Editor
+  // (siehe updatePersonnelRequirements). Nur fuer diese Anzeige gedacht, Personal-Check/
+  // Schulungen nutzen weiterhin computeBlueprintPersonnelRequirements() (einzelner Zielwert).
+  function computeBlueprintPersonnelRequirementRanges(blueprint) {
+    const totals = new Map();
+    for (const { vehicleTypeId, quantity } of blueprint.vehicles) {
+      if (!(quantity > 0)) continue;
+      const requirement = getBlueprintTrainingRequirement(Number(vehicleTypeId));
+      if (!requirement) continue;
+      for (const req of requirement.requirements) {
+        const existing = totals.get(req.slug) || { min: 0, max: 0 };
+        existing.min += req.min * quantity;
+        existing.max += req.max * quantity;
+        totals.set(req.slug, existing);
       }
     }
     return totals;
@@ -6580,13 +6752,7 @@
       });
     }
 
-    function vehicleInputsHtml(pseudoId) {
-      if (!pseudoId) return `<p class="text-muted">Bitte zuerst Gebäudetyp wählen ...</p>`;
-      const types = getVehicleTypesForPseudoId(pseudoId);
-      if (!types.length) return `<p class="text-muted">Keine Fahrzeuge für diesen Gebäudetyp bekannt.</p>`;
-      const quantities = new Map(
-        (existing?.pseudoId === pseudoId ? existing.vehicles : []).map(v => [String(v.vehicleTypeId), v.quantity]),
-      );
+    function vehicleGridHtml(types, quantities) {
       return `
         <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:6px;">
           ${types
@@ -6604,6 +6770,39 @@
       `;
     }
 
+    function vehicleInputsHtml(pseudoId) {
+      if (!pseudoId) return `<p class="text-muted">Bitte zuerst Gebäudetyp wählen ...</p>`;
+      const types = getVehicleTypesForPseudoId(pseudoId);
+      if (!types.length) return `<p class="text-muted">Keine Fahrzeuge für diesen Gebäudetyp bekannt.</p>`;
+      const quantities = new Map(
+        (existing?.pseudoId === pseudoId ? existing.vehicles : []).map(v => [String(v.vehicleTypeId), v.quantity]),
+      );
+
+      const pseudo = PSEUDO_BUILDING_TYPES.find(t => t.id === pseudoId);
+      if (pseudo?.buildingType !== 0) return vehicleGridHtml(types, quantities);
+
+      // Feuerwehr hat mit Abstand die meisten Fahrzeugtypen - nach Kategorien wie im Spiel
+      // gruppiert statt einem einzigen unuebersichtlichen Grid (siehe categorizeFireVehicleName).
+      const byCategory = new Map();
+      for (const t of types) {
+        const category = categorizeFireVehicleName(t.name);
+        if (!byCategory.has(category)) byCategory.set(category, []);
+        byCategory.get(category).push(t);
+      }
+      return FIRE_VEHICLE_CATEGORY_ORDER.filter(cat => byCategory.has(cat))
+        .map(
+          category => `
+            <div style="margin-bottom:10px;">
+              <div class="text-muted" style="font-size:11px; font-weight:bold; text-transform:uppercase; margin-bottom:4px;">
+                ${escapeHtml(category)}
+              </div>
+              ${vehicleGridHtml(byCategory.get(category), quantities)}
+            </div>
+          `,
+        )
+        .join("");
+    }
+
     function bindVehicleQuantityInputs() {
       body.querySelectorAll(".vn-bp-vehicle-qty").forEach(input => {
         input.addEventListener("change", updatePersonnelRequirements);
@@ -6615,13 +6814,16 @@
         vehicleTypeId: input.dataset.vehicleTypeId,
         quantity: parseInt(input.value, 10) || 0,
       }));
-      const totals = computeBlueprintPersonnelRequirements({ vehicles });
-      const rows = [...totals.entries()]
+      const ranges = computeBlueprintPersonnelRequirementRanges({ vehicles });
+      const rows = [...ranges.entries()]
         .sort((a, b) => (qualifications[a[0]] || a[0]).localeCompare(qualifications[b[0]] || b[0], "de"))
-        .map(([slug, count]) => `<tr><td>${count}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`)
+        .map(
+          ([slug, { min, max }]) =>
+            `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`,
+        )
         .join("");
       document.getElementById("vn-bp-personnel-body").innerHTML =
-        rows || `<tr><td colspan="2" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`;
+        rows || `<tr><td colspan="3" class="text-muted">Keine besondere Ausbildung erforderlich.</td></tr>`;
 
       const totalCount = computeBlueprintTotalPersonnelCount({ vehicles });
       document.getElementById("vn-bp-personnel-total").textContent = `Insgesamt benötigt: ${totalCount} Person(en).`;
@@ -6691,7 +6893,7 @@
           <label class="col-sm-2 control-label">Benötigtes Personal</label>
           <div class="col-sm-10">
             <table class="table table-condensed" style="font-size:12px; max-width:400px;">
-              <thead><tr><th>Anzahl</th><th>Ausbildung</th></tr></thead>
+              <thead><tr><th>Min.</th><th>Max.</th><th>Ausbildung</th></tr></thead>
               <tbody id="vn-bp-personnel-body"></tbody>
             </table>
             <div id="vn-bp-personnel-total" class="text-muted" style="font-size:11px;"></div>
