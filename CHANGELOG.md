@@ -36,10 +36,11 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Wachen-Bauplaner**: "Benötigtes Personal" zeigt jetzt Min./Max.-Spalten statt einer
   einzelnen Zahl, inkl. Fahrzeugtypen wie Dekon-P, die vorher trotz eigener Ausbildungsanforderung
   komplett fehlten (betraf auch Personal-Check & Schulungen).
-- **Fahrzeug-Besatzung**: neuer Schalter "Nur ungeschultes Personal zuweisen" - ignoriert jede
-  Ausbildungsanforderung, praktisch für BePol/THW/SEG, deren Spezialisten sich bei Alarmierung
-  ohnehin selbst zuordnen. Optionen jetzt als Buttons statt Checkboxen, Erklärungen als
-  Tooltip statt Fließtext.
+- **Fahrzeug-Besatzung**: neuer Schalter "Nur ungeschultes Personal zuweisen" - bei Fahrzeugen
+  ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten wie
+  Notarzt nie mehr verbraucht (lieber ein Platz leer). Echte Ausbildungspflichten (z.B.
+  Notarzt auf NAW) bleiben davon unberührt. Optionen jetzt als Buttons statt Checkboxen,
+  Erklärungen als Tooltip statt Fließtext.
 - **Wachen umbenennen**: Liste jetzt nach Wachen-ID statt Name sortiert, für eine vom aktuellen
   Namen unabhängige, stabile Reihenfolge.
 - **Wachen-Bauplaner**: Feuerwehr-Fahrzeugkategorien sind jetzt auf-/zuklappbar statt alle auf

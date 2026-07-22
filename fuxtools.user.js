@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.52
+// @version     0.9.53
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.52";
+  const SCRIPT_VERSION = "0.9.53";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -5766,7 +5766,7 @@
   // jedes Fahrzeug im "Alle ... pruefen & zuweisen"-Lauf nur bis zu seinem eigenen Ziel
   // (staffMin bei "Minimum", nicht staffMax) auffuellt statt sich das gesamte verfuegbare
   // Personal zu greifen.
-  async function assignAnyPersonnelToVehicle(vehicleId, target, staffMax) {
+  async function assignAnyPersonnelToVehicle(vehicleId, target, staffMax, untrainedOnly = false) {
     const { people } = await fetchVehicleAssignmentPage(vehicleId);
     const assignedCount = people.filter(p => p.assignedHere).length;
     const csrfToken = getCsrfTokenOrThrow(vehicleId);
@@ -5779,9 +5779,14 @@
     // Personen vor solchen, die von einem ANDEREN Fahrzeug abgezogen werden muessten (Klasse
     // "btn-warning", siehe fetchVehicleAssignmentPage) - vermeidet unnoetiges Hin-und-Her-
     // Schieben, wenn ohnehin schon genug frei verfuegbares Personal existiert.
+    // Mit untrainedOnly (z.B. fuer GruKw bei BePol/THW/SEG, das selbst KEINE Ausbildung
+    // braucht): Spezialisten werden nicht nur nachrangig, sondern komplett ausgeschlossen -
+    // lieber ein Platz leer als einen Notarzt/Spezialisten hierfuer "auszugeben", der sich im
+    // Spiel bei Alarmierung ohnehin selbst dem richtigen Fahrzeug zuordnet.
     const specialSlugs = getSpecialTrainingSlugs();
     const eligible = people
       .filter(p => !p.assignedHere && !p.inTraining && p.assignHref)
+      .filter(p => !untrainedOnly || !p.slugs.some(s => specialSlugs.has(s)))
       .sort((a, b) => {
         const aSpecial = Number(a.slugs.some(s => specialSlugs.has(s)));
         const bSpecial = Number(b.slugs.some(s => specialSlugs.has(s)));
@@ -5899,11 +5904,6 @@
       throw new Error("Fahrzeug ist gerade im Einsatz - übersprungen, um nicht einzugreifen.");
     }
 
-    // "Nur ungeschultes Personal": Fahrzeug wird ab hier wie eines OHNE Ausbildungsanforderung
-    // behandelt (leere requirements) - dieselbe Logik wie fuer normale Fahrzeuge weiter unten
-    // (assignAnyPersonnelToVehicle statt assignQualifiedPersonnelToVehicleForSlug).
-    vehicle = untrainedOnly ? { ...vehicle, requirements: [] } : vehicle;
-
     let assignedNow = 0;
     const targetByRequirement = new Map();
     const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
@@ -5919,14 +5919,18 @@
       // BELIEBIGEM verfuegbarem Personal bis staffMin/staffMax auffuellen - aber nur, wenn KEINE
       // Anforderung "alle muessen das koennen" ist (min:null, z.B. ELW 2). Dort waere ein
       // zusaetzlicher, unpassend ausgebildeter Platz ein Verstoss gegen genau diese Anforderung,
-      // ein unvollstaendig besetztes ELW 2 ist also weiterhin korrekt und gewollt.
+      // ein unvollstaendig besetztes ELW 2 ist also weiterhin korrekt und gewollt. Die
+      // Pflicht-Plaetze oben (req.slug) bleiben von untrainedOnly unberuehrt - das betrifft nur
+      // diese ZUSAETZLICHEN, nicht zwingend geforderten Restplaetze.
       if (!hasFullRequirement) {
         const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
-        assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax);
+        assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax, untrainedOnly);
       }
     } else {
+      // Fahrzeuge OHNE jede eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) -
+      // genau hier wirkt "Nur ungeschultes Personal zuweisen".
       const target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
-      assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax);
+      assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, target, vehicle.staffMax, untrainedOnly);
     }
 
     // Wechsel von "Volle Besatzung" zurueck auf "Minimum": ueberzaehliges Personal (aus einem
@@ -6272,7 +6276,7 @@
             Normale Fahrzeuge einbeziehen
           </button>
           <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"
-                  title="Ignoriert jede Ausbildungsanforderung, z.B. für BePol/THW/SEG, deren Spezialisten sich bei Alarmierung selbst zuordnen.">
+                  title="Bei Fahrzeugen ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten (Notarzt usw.) nie verbraucht - lieber ein Platz leer. Echte Ausbildungspflichten (z.B. Notarzt auf NAW) bleiben davon unberührt.">
             Nur ungeschultes Personal zuweisen
           </button>
         </div>
