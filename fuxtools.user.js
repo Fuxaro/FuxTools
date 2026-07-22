@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.48
+// @version     0.9.49
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.48";
+  const SCRIPT_VERSION = "0.9.49";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -3298,6 +3298,63 @@
     return csrfToken;
   }
 
+  // Nach einem Kauf/Verkauf braucht die Spiel-API selbst laut Rueckmeldung teils bis zu einer
+  // Minute, bis /api/v2/vehicles die neue Anzahl zeigt - ohne Gegenmassnahme sieht der
+  // Wachen-Bauplaner "Anwenden"-Screen direkt danach wieder den ALTEN Stand und zeigt
+  // faelschlich "1x kaufen"/"1x zu viel", obwohl die Aktion schon durch ist. Merkt Kaeufe/
+  // Verkaeufe deshalb hier optimistisch vor (pro Wache+Fahrzeugtyp, mehrere gleichzeitig
+  // moeglich) und rechnet sie oben auf den zuletzt geladenen (ggf. noch veralteten) Stand
+  // drauf. Nach PENDING_VEHICLE_CHANGE_TTL_MS gilt der Vormerkung als abgelaufen - danach
+  // zaehlt wieder ausschliesslich der echte, frisch geladene API-Stand (faellt also auf den
+  // tatsaechlichen Wert zurueck, falls die Vormerkung doch nicht gestimmt haben sollte).
+  const PENDING_VEHICLE_CHANGE_TTL_MS = 90 * 1000;
+  const pendingVehicleChanges = new Map(); // `${stationId}::${vehicleTypeId}` -> {delta, since}
+
+  function recordPendingVehicleChange(stationId, vehicleTypeId, delta) {
+    const key = `${stationId}::${vehicleTypeId}`;
+    const existing = pendingVehicleChanges.get(key);
+    const stillFresh = existing && Date.now() - existing.since < PENDING_VEHICLE_CHANGE_TTL_MS;
+    pendingVehicleChanges.set(key, { delta: (stillFresh ? existing.delta : 0) + delta, since: Date.now() });
+  }
+
+  // Liest UND raeumt zugleich auf - eine abgelaufene Vormerkung wird beim naechsten Abfragen
+  // automatisch entfernt, damit sie nicht ewig als "0" im Speicher haengen bleibt.
+  function getPendingVehicleDelta(stationId, vehicleTypeId) {
+    const key = `${stationId}::${vehicleTypeId}`;
+    const entry = pendingVehicleChanges.get(key);
+    if (!entry) return 0;
+    if (Date.now() - entry.since >= PENDING_VEHICLE_CHANGE_TTL_MS) {
+      pendingVehicleChanges.delete(key);
+      return 0;
+    }
+    return entry.delta;
+  }
+
+  function hasFreshPendingVehicleChanges() {
+    for (const entry of pendingVehicleChanges.values()) {
+      if (Date.now() - entry.since < PENDING_VEHICLE_CHANGE_TTL_MS) return true;
+    }
+    return false;
+  }
+
+  // Rendert den Wachenbauplan-"Anwenden"-Screen einmalig neu, sobald die letzte Vormerkung
+  // abgelaufen sein sollte - holt dabei automatisch den dann echten API-Stand. Nur EIN
+  // gemeinsamer Timer (nicht pro Kauf/Verkauf einzeln), sonst wuerden bei mehreren schnell
+  // aufeinanderfolgenden Aktionen mehrere Neu-Renderings gleichzeitig laufen. Rendert nur
+  // neu, wenn der Nutzer wirklich noch auf demselben Bauplan-Screen ist (data-blueprint-id),
+  // sonst wuerde ein spaeter feuernder Timer den falschen/verlassenen Screen ueberschreiben.
+  let vehicleReconcileTimer = null;
+  function scheduleVehicleReconcile(blueprintId, goBack) {
+    if (vehicleReconcileTimer) clearTimeout(vehicleReconcileTimer);
+    vehicleReconcileTimer = setTimeout(() => {
+      vehicleReconcileTimer = null;
+      const tbody = document.getElementById("vn-bp-apply-tbody");
+      if (tbody?.dataset.blueprintId === blueprintId) {
+        renderStationBlueprintApplyScreen(blueprintId, goBack);
+      }
+    }, PENDING_VEHICLE_CHANGE_TTL_MS + 2000);
+  }
+
   async function buildExtension(buildingId, extensionId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
     const res = await fetchWithTimeout(`/buildings/${buildingId}/extension/${currency}/${extensionId}`, {
@@ -3627,7 +3684,7 @@
   // Eigene Bestaetigung fuer eine zerstoerende Aktion (aktuell: Fahrzeug verkaufen) statt
   // eines blossen browser confirm() - analog zu renderBuildConfirmScreen, aber ohne
   // Waehrungswahl (kostet nichts) und mit deutlich rot markierter Warnung.
-  function renderVehicleSellConfirmScreen({ vehicleId, vehicleName, stationName, goBack }) {
+  function renderVehicleSellConfirmScreen({ vehicleId, vehicleName, stationName, goBack, onSold }) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `
@@ -3657,6 +3714,7 @@
       try {
         await sellVehicle(vehicleId);
         await logHistoryEntry({ type: "vehicle_sell", label: vehicleName, station: stationName });
+        onSold?.();
         statusEl.innerHTML = `<span class="text-success">Verkauft. Lade neu ...</span>`;
         setTimeout(goBack, 600);
       } catch (e) {
@@ -6825,20 +6883,32 @@
       const vehicleCell = blueprint.vehicles
         .map(bv => {
           const ownIds = byType.get(String(bv.vehicleTypeId)) || [];
-          const have = ownIds.length;
+          // API zeigt einen frischen Kauf/Verkauf teils erst nach bis zu einer Minute - bis
+          // dahin optimistisch mit der Vormerkung rechnen (siehe recordPendingVehicleChange),
+          // sonst wuerde hier faelschlich wieder "kaufen"/"zu viel" fuer eine Aktion stehen,
+          // die schon durch ist.
+          const pendingDelta = getPendingVehicleDelta(station.id, bv.vehicleTypeId);
+          const have = Math.max(0, ownIds.length + pendingDelta);
           const missing = Math.max(bv.quantity - have, 0);
           const surplus = Math.max(have - bv.quantity, 0);
           vehicleDeficit += missing;
           vehicleSurplus += surplus;
           const name = vehicleTypeCaptions[bv.vehicleTypeId] || `Typ ${bv.vehicleTypeId}`;
           const cssClass = surplus ? "label-danger" : missing ? "label-warning" : "label-success";
-          const label = `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}</span>`;
+          const pendingHint = pendingDelta
+            ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="Vorläufig - gleicht sich automatisch mit dem Spiel ab, sobald die Änderung dort sichtbar ist"></span>`
+            : "";
+          const label = `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${bv.quantity}${pendingHint}</span>`;
           if (surplus) {
+            // Bei einer noch vorgemerkten (noch nicht in der API sichtbaren) Aktion kennen wir
+            // die echte id des naechsten ueberzaehligen Fahrzeugs nicht zuverlaessig - Verkaufen
+            // dann sicherheitshalber sperren, statt versehentlich das falsche zu treffen.
             const excessVehicleId = ownIds[ownIds.length - 1];
+            if (!excessVehicleId) return label;
             return `${label}
               <button type="button" class="btn btn-xs btn-danger vn-bp-sell-vehicle" style="margin:1px;"
                       data-vehicle-id="${excessVehicleId}" data-name="${escapeHtml(name)}" data-station-id="${station.id}"
-                      title="Verkauft eines der überzähligen Fahrzeuge">
+                      data-vehicle-type-id="${bv.vehicleTypeId}" title="Verkauft eines der überzähligen Fahrzeuge">
                 <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> ${surplus}x zu viel
               </button>`;
           }
@@ -6963,6 +7033,8 @@
               for (let i = 0; i < missing; i++) {
                 await buyVehicle(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), currency);
               }
+              recordPendingVehicleChange(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), missing);
+              scheduleVehicleReconcile(blueprintId, goBack);
             },
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
             historyType: "vehicle",
@@ -6980,6 +7052,10 @@
             vehicleName: btn.dataset.name,
             stationName,
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack),
+            onSold: () => {
+              recordPendingVehicleChange(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), -1);
+              scheduleVehicleReconcile(blueprintId, goBack);
+            },
           });
         });
       });
@@ -7023,7 +7099,7 @@
       <div style="max-height:60vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
           <thead id="vn-bp-apply-thead">${theadHtml()}</thead>
-          <tbody id="vn-bp-apply-tbody">${sortedRowsHtml()}</tbody>
+          <tbody id="vn-bp-apply-tbody" data-blueprint-id="${escapeHtml(blueprintId)}">${sortedRowsHtml()}</tbody>
         </table>
       </div>
       <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">
@@ -7040,6 +7116,10 @@
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindSortHeaders();
     bindRowActions();
+    // Falls der Screen mit noch frischen Vormerkungen (er)oeffnet wird (z.B. Zurueck-Button
+    // kurz nach einem Kauf) - auch dann automatisch neu laden, sobald sie ablaufen, nicht nur
+    // direkt nach dem Kauf/Verkauf-Klick selbst.
+    if (hasFreshPendingVehicleChanges()) scheduleVehicleReconcile(blueprintId, goBack);
 
     document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
       const btn = document.getElementById("vn-bp-apply-refresh");

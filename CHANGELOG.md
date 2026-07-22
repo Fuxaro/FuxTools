@@ -28,6 +28,11 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   zusätzlich in einem einsehbaren Fehlerprotokoll (Export als Datei möglich).
 - Netzwerk-Anfragen haben jetzt ein Zeitlimit (20s) statt bei einer hängenden Verbindung
   unbegrenzt zu blockieren.
+- **Wachen-Bauplaner "Anwenden"**: nach einem Kauf/Verkauf zeigt das Spiel die neue Anzahl
+  teils erst nach bis zu einer Minute - der Screen merkt sich Käufe/Verkäufe jetzt vorläufig
+  vor (Uhr-Symbol als Hinweis) und gleicht das automatisch mit dem echten Stand ab, sobald die
+  Änderung im Spiel sichtbar ist. Funktioniert auch bei mehreren gleichzeitigen Käufen/
+  Verkäufen an verschiedenen Wachen/Fahrzeugtypen.
 
 ## Stable (v0.5.1)
 
