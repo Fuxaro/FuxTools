@@ -70,6 +70,10 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - Große "Aktualisieren"/"Scan jetzt starten"-Buttons (Wachenausbau, Personal-Check,
   Schulungen, Wachen-Bauplaner "Anwenden") durch einheitliche kleine Icon-Buttons direkt neben
   dem Zeitstempel ersetzt.
+- **Schulungen**: Bugfix - Personal, das bereits eine andere Ausbildung hat oder gerade "Im
+  Unterricht"/"Im Einsatz" ist, wird jetzt nicht mehr zusätzlich für einen neuen Lehrgang
+  eingeteilt (die bisherige Auswahl kannte nur die eine gerade gesuchte Ausbildung, nicht den
+  restlichen Status der Person).
 
 ## Stable (v0.5.1)
 

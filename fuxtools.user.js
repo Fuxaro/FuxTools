@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.59
+// @version     0.9.60
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.59";
+  const SCRIPT_VERSION = "0.9.60";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -5052,16 +5052,34 @@
   // Spiel selbst, siehe personal-select-heading href) und liefert alle Personen, die diese
   // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
   // haben (echte Vor-Ort-Daten statt der ggf. veralteten Scan-Zahlen).
+  //
+  // Diese Auswahl-Seite kennt aber NUR den einen hier gesuchten Slug - ob eine Person schon
+  // eine ANDERE Ausbildung hat oder gerade "Im Unterricht"/"Im Einsatz" ist, weiss sie nicht
+  // (per Live-Test bestaetigt: genau das fuehrte dazu, dass eine Person mit bereits einer
+  // Ausbildung zusaetzlich fuer eine zweite eingeteilt wurde). Deshalb zusaetzlich die normale
+  // Personal-Seite derselben Wache abfragen (parsePersonalPageHtml, dieselbe Quelle wie beim
+  // Personal-Check-Scan) und ueber den NAMEN abgleichen: nur wer dort GAR KEINE Ausbildung hat
+  // UND als "Verfuegbar" gilt, bleibt uebrig. Kein Treffer beim Namensabgleich (z.B. durch
+  // Sonderzeichen) schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
   async function fetchAvailablePersonnelForEducation(stationId, slug) {
-    const res = await fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" });
-    if (!res.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${res.status}).`);
-    const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+    const [selectRes, personalHtml] = await Promise.all([
+      fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" }),
+      fetchPersonalPage(stationId),
+    ]);
+    if (!selectRes.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${selectRes.status}).`);
+    const statusByName = new Map(parsePersonalPageHtml(personalHtml).map(e => [e.name, e]));
+
+    const doc = new DOMParser().parseFromString(await selectRes.text(), "text/html");
     return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
       .filter(cb => cb.getAttribute(slug) === "false")
       .map(cb => ({
         id: cb.value,
         name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value,
-      }));
+      }))
+      .filter(p => {
+        const entry = statusByName.get(p.name);
+        return !!entry && entry.slugs.length === 0 && entry.statusText.trim() === "Verfügbar";
+      });
   }
 
   // Ermittelt fuer einen Bedarf (eine Kategorie+Ausbildung, ueber ggf. mehrere Wachen) an
@@ -5101,7 +5119,9 @@
 
     const selected = selectedByStation.flatMap(s => s.people);
     if (!selected.length) {
-      throw new Error("Kein verfügbares Personal ohne diese Ausbildung gefunden (evtl. schon in Ausbildung).");
+      throw new Error(
+        "Kein verfügbares Personal gefunden (ohne jede Ausbildung und als \"Verfügbar\" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig ausgebildet).",
+      );
     }
 
     const actualRooms = Math.min(freeRooms, Math.max(1, Math.ceil(selected.length / SCHOOLING_SEATS_PER_ROOM)));
