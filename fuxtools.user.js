@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.61
+// @version     0.9.63
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.61";
+  const SCRIPT_VERSION = "0.9.63";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -98,6 +98,17 @@
   // runningCategoryRuns) - passt nicht in den "ein Task"-Slot oben, zaehlt aber fuer Warteschlange
   // und Badge trotzdem als "etwas laeuft".
   let activeCrewCategoryRunCount = 0;
+
+  // category -> laufender Abbrechen-Zustand ({cancelled, statusText}), solange ein Lauf aktiv
+  // ist - bewusst AUSSERHALB von renderVehicleCrewScreen (Modul-Ebene statt lokaler Closure!),
+  // damit ein Schliessen+Wiederoeffnen des Fensters (frischer Aufruf der Funktion) den Lauf
+  // weiterhin kennt: der neue Bildschirm zeigt die Kategorie sofort korrekt als "laeuft"/rot an
+  // statt sie versehentlich ein zweites Mal parallel starten zu koennen (siehe renderGroups/
+  // bindCategoryButtons). Alle Status-Updates suchen sich Button/Statuszeile bei JEDEM Update
+  // frisch per body.querySelector() statt einmal gecacht - body selbst ist ein fixer, nie neu
+  // erzeugter DOM-Knoten (nur .innerHTML wechselt), dadurch findet auch ein alter, noch
+  // laufender Worker-Loop nach einem Neu-Rendern die jeweils AKTUELLEN Elemente wieder.
+  const runningCategoryRuns = new Map();
 
   function isBackgroundTaskSlotBusy() {
     return !!activeBackgroundTask || activeCrewCategoryRunCount > 0;
@@ -215,30 +226,6 @@
       </div>
     `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-close").addEventListener("click", closeModal);
-  }
-
-  // Fahrzeug-Besatzung erlaubt mehrere gleichzeitig laufende Kategorien (siehe
-  // bindCategoryButtons) - deren Fortschritt lebt in einer lokalen Closure von
-  // renderVehicleCrewScreen(), die beim Schliessen/Wiederoeffnen des Fensters neu aufgebaut
-  // wuerde. Ein frischer Aufruf waehrend ein Lauf noch aktiv ist wuerde also nichts von den
-  // laufenden Workern wissen und liesse dieselbe Kategorie ein zweites Mal (parallel,
-  // fehleranfaellig) starten - deshalb stattdessen nur dieser einfache Hinweis, bis alle
-  // Kategorien fertig sind.
-  function renderCrewAssignmentRunningScreen() {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle("Fahrzeug-Besatzung");
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `
-      <p>
-        <span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>
-        Fahrzeug-Besatzung läuft noch im Hintergrund (${activeCrewCategoryRunCount} Kategorie(n) aktiv) -
-        der Bildschirm lässt sich erst wieder öffnen, wenn alle fertig sind.
-      </p>
-      <div class="vn-sticky-footer">
-        <button id="vn-btn-close" type="button" class="btn btn-default">Schließen</button>
-      </div>
-    `;
     document.getElementById("vn-btn-close").addEventListener("click", closeModal);
   }
 
@@ -1779,6 +1766,17 @@
     modal.style.zIndex = "5000";
 
     document.body.appendChild(modal);
+
+    // Nach einem Klick behaelt ein <button> den Browser-Fokus - zusammen mit Bootstraps
+    // eigenem ".btn:active:focus"-Schatten (dunkler oberer Rand) sieht der Button dann "halb"
+    // gefaerbt aus, bis man woanders hinklickt (genau das gemeldete Symptom, betrifft JEDEN
+    // Button im Modal). Ein Blur direkt nach dem Klick behebt das pauschal fuer alle Buttons,
+    // ohne jeden einzelnen Click-Handler anzufassen.
+    modal.addEventListener("click", e => {
+      const btn = e.target.closest("button");
+      if (btn) setTimeout(() => btn.blur(), 0);
+    });
+
     // Aktionsleiste (siehe .vn-sticky-footer) braucht einen deckenden Hintergrund - liest
     // dafuer die TATSAECHLICHE Hintergrundfarbe des Modals aus (Seiten-Theme, kein von uns
     // geratener Farbwert), statt einen festen Hex-Wert zu hinterlegen, der bei einem anderen
@@ -1807,10 +1805,6 @@
       // wo man das Fenster geschlossen hat, statt den Fortschritt neu suchen zu muessen.
       if (activeBackgroundTask) {
         renderBackgroundTaskProgressScreen();
-        return;
-      }
-      if (activeCrewCategoryRunCount > 0) {
-        renderCrewAssignmentRunningScreen();
         return;
       }
       if (finishedBackgroundTask) {
@@ -2695,6 +2689,15 @@
       summary.vn-category-heading { list-style:none; }
       summary.vn-category-heading::-webkit-details-marker { display:none; }
       details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }
+      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle
+         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche
+         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */
+      .vn-btn-group-box {
+        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;
+        border:1px solid rgba(128,128,128,0.4); border-radius:4px;
+        padding:5px 8px; background:rgba(128,128,128,0.08);
+      }
+      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }
     `;
     document.head.appendChild(style);
   }
@@ -6324,13 +6327,34 @@
       return `${d.toLocaleDateString("de-DE")}, ${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
     }
 
+    // Sortierung der Fehler-Liste per Klick auf die Spaltenueberschrift (wie bei "Wachen
+    // umbenennen") - erneuter Klick auf dieselbe Spalte dreht die Richtung um.
+    const problemsSort = { column: "category", asc: true };
+
+    function problemsSortKey(column, { vehicle, message, since }) {
+      switch (column) {
+        case "station":
+          return vehicle.stationName;
+        case "vehicle":
+          return vehicle.caption;
+        case "status":
+          return message || "";
+        case "since":
+          return since || 0;
+        case "category":
+        default:
+          return vehicle.category;
+      }
+    }
+
     function renderProblemsRows() {
-      const rows = [...problemsById.entries()].sort(
-        ([, a], [, b]) =>
-          a.vehicle.category.localeCompare(b.vehicle.category, "de") ||
-          a.vehicle.stationName.localeCompare(b.vehicle.stationName, "de") ||
-          a.vehicle.caption.localeCompare(b.vehicle.caption, "de"),
-      );
+      const dir = problemsSort.asc ? 1 : -1;
+      const rows = [...problemsById.entries()].sort(([, a], [, b]) => {
+        const ka = problemsSortKey(problemsSort.column, a);
+        const kb = problemsSortKey(problemsSort.column, b);
+        if (typeof ka === "number" && typeof kb === "number") return dir * (ka - kb);
+        return dir * String(ka).localeCompare(String(kb), "de");
+      });
       if (!rows.length) {
         return `<tr><td colspan="6" class="text-muted">Noch keine Probleme gefunden (oder noch nicht geprüft).</td></tr>`;
       }
@@ -6355,6 +6379,38 @@
         .join("");
     }
 
+    function problemsHeaderHtml() {
+      const arrow = col =>
+        problemsSort.column === col
+          ? `<span class="glyphicon glyphicon-triangle-${problemsSort.asc ? "bottom" : "top"}" aria-hidden="true" style="font-size:10px;"></span>`
+          : "";
+      const th = (col, label) =>
+        `<th class="vn-problems-sort-th" data-sort="${col}" style="cursor:pointer; white-space:nowrap;">${label} ${arrow(col)}</th>`;
+      return `${th("category", "Kategorie")}${th("station", "Wache")}${th("vehicle", "Fahrzeug")}${th("status", "Status")}${th("since", "Seit")}<th></th>`;
+    }
+
+    function bindProblemsSortHeaders() {
+      body.querySelectorAll(".vn-problems-sort-th").forEach(th => {
+        th.addEventListener("click", () => {
+          const col = th.dataset.sort;
+          if (problemsSort.column === col) problemsSort.asc = !problemsSort.asc;
+          else {
+            problemsSort.column = col;
+            problemsSort.asc = true;
+          }
+          updateProblemsTable();
+        });
+      });
+    }
+
+    function updateProblemsTable() {
+      const headRow = document.getElementById("vn-crew-problems-head");
+      if (headRow) headRow.innerHTML = problemsHeaderHtml();
+      document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
+      bindProblemsRowButtons();
+      bindProblemsSortHeaders();
+    }
+
     function bindProblemsRowButtons() {
       body.querySelectorAll(".vn-crew-problem-remove").forEach(btn => {
         btn.addEventListener("click", async () => {
@@ -6371,20 +6427,29 @@
         return `<p class="text-muted">Keine passenden Fahrzeuge gefunden.</p>`;
       }
       return CATEGORY_ORDER.filter(cat => byCategory.has(cat))
-        .map(
-          category => `
+        .map(category => {
+          // Laeuft diese Kategorie noch aus einem FRUEHEREN Aufruf dieses Screens (Fenster
+          // zwischenzeitlich geschlossen+wiedergeoeffnet)? Dann sofort als "Abbrechen" (rot)
+          // starten statt faelschlich wieder als startbar - verhindert einen doppelten,
+          // parallelen Lauf derselben Kategorie.
+          const running = runningCategoryRuns.get(category);
+          const btnClass = running ? "btn-danger" : "btn-primary";
+          const btnLabel = running
+            ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
+            : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+          return `
             <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
               <span style="display:inline-block; min-width:140px;">
                 <b>${escapeHtml(category)}</b>
                 <span class="text-muted" style="font-size:11px;">(${byCategory.get(category).length})</span>
               </span>
-              <button type="button" class="btn btn-primary btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">
-                <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen
+              <button type="button" class="btn ${btnClass} btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">
+                ${btnLabel}
               </button>
-              <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}"></small>
+              <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}">${escapeHtml(running?.statusText || "")}</small>
             </div>
-          `,
-        )
+          `;
+        })
         .join("");
     }
 
@@ -6393,9 +6458,9 @@
         Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale
         Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt).
       </p>
-      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <label style="font-size:12px; margin:0;">Bei Teil-Anforderungen (z.B. GRTW/NAW) zuweisen:</label>
-        <div style="display:flex; gap:6px;">
+      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+        <div class="vn-btn-group-box">
+          <span class="vn-btn-group-label">Bei Teil-Anforderungen (z.B. GRTW/NAW):</span>
           <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"
                   title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">
             Nur Minimum
@@ -6405,7 +6470,7 @@
             Volle Besatzung
           </button>
         </div>
-        <div style="display:flex; gap:6px;">
+        <div class="vn-btn-group-box">
           <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"
                   title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">
             Normale Fahrzeuge einbeziehen
@@ -6415,7 +6480,8 @@
             Nur ungeschultes Personal zuweisen
           </button>
         </div>
-        <div style="display:flex; gap:6px;">
+        <div class="vn-btn-group-box">
+          <span class="vn-btn-group-label">Bereits Zugewiesenes:</span>
           <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"
                   title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">
             Nur ergänzen
@@ -6436,7 +6502,7 @@
       <div style="max-height:35vh; overflow:auto;">
         <table class="table table-condensed table-striped" style="font-size:12px;">
           <thead>
-            <tr><th>Kategorie</th><th>Wache</th><th>Fahrzeug</th><th>Status</th><th>Seit</th><th></th></tr>
+            <tr id="vn-crew-problems-head">${problemsHeaderHtml()}</tr>
           </thead>
           <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>
         </table>
@@ -6456,6 +6522,7 @@
       renderVehicleCrewUnassignAllConfirmScreen(scopeVehicles, () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds));
     });
     bindProblemsRowButtons();
+    bindProblemsSortHeaders();
 
     document.getElementById("vn-btn-clear-problems").addEventListener("click", () => {
       if (!problemsById.size) return;
@@ -6499,15 +6566,30 @@
       });
     });
 
-    // category -> laufender Abbrechen-Zustand ({cancelled:false}), solange ein Lauf aktiv ist.
-    // Ein zweiter Klick auf denselben (jetzt rot/"Abbrechen" beschrifteten) Button bricht den
-    // laufenden Durchlauf ab, statt einen zweiten parallel zu starten.
-    const runningCategoryRuns = new Map();
+    // Button/Statuszeile einer Kategorie IMMER frisch per body.querySelector() suchen statt
+    // einmal zu cachen - body selbst ist ein fixer DOM-Knoten (nur .innerHTML wechselt), so
+    // findet auch ein Update aus einem AELTEREN Aufruf dieses Screens (Fenster zwischenzeitlich
+    // geschlossen+wiedergeoeffnet) die jeweils AKTUELLEN Elemente statt ins Leere zu laufen.
+    function setCategoryRunningUI(category, running) {
+      const btn = body.querySelector(`.vn-crew-check-category[data-category="${category}"]`);
+      if (!btn) return;
+      btn.classList.toggle("btn-danger", running);
+      btn.classList.toggle("btn-primary", !running);
+      btn.innerHTML = running
+        ? `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`
+        : `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Alle ${escapeHtml(category)} prüfen &amp; zuweisen`;
+    }
+
+    function setCategoryStatusText(category, text) {
+      const el = body.querySelector(`.vn-crew-category-status[data-category="${category}"]`);
+      if (el) el.textContent = text;
+      const state = runningCategoryRuns.get(category);
+      if (state) state.statusText = text; // ueberlebt ein Neu-Rendern zwischendurch
+    }
 
     function bindCategoryButtons() {
       body.querySelectorAll(".vn-crew-check-category").forEach(btn => {
         const category = btn.dataset.category;
-        const originalLabel = btn.innerHTML;
         btn.addEventListener("click", async () => {
           const running = runningCategoryRuns.get(category);
           if (running) {
@@ -6515,20 +6597,17 @@
             return;
           }
 
-          const state = { cancelled: false };
+          const state = { cancelled: false, statusText: "" };
           runningCategoryRuns.set(category, state);
           activeCrewCategoryRunCount++;
           updateBackgroundTaskBadge();
           const categoryVehicles = byCategory.get(category) || [];
-          const categoryStatusEl = body.querySelector(`.vn-crew-category-status[data-category="${btn.dataset.category}"]`);
-          btn.classList.remove("btn-primary");
-          btn.classList.add("btn-danger");
-          btn.innerHTML = `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`;
+          setCategoryRunningUI(category, true);
 
           let done = 0;
           let ok = 0;
           let failed = 0;
-          categoryStatusEl.textContent = `0/${categoryVehicles.length} geprüft ...`;
+          setCategoryStatusText(category, `0/${categoryVehicles.length} geprüft ...`);
 
           // WICHTIG: Faehrzeuge DERSELBEN Wache duerfen nie parallel von zwei Workern
           // bearbeitet werden - fetchVehicleAssignmentPage() zeigt den STATIONS-weiten
@@ -6573,9 +6652,12 @@
                   problemsById.set(vehicle.id, { vehicle, message: e.message, since: existing?.since || Date.now() });
                 }
                 done++;
-                categoryStatusEl.textContent = `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
-                document.getElementById("vn-crew-problems-body").innerHTML = renderProblemsRows();
-                bindProblemsRowButtons();
+                setCategoryStatusText(category, `${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`);
+                const problemsBody = document.getElementById("vn-crew-problems-body");
+                if (problemsBody) {
+                  problemsBody.innerHTML = renderProblemsRows();
+                  bindProblemsRowButtons();
+                }
                 await persistProblems();
               }
             }
@@ -6584,15 +6666,13 @@
           await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
           if (state.cancelled) {
-            categoryStatusEl.textContent = `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`;
+            setCategoryStatusText(category, `Abgebrochen: ${done}/${categoryVehicles.length} geprüft (${ok} passen, ${failed} nicht/Fehler)`);
           }
           runningCategoryRuns.delete(category);
           activeCrewCategoryRunCount--;
           updateBackgroundTaskBadge();
           tryStartNextQueuedBackgroundTask();
-          btn.classList.remove("btn-danger");
-          btn.classList.add("btn-primary");
-          btn.innerHTML = originalLabel;
+          setCategoryRunningUI(category, false);
         });
       });
     }

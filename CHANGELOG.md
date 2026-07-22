@@ -74,6 +74,16 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
   Unterricht"/"Im Einsatz" ist, wird jetzt nicht mehr zusätzlich für einen neuen Lehrgang
   eingeteilt (die bisherige Auswahl kannte nur die eine gerade gesuchte Ausbildung, nicht den
   restlichen Status der Person). Abgleich läuft über die echte Personal-ID statt über den Namen.
+- **Fahrzeug-Besatzung**: kritischer Bugfix - lief eine Kategorie im Hintergrund weiter, ließ
+  sich das Fenster gar nicht mehr öffnen (nur ein Hinweis-Bildschirm ohne Fortschritt, ohne
+  Zugriff auf den Rest des Tools). Läuft jetzt weiter normal, die betroffene Kategorie zeigt
+  direkt "Abbrechen" (rot) mit dem echten Fortschritt statt eines zweiten möglichen Laufs.
+- Buttons blieben nach einem Klick "hängen" (halb eingefärbt, bis man woanders hinklickt) -
+  Fokus wird nach jedem Klick automatisch wieder entfernt.
+- Schalter-Gruppen (Minimum/Volle Besatzung, Nur ergänzen/Vollständig anwenden, ...) stehen
+  jetzt in einem grauen Kasten, damit erkennbar ist, was zusammengehört.
+- **Fahrzeug-Besatzung**: Fehler-Liste (Kategorie/Wache/Fahrzeug/Status/Seit) jetzt per Klick
+  auf die Spaltenüberschrift sortierbar.
 
 ## Stable (v0.5.1)
 
