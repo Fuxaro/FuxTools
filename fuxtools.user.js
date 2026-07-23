@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.72
+// @version     0.9.73
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.72";
+  const SCRIPT_VERSION = "0.9.73";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -4932,16 +4932,26 @@
     const scan = scanData[station.id];
     if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
 
+    // req kommt aus dem Fahrzeug-Katalog und kann Slugs enthalten, die dort anders heissen als
+    // ueberall sonst beim echten Personal (siehe realSlugFor) - deshalb hier auf den echten Slug
+    // normalisiert, BEVOR er mit scan.counts (das schon echte Slugs benutzt) vereinigt wird, sonst
+    // wuerde z.B. Dekon-P als zwei getrennte Badges auftauchen (einmal "gefordert, 0 vorhanden",
+    // einmal "0 gefordert, X vorhanden" - faelschlich als "ueberbesetzt" markiert).
     const req = requirements[station.pseudoId] || {};
+    const reqByRealSlug = {};
+    for (const [slug, value] of Object.entries(req)) {
+      const realSlug = realSlugFor(slug);
+      reqByRealSlug[realSlug] = Math.max(reqByRealSlug[realSlug] || 0, value);
+    }
     const slugs = new Set([
-      ...Object.keys(req).filter(slug => req[slug] > 0),
+      ...Object.keys(reqByRealSlug).filter(slug => reqByRealSlug[slug] > 0),
       ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0),
     ]);
 
     const badges = [...slugs]
       .sort((a, b) => (qualifications[a] || a).localeCompare(qualifications[b] || b, "de"))
       .map(slug => {
-        const required = req[slug] || 0;
+        const required = reqByRealSlug[slug] || 0;
         const have = scan.counts[slug] || 0;
         const name = qualifications[slug] || slug;
         const namesList = (scan.names?.[slug] || []).join(", ");
@@ -5023,7 +5033,10 @@
       if (!entries.length) return 0;
       const scan = scanData[station.id];
       if (!scan) return Number.MAX_SAFE_INTEGER;
-      return entries.reduce((sum, [slug, required]) => sum + Math.max(0, required - (scan.counts[slug] || 0)), 0);
+      return entries.reduce(
+        (sum, [slug, required]) => sum + Math.max(0, required - (scan.counts[realSlugFor(slug)] || 0)),
+        0,
+      );
     }
 
     // "category" (Standard, nach Kategorie+Name) oder "missing" (nach fehlendem
@@ -5263,7 +5276,7 @@
 
       const req = requirementRanges[station.pseudoId] || {};
       for (const [slug, range] of Object.entries(req)) {
-        const have = scan.counts[slug] || 0;
+        const have = scan.counts[realSlugFor(slug)] || 0;
         const minDeficit = Math.max(0, range.min - have);
         const maxDeficit = Math.max(0, range.max - have);
         if (minDeficit <= 0 && maxDeficit <= 0) continue;
@@ -5365,6 +5378,26 @@
     return finishTimes.length ? Math.min(...finishTimes) : null;
   }
 
+  // Manche Ausbildungs-Slugs aus dem Fahrzeug-Katalog (staff.training, siehe
+  // getBlueprintTrainingRequirement) stimmen NICHT mit dem echten Slug ueberein, den das Spiel
+  // sonst ueberall fuer diese Person benutzt (schooling_checkbox-Attribute, data-filterable-by
+  // auf der Personal-Seite) - bisher einzig bekannter Fall: "Dekon-P" heisst im Fahrzeug-Katalog
+  // UND im Schul-Dropdown (<option value="dekon_p:...">) "dekon_p", ueberall sonst aber
+  // "decontamination_personnel" (per Live-Diagnose an echtem HTML bestaetigt - "dekon_p"
+  // existiert als Checkbox-Attribut gar nicht, wohl aber einzeln "decontamination_personnel"/
+  // "_chemicals"/"_radiology"). Ohne Umrechnung lieferte cb.getAttribute("dekon_p") deshalb IMMER
+  // null statt "false", wodurch fetchAvailablePersonnelForEducation() ausnahmslos JEDEN
+  // ausschloss - auch Personal, das frei war und gar keine andere Ausbildung hatte (gemeldeter
+  // Bug trotz vorherigem Fix der slugs.length-Bedingung) - und computeTrainingNeeds() zaehlte
+  // bereits ausgebildetes Personal nie mit, was den Mangel kuenstlich aufblies.
+  const VEHICLE_CATALOG_SLUG_ALIASES = {
+    dekon_p: "decontamination_personnel",
+  };
+
+  function realSlugFor(slug) {
+    return VEHICLE_CATALOG_SLUG_ALIASES[slug] || slug;
+  }
+
   // Laedt die Personal-Auswahl EINER Wache fuer den Lehrgang-Tab (eigene AJAX-Anfrage im
   // Spiel selbst, siehe personal-select-heading href) und liefert alle Personen, die diese
   // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
@@ -5394,8 +5427,9 @@
     const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [e.id, e]));
 
     const doc = new DOMParser().parseFromString(await selectRes.text(), "text/html");
+    const attribute = realSlugFor(slug);
     return [...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`)]
-      .filter(cb => cb.getAttribute(slug) === "false")
+      .filter(cb => cb.getAttribute(attribute) === "false")
       .map(cb => ({
         id: cb.value,
         name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value,
@@ -5689,12 +5723,15 @@
           const categoryNeeds = byCategory
             .get(category)
             .sort((a, b) =>
-              (qualifications[a.slug] || a.slug).localeCompare(qualifications[b.slug] || b.slug, "de"),
+              (qualifications[realSlugFor(a.slug)] || a.slug).localeCompare(
+                qualifications[realSlugFor(b.slug)] || b.slug,
+                "de",
+              ),
             );
 
           const rows = categoryNeeds
             .map(need => {
-              const qualificationName = qualifications[need.slug] || need.slug;
+              const qualificationName = qualifications[realSlugFor(need.slug)] || need.slug;
               const stationTitleFor = deficitField =>
                 need.stations
                   .filter(s => s[deficitField] > 0)
@@ -7736,10 +7773,10 @@
       }));
       const ranges = computeBlueprintPersonnelRequirementRanges({ vehicles });
       const rows = [...ranges.entries()]
-        .sort((a, b) => (qualifications[a[0]] || a[0]).localeCompare(qualifications[b[0]] || b[0], "de"))
+        .sort((a, b) => (qualifications[realSlugFor(a[0])] || a[0]).localeCompare(qualifications[realSlugFor(b[0])] || b[0], "de"))
         .map(
           ([slug, { min, max }]) =>
-            `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[slug] || slug)}</td></tr>`,
+            `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualifications[realSlugFor(slug)] || slug)}</td></tr>`,
         )
         .join("");
 
@@ -8061,9 +8098,10 @@
       const personnelCell = scan
         ? [...requiredPersonnel.entries()]
             .map(([slug, required]) => {
-              const have = scan.counts[slug] || 0;
+              const realSlug = realSlugFor(slug);
+              const have = scan.counts[realSlug] || 0;
               if (have < required) personnelDeficit += required - have;
-              const name = qualifications[slug] || slug;
+              const name = qualifications[realSlug] || slug;
               const cssClass = have >= required ? "label-success" : "label-warning";
               return `<span class="label ${cssClass}" style="margin:1px;">${escapeHtml(name)} ${have}/${required}</span>`;
             })
