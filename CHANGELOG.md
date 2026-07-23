@@ -133,6 +133,12 @@ Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 - **Verlauf**: eigene Status-Spalte (statt Label mitten im Funktions-Text) - jetzt außerdem
   alle Spalten (Datum, Uhrzeit, Status, Funktion, Kosten) per Klick auf die Spaltenüberschrift
   sortierbar, wie bei den anderen Tabellen im Tool.
+- **Schulungen**: Bugfix - "Kein verfügbares Personal gefunden" erschien oft, obwohl reichlich
+  freies Personal an der Wache stand. Die Auswahl verlangte fälschlich, dass eine Person GAR
+  KEINE andere Ausbildung haben darf, statt nur zu prüfen, ob sie schon "Verfügbar" ist - betraf
+  praktisch jede Wache mit erfahrenem Personal.
+- **Schulungen**: getrennte Buttons "Ausbilden Minimum" und "Ausbilden Maximum" statt eines
+  einzelnen "Ausbilden" - richten sich nach den Min./Max.-Werten des aktiven Wachenbauplans.
 
 ## Stable (v0.5.1)
 

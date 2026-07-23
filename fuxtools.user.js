@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     0.9.71
+// @version     0.9.72
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -40,7 +40,7 @@
   //                   Muss zusammen mit @updateURL/@downloadURL im Header oben
   //                   passend zum jeweiligen Branch gesetzt sein.
   //////////////////////////////////////////////////////////////////////////////
-  const SCRIPT_VERSION = "0.9.71";
+  const SCRIPT_VERSION = "0.9.72";
   const CHANNEL = "beta"; // "stable" oder "beta"
   //////////////////////////////////////////////////////////////////////////////
 
@@ -5245,11 +5245,14 @@
   }
 
   // Ermittelt je Kategorie+Ausbildungs-Slug, wie viel Personal insgesamt fehlt (Summe ueber
-  // alle Wachen dieser Kategorie) - Grundlage fuer die Schulungen-Uebersicht. Wachen ohne
-  // Scan-Daten werden ausgelassen (wie bei den Badges im Personal-Check: unbekannt statt
+  // alle Wachen dieser Kategorie) - Grundlage fuer die Schulungen-Uebersicht. Liefert je Bedarf
+  // getrennt minDeficit/maxDeficit (aus dem {min,max}-Fenster des Bauplans, siehe
+  // computePersonnelRequirementRangesFromBlueprints) - Grundlage fuer die getrennten
+  // "Ausbilden Minimum"/"Ausbilden Maximum"-Buttons, statt nur einer einzelnen Zielzahl. Wachen
+  // ohne Scan-Daten werden ausgelassen (wie bei den Badges im Personal-Check: unbekannt statt
   // faelschlich "fehlt nichts"), ebenso Wachen unter der Mindest-Personalstaerke (schuetzt
   // frisch gebaute/kleine Wachen davor, sofort leergeraeumt zu werden).
-  function computeTrainingNeeds(stations, requirements, scanData, minStaff) {
+  function computeTrainingNeeds(stations, requirementRanges, scanData, minStaff) {
     const needs = new Map();
     for (const station of stations) {
       const scan = scanData[station.id];
@@ -5258,18 +5261,21 @@
       const schoolBuildingType = SCHOOL_BUILDING_TYPE_BY_CATEGORY[station.category];
       if (!schoolBuildingType) continue;
 
-      const req = requirements[station.pseudoId] || {};
-      for (const [slug, required] of Object.entries(req)) {
-        const deficit = required - (scan.counts[slug] || 0);
-        if (deficit <= 0) continue;
+      const req = requirementRanges[station.pseudoId] || {};
+      for (const [slug, range] of Object.entries(req)) {
+        const have = scan.counts[slug] || 0;
+        const minDeficit = Math.max(0, range.min - have);
+        const maxDeficit = Math.max(0, range.max - have);
+        if (minDeficit <= 0 && maxDeficit <= 0) continue;
 
         const key = `${station.category}::${slug}`;
         if (!needs.has(key)) {
-          needs.set(key, { category: station.category, slug, stations: [], totalDeficit: 0 });
+          needs.set(key, { category: station.category, slug, stations: [], totalMinDeficit: 0, totalMaxDeficit: 0 });
         }
         const need = needs.get(key);
-        need.stations.push({ id: station.id, name: station.name, deficit });
-        need.totalDeficit += deficit;
+        need.stations.push({ id: station.id, name: station.name, minDeficit, maxDeficit });
+        need.totalMinDeficit += minDeficit;
+        need.totalMaxDeficit += maxDeficit;
       }
     }
     return [...needs.values()];
@@ -5364,16 +5370,21 @@
   // Ausbildung laut den per-Ausbildung true/false-Attributen der Checkboxen NICHT schon
   // haben (echte Vor-Ort-Daten statt der ggf. veralteten Scan-Zahlen).
   //
-  // Diese Auswahl-Seite kennt aber NUR den einen hier gesuchten Slug - ob eine Person schon
-  // eine ANDERE Ausbildung hat oder gerade "Im Unterricht"/"Im Einsatz" ist, weiss sie nicht
-  // (per Live-Test bestaetigt: genau das fuehrte dazu, dass eine Person mit bereits einer
-  // Ausbildung zusaetzlich fuer eine zweite eingeteilt wurde). Deshalb zusaetzlich die normale
-  // Personal-Seite derselben Wache abfragen (parsePersonalPageHtml, dieselbe Quelle wie beim
-  // Personal-Check-Scan) und ueber die Personal-ID abgleichen (beide Checkboxen - "schooling_
-  // checkbox" hier und "personal-delete-checkbox" auf der Personal-Seite - tragen dieselbe
-  // echte Personal-ID als value, per Live-Diagnose bestaetigt): nur wer dort GAR KEINE
-  // Ausbildung hat UND als "Verfuegbar" gilt, bleibt uebrig. Keine passende ID gefunden
-  // schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
+  // Diese Auswahl-Seite kennt aber NUR den einen hier gesuchten Slug - ob eine Person gerade
+  // "Im Unterricht"/"Im Einsatz" ist, weiss sie nicht (per Live-Test bestaetigt: genau das
+  // fuehrte dazu, dass eine bereits anderweitig beschaeftigte Person zusaetzlich fuer einen
+  // neuen Lehrgang eingeteilt wurde). Deshalb zusaetzlich die normale Personal-Seite derselben
+  // Wache abfragen (parsePersonalPageHtml, dieselbe Quelle wie beim Personal-Check-Scan) und
+  // ueber die Personal-ID abgleichen (beide Checkboxen - "schooling_checkbox" hier und
+  // "personal-delete-checkbox" auf der Personal-Seite - tragen dieselbe echte Personal-ID als
+  // value, per Live-Diagnose bestaetigt): nur wer dort als "Verfuegbar" gilt, bleibt uebrig.
+  // Bewusst KEINE Anforderung mehr an bereits vorhandene ANDERE Ausbildungen (fruehere Version
+  // verlangte "entry.slugs.length === 0") - das schloss in der Praxis fast das gesamte Personal
+  // aus, sobald es schon irgendeine andere Qualifikation hatte, obwohl es fuer DIESEN Lehrgang
+  // frei war (gemeldeter Bug: "kein verfuegbares Personal gefunden" trotz vieler freier
+  // Personen). Status-Abgleich per includes() statt exaktem Vergleich, damit zusaetzlicher Text
+  // in der Status-Spalte (z.B. Icon-Titel) den Treffer nicht verhindert. Keine passende ID
+  // gefunden schliesst die Person sicherheitshalber AUS statt sie faelschlich zuzulassen.
   async function fetchAvailablePersonnelForEducation(stationId, slug) {
     const [selectRes, personalHtml] = await Promise.all([
       fetchWithTimeout(`/buildings/${stationId}/schooling_personal_select`, { credentials: "same-origin" }),
@@ -5391,7 +5402,7 @@
       }))
       .filter(p => {
         const entry = statusById.get(p.id);
-        return !!entry && entry.slugs.length === 0 && entry.statusText.trim() === "Verfügbar";
+        return !!entry && entry.statusText.includes("Verfügbar");
       });
   }
 
@@ -5401,8 +5412,11 @@
   // einsammeln (bis zur tatsaechlich freien Kapazitaet). Grundlage fuer die eigene
   // Bestaetigungs-Ansicht (siehe renderSchoolingConfirmScreen) statt eines blossen
   // Browser-confirm() - der Spieler soll VOR dem Klick exakt sehen, wer betroffen ist.
-  async function planTrainingRun(need, school) {
+  // mode "min" oder "max" waehlt, welches der beiden Deficit-Fenster (siehe
+  // computeTrainingNeeds) als Ziel gilt - "Ausbilden Minimum" vs. "Ausbilden Maximum".
+  async function planTrainingRun(need, school, mode) {
     const schoolId = school.id;
+    const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
     const schoolingRuns = await fetchSchoolingRuns();
     const occupied = countOccupiedRooms(schoolingRuns, schoolId);
     // freeRooms fuer die Zuteilung kommt aus der ECHTEN Raumzahl der Schule (school.maxRooms,
@@ -5415,15 +5429,16 @@
     }
     const { authenticityToken, educationValue, educationLabel } = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
 
-    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(need.totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
+    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
     const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
 
-    const stationsByDeficit = [...need.stations].sort((a, b) => b.deficit - a.deficit);
+    const deficitOf = station => (mode === "max" ? station.maxDeficit : station.minDeficit);
+    const stationsByDeficit = [...need.stations].sort((a, b) => deficitOf(b) - deficitOf(a));
     const selectedByStation = [];
     for (const station of stationsByDeficit) {
       const alreadySelected = selectedByStation.reduce((sum, s) => sum + s.people.length, 0);
       if (alreadySelected >= capacity) break;
-      const takeCount = Math.min(station.deficit, capacity - alreadySelected);
+      const takeCount = Math.min(deficitOf(station), capacity - alreadySelected);
       if (takeCount <= 0) continue;
       const available = await fetchAvailablePersonnelForEducation(station.id, need.slug);
       const people = available.slice(0, takeCount);
@@ -5433,7 +5448,7 @@
     const selected = selectedByStation.flatMap(s => s.people);
     if (!selected.length) {
       throw new Error(
-        "Kein verfügbares Personal gefunden (ohne jede Ausbildung und als \"Verfügbar\" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig ausgebildet).",
+        "Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als \"Verfügbar\" markiert - evtl. schon in Ausbildung oder im Einsatz).",
       );
     }
 
@@ -5583,7 +5598,7 @@
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
 
-    const requirements = await computePersonnelRequirementsFromBlueprints();
+    const requirements = await computePersonnelRequirementRangesFromBlueprints();
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const qualifications = await getPersonnelQualifications();
@@ -5680,16 +5695,34 @@
           const rows = categoryNeeds
             .map(need => {
               const qualificationName = qualifications[need.slug] || need.slug;
-              const stationTitle = need.stations.map(s => `${s.name} (${s.deficit} fehlen)`).join(", ");
+              const stationTitleFor = deficitField =>
+                need.stations
+                  .filter(s => s[deficitField] > 0)
+                  .map(s => `${s.name} (${s[deficitField]} fehlen)`)
+                  .join(", ");
               const needKey = `${need.category}::${need.slug}`;
+              const minBtn =
+                need.totalMinDeficit > 0
+                  ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>
+                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum
+                     </button>`
+                  : "";
+              const maxBtn =
+                need.totalMaxDeficit > 0
+                  ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>
+                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum
+                     </button>`
+                  : "";
               return `
                 <tr>
                   <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>
-                  <td style="vertical-align:middle;" title="${escapeHtml(stationTitle)}">${need.totalDeficit} fehlen<br><small class="text-muted">${need.stations.length} Wache(n)</small></td>
                   <td style="vertical-align:middle;">
-                    <button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" ${school ? "" : "disabled"}>
-                      <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden
-                    </button>
+                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}
+                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}
+                    <small class="text-muted">${need.stations.length} Wache(n)</small>
+                  </td>
+                  <td style="vertical-align:middle;">
+                    ${minBtn} ${maxBtn}
                     <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>
                   </td>
                 </tr>
@@ -5792,13 +5825,17 @@
           if (!need) return;
           const school = schoolByCategory[need.category];
           if (!school) return;
+          const mode = btn.dataset.mode === "max" ? "max" : "min";
+          // Beide Buttons (Minimum/Maximum) derselben Zeile teilen sich denselben Status-Text -
+          // waehrend einer laedt, macht ein Klick auf den anderen keinen Sinn.
+          const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"]`);
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
           const qualificationName = qualifications[need.slug] || need.slug;
 
-          btn.disabled = true;
+          siblingButtons.forEach(b => (b.disabled = true));
           statusEl.textContent = "Lade Vorschau ...";
           try {
-            const plan = await planTrainingRun(need, school);
+            const plan = await planTrainingRun(need, school, mode);
             renderSchoolingConfirmScreen({
               need,
               school,
@@ -5808,7 +5845,7 @@
             });
           } catch (e) {
             statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
-            btn.disabled = false;
+            siblingButtons.forEach(b => (b.disabled = false));
           }
         });
       });
@@ -7316,6 +7353,22 @@
       const totals = computeBlueprintPersonnelRequirements(blueprint);
       const obj = {};
       for (const [slug, count] of totals) obj[slug] = count;
+      result[blueprint.pseudoId] = obj;
+    }
+    return result;
+  }
+
+  // Wie computePersonnelRequirementsFromBlueprints(), aber mit {min, max}-Fenster je Slug
+  // (siehe computeBlueprintPersonnelRequirementRanges) statt einer einzelnen Zahl - Grundlage
+  // fuer die getrennten "Ausbilden Minimum"/"Ausbilden Maximum"-Buttons bei Schulungen.
+  async function computePersonnelRequirementRangesFromBlueprints() {
+    const blueprints = await getStationBlueprints();
+    const result = {};
+    for (const blueprint of Object.values(blueprints)) {
+      if (!blueprint.enabled) continue;
+      const totals = computeBlueprintPersonnelRequirementRanges(blueprint);
+      const obj = {};
+      for (const [slug, range] of totals) obj[slug] = range;
       result[blueprint.pseudoId] = obj;
     }
     return result;
