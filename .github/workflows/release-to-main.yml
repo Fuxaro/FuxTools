@@ -1,25 +1,35 @@
 name: Main-Release vorbereiten
 
-# Nur manuell auslösbar (Button "Run workflow" im Actions-Tab) - kein automatischer Trigger
-# bei jedem Push auf beta, damit main weiterhin nur dann aktualisiert wird, wenn das
-# tatsächlich gewollt ist. Nimmt den aktuellen beta-Stand und bringt ihn auf main-Stand:
-# interne Entwickler-Kommentare raus (scripts/strip-comments.js), Kanal/Update-Links auf
-# stable/main umgestellt (scripts/set-stable-channel.js), CHANGELOG.md "Beta"-Abschnitt wird
-# zum neuen "Stable"-Abschnitt (scripts/promote-changelog.js). Das Ergebnis landet als Pull
-# Request gegen main, damit der Diff vor dem Live-Gehen bei den Stable-Nutzern noch
-# gegengeprüft werden kann - kein direkter Push.
+# Nur manuell auslösbar (Button "Run workflow" im Actions-Tab) - kein automatischer Trigger,
+# damit main weiterhin nur dann aktualisiert wird, wenn das tatsächlich gewollt ist. Nimmt den
+# aktuellen Stand aus dem PRIVATEN Beta-Repo (fuxaro/fuxtools-beta, Branch main) und bringt ihn
+# auf main-Stand hier in diesem (öffentlichen) Repo: interne Entwickler-Kommentare raus
+# (scripts/strip-comments.js), Kanal/Update-Links auf stable/main umgestellt
+# (scripts/set-stable-channel.js), CHANGELOG.md "Beta"-Abschnitt wird zum neuen
+# "Stable"-Abschnitt (scripts/promote-changelog.js). Das Ergebnis landet als Pull Request gegen
+# main, damit der Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann -
+# kein direkter Push.
 #
-# WICHTIG: Der Release-Branch wird bewusst von main (nicht von beta) abgezweigt und bekommt
-# DANACH den kompletten beta-Inhalt aufgespielt - nicht andersrum. main und beta enthalten
-# fuxtools.user.js/CHANGELOG.md nämlich dauerhaft in unterschiedlichen "Übersetzungen" (main =
-# kommentarlos/stable-Kanal, beta = kommentiert/beta-Kanal), und beta bekommt diese Übersetzung
-# nie zurückgespielt. Ein Release-Branch direkt von beta abgezweigt hätte bei JEDEM Release
-# erneut genau dieselben Zeilen (Versions-Header, CHANNEL-Konstante, "## Beta"-Überschrift im
-# Changelog) unabhängig vom letzten main-Release umgeschrieben - Git meldete das beim
-# Zurückmergen zuverlässig als Konflikt, weil beide Seiten (main vom letzten Mal, der neue
-# Release-Branch jetzt) dieselbe Stelle unabhängig voneinander verändert hatten. Mit main als
-# Basis ist der neue Commit stattdessen ein einfacher Kind-Commit von mains aktuellem Stand -
-# der Merge danach hat nichts mehr gegenzuprüfen.
+# Beta-Entwicklung läuft im privaten Repo fuxaro/fuxtools-beta, damit interne Entwickler-
+# Kommentare/Zwischenstände nicht öffentlich einsehbar sind. Dieser Workflow braucht deshalb
+# Lesezugriff auf ein FREMDES (privates) Repo - dafür reicht der eingebaute GITHUB_TOKEN nicht,
+# er gilt nur für DIESES Repo. Notwendig ist ein Secret BETA_REPO_TOKEN in den
+# Repo-Einstellungen dieses (öffentlichen) Repos (Settings > Secrets and variables > Actions >
+# "New repository secret"): ein Personal Access Token (fine-grained empfohlen) mit
+# "Contents: Read" auf fuxaro/fuxtools-beta. Ohne dieses Secret schlägt der Fetch-Schritt unten
+# mit einem Auth-Fehler fehl.
+#
+# WICHTIG: Der Release-Branch wird bewusst von main (nicht vom Beta-Repo) abgezweigt und bekommt
+# DANACH den kompletten Beta-Inhalt aufgespielt - nicht andersrum. main und das Beta-Repo
+# enthalten fuxtools.user.js/CHANGELOG.md nämlich dauerhaft in unterschiedlichen "Übersetzungen"
+# (main = kommentarlos/stable-Kanal, Beta-Repo = kommentiert/beta-Kanal), und das Beta-Repo
+# bekommt diese Übersetzung nie zurückgespielt. Ein Release-Branch direkt vom Beta-Stand
+# abgezweigt hätte bei JEDEM Release erneut genau dieselben Zeilen (Versions-Header,
+# CHANNEL-Konstante, "## Beta"-Überschrift im Changelog) unabhängig vom letzten main-Release
+# umgeschrieben - Git meldete das beim Zurückmergen zuverlässig als Konflikt, weil beide Seiten
+# (main vom letzten Mal, der neue Release-Branch jetzt) dieselbe Stelle unabhängig voneinander
+# verändert hatten. Mit main als Basis ist der neue Commit stattdessen ein einfacher Kind-Commit
+# von mains aktuellem Stand - der Merge danach hat nichts mehr gegenzuprüfen.
 on:
   workflow_dispatch: {}
 
@@ -36,22 +46,28 @@ jobs:
         with:
           ref: main
 
-      - name: beta-Branch dazuholen
-        run: git fetch --depth 1 origin beta
+      - name: Privates Beta-Repo als Remote hinzufügen und main-Stand dazuholen
+        run: |
+          if [ -z "${{ secrets.BETA_REPO_TOKEN }}" ]; then
+            echo "::error::Secret BETA_REPO_TOKEN fehlt - siehe Kommentar oben im Workflow für die Einrichtung (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          git remote add betarepo "https://x-access-token:${{ secrets.BETA_REPO_TOKEN }}@github.com/fuxaro/fuxtools-beta.git"
+          git fetch --depth 1 betarepo main
 
       - name: Node einrichten
         uses: actions/setup-node@v5
         with:
           node-version: 20
 
-      - name: Release-Branch von main abzweigen und kompletten beta-Stand einspielen
+      - name: Release-Branch von main abzweigen und kompletten Beta-Stand einspielen
         run: |
-          VERSION=$(git show origin/beta:fuxtools.user.js | grep -m1 -oP '@version\s+\K[0-9.]+')
+          VERSION=$(git show betarepo/main:fuxtools.user.js | grep -m1 -oP '@version\s+\K[0-9.]+')
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BRANCH=release/v$VERSION" >> "$GITHUB_ENV"
           git checkout -b "release/v$VERSION"
           git rm -rf . > /dev/null
-          git checkout origin/beta -- .
+          git checkout betarepo/main -- .
 
       - name: Abhängigkeiten installieren
         run: npm ci
@@ -71,6 +87,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote remove betarepo
           git add -A
           git commit -m "Main-Release v$VERSION: Kommentare entfernt, Kanal auf stable, Changelog aktualisiert"
           git push --force origin "$BRANCH"
@@ -84,7 +101,7 @@ jobs:
             --base main \
             --head "$BRANCH" \
             --title "Main-Release v$VERSION" \
-            --body "Automatisch erzeugter Release-PR aus \`beta\` (v$VERSION).
+            --body "Automatisch erzeugter Release-PR aus dem privaten Beta-Repo (fuxaro/fuxtools-beta, main, v$VERSION).
 
           - Interne Entwickler-Kommentare entfernt (\`scripts/strip-comments.js\`)
           - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
