@@ -2,7 +2,15 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.0)
+## Stable (v1.0.1)
+
+- Effizienz: Wachen (`/api/buildings`) und Fahrzeuge (`/api/v2/vehicles`) wurden bisher von
+  fast jedem Modul (Wachenausbau, Wachen-Check, Schulungen, Statistik, Fahrzeug-Besatzung,
+  Umbenennen) unabhängig voneinander neu abgerufen - bis zu 6x `/api/buildings` für denselben
+  Menü-Durchlauf. Es gibt jetzt einen zentralen, 60 Sekunden gültigen Cache: alle Module teilen
+  sich denselben Abruf, bei Wachen mit vielen Tausend Wachen/Fahrzeugen spürbar schneller beim
+  Wechseln zwischen den Bildschirmen. Die "Aktualisieren"-Buttons (Wachenausbau, Wachen-Check)
+  erzwingen weiterhin einen echten Neuabruf.
 
 - Beta-Entwicklung ist in dieses private Repo umgezogen (siehe README) - der öffentliche
   `beta`-Branch im Haupt-Repo wurde eingestellt. Den dafür überflüssig gewordenen "Zu Beta

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.0
+// @version     1.0.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "1.0.1";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -1855,13 +1855,35 @@
     }
     return vehicles;
   }
-  async function loadGameData() {
-    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
-    return {
-      vehicles: vehicles,
-      buildingsById: buildingsById
-    };
+  const GAME_DATA_CACHE_TTL_MS = 60 * 1e3;
+  let gameDataCache = null;
+  let gameDataFetchPromise = null;
+  function invalidateGameDataCache() {
+    gameDataCache = null;
+  }
+  async function loadGameData(forceRefresh = false) {
+    if (!forceRefresh && gameDataCache && Date.now() - gameDataCache.fetchedAt < GAME_DATA_CACHE_TTL_MS) {
+      return gameDataCache;
+    }
+    if (!forceRefresh && gameDataFetchPromise) {
+      return gameDataFetchPromise;
+    }
+    gameDataFetchPromise = (async () => {
+      const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
+      const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+      gameDataCache = {
+        vehicles: vehicles,
+        buildings: buildings,
+        buildingsById: buildingsById,
+        fetchedAt: Date.now()
+      };
+      return gameDataCache;
+    })();
+    try {
+      return await gameDataFetchPromise;
+    } finally {
+      gameDataFetchPromise = null;
+    }
   }
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -2997,8 +3019,7 @@
     executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
   async function loadAllBuildings() {
-    const buildings = await fetchJSON("/api/buildings");
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    const {buildings: buildings, buildingsById: buildingsById} = await loadGameData();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
@@ -3313,13 +3334,12 @@
     }
   }
   async function loadBuildingsForCheck() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings, buildingsById: buildingsById} = await loadGameData();
     const requiredExtensionOverrides = await getRequiredExtensionsOverrides();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
     return buildings.filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt").map(b => {
       const pseudoId = getPseudoBuildingTypeId(b);
       const buildingKey = getBuildingKey(b);
@@ -3668,13 +3688,14 @@
       renderRequiredExtensionsSettingsScreen(() => renderStationCheckScreen(savedState));
     });
     document.getElementById("vn-station-check-refresh").addEventListener("click", () => {
+      invalidateGameDataCache();
       renderStationCheckScreen(currentState());
     });
     renderTable();
   }
   const PERSONNEL_SCAN_CONCURRENCY = 5;
   async function loadPersonnelCheckStations() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings} = await loadGameData();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
@@ -3850,7 +3871,7 @@
     return 1 + builtExtraRooms;
   }
   async function loadOwnedSchoolsByCategory() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings} = await loadGameData();
     const byCategory = {};
     for (const b of buildings) {
       const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type);
@@ -4449,7 +4470,7 @@
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
     let allStations, vehicles;
     try {
-      [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2() ]);
+      [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles) ]);
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
@@ -4609,8 +4630,7 @@
     return slugs;
   }
   async function loadCrewCheckVehicles() {
-    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    const {vehicles: vehicles, buildingsById: buildingsById} = await loadGameData();
     return vehicles.map(v => {
       const typeId = v.vehicle_type ?? v.type;
       const info = getVehicleTypeCrewTarget(typeId);
@@ -5904,7 +5924,7 @@
     }
     let allStations, vehicles, scanData, qualifications, scanMeta;
     try {
-      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2(), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
+      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
@@ -6139,6 +6159,7 @@
     document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
       const btn = document.getElementById("vn-bp-apply-refresh");
       btn.disabled = true;
+      invalidateGameDataCache();
       body.insertAdjacentHTML("beforeend", `<p id="vn-bp-apply-refresh-status"><em>Wachen, Fahrzeuge und Personal werden neu geladen ...</em></p>`);
       try {
         await scanAllPersonnel((done, of) => {
