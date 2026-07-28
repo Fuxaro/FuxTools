@@ -16,6 +16,10 @@ permissions:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    # Nur im oeffentlichen Repo tatsaechlich aktiv - eine Kopie dieser Datei liegt zusaetzlich
+    # im privaten Beta-Repo (nur damit sie den Release-Branch-Wipe von release-to-main.yml
+    # uebersteht), soll dort aber nicht das private main (Beta-Kanal-Stand) taggen.
+    if: github.repository == 'Fuxaro/FuxTools'
     steps:
       - name: main auschecken
         uses: actions/checkout@v5
