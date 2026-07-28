@@ -9,7 +9,7 @@ Willkommen bei FuxTools – meinem ersten Script für [leitstellenspiel.de](http
 Ein Tampermonkey-Script zur Wachen-, Fahrzeug- und Personalverwaltung: Fahrzeuge/Wachen/
 Leitstellen umbenennen, Ausbauten direkt bauen, Fahrzeuge automatisch mit passend ausgebildetem
 Personal besetzen, Wachen-Baupläne mit automatischer Personal-Bedarfsrechnung und fehlende
-Lehrgänge selbst starten. Läuft komplett über die bestehende Spiel-Session, kein API-Key nötig.
+Lehrgänge selbst starten.
 
 ## Aktuelle Funktionen
 
@@ -86,8 +86,7 @@ FuxTools läuft komplett lokal in deinem Browser und sendet keine Daten an Serve
 oder sonstige Dritte:
 
 - **leitstellenspiel.de**: alle Aktionen (Umbenennen, Bauen, Fahrzeuge kaufen/verkaufen, Personal
-  zuweisen, ...) laufen über deine bestehende, eingeloggte Spiel-Session – kein separates
-  Passwort, kein API-Key nötig.
+  zuweisen, ...) laufen über deine bestehende, eingeloggte Spiel-Session.
 - **api.lss-manager.de**: liefert nur den öffentlichen Fahrzeug-Katalog (Namen,
   Ausbildungsanforderungen) – es werden keine Daten an diese Seite gesendet, nur abgerufen.
 - **raw.githubusercontent.com** (dieses Repo): für den automatischen Update-Check, den

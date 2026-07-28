@@ -1,7 +1,5 @@
 # So funktioniert's
 
-Läuft komplett über deine bestehende Spiel-Session - kein Login, kein API-Key nötig.
-
 ## Empfohlener Einstieg
 
 - **Wachen-Bauplaner**: festlegen, wie eine Wache aussehen soll.
