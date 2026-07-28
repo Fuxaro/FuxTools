@@ -2,7 +2,7 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v0.9.106)
+## Stable (v1.0.0)
 
 - Beta-Entwicklung ist in dieses private Repo umgezogen (siehe README) - der öffentliche
   `beta`-Branch im Haupt-Repo wurde eingestellt. Den dafür überflüssig gewordenen "Zu Beta
