@@ -36,6 +36,11 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # Noetig, weil der Release-Branch auch .github/workflows/tag-release.yml enthaelt (kommt
+  # aus dem privaten Beta-Repo mit) - ohne diese Berechtigung verweigert GitHub jeden Push,
+  # der Dateien unter .github/workflows/ aendert (Schutz gegen Rechte-Eskalation durch einen
+  # Workflow, der sich selbst mehr Rechte verschafft).
+  workflows: write
 
 jobs:
   prepare-release:
