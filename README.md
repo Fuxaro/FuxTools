@@ -106,6 +106,9 @@ derselben Lizenz weitergegeben werden.
 
 ## Credits
 
+Der Fahrzeug-Katalog (Namen, Ausbildungsanforderungen) stammt von
+[lss-manager.de](https://www.lss-manager.de) – danke an das Team dafür!
+
 FuxTools ist komplett eigener Code (kein übernommener Quelltext). Bei ein paar Konzepten haben
 folgende Community-Skripte für leitstellenspiel.de als Inspiration gedient:
 
