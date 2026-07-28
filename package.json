@@ -1,0 +1,11 @@
+{
+  "name": "fuxtools",
+  "private": true,
+  "description": "Build-Hilfsskripte für FuxTools (kein Teil des eigentlichen Userscripts).",
+  "scripts": {
+    "strip-comments": "node scripts/strip-comments.js"
+  },
+  "devDependencies": {
+    "terser": "^5.49.0"
+  }
+}
