@@ -46,6 +46,19 @@ jobs:
         with:
           ref: main
 
+      - name: Debug - Secret pruefen (nur Laenge/Praefix, niemals der Wert selbst)
+        env:
+          TOKEN: ${{ secrets.BETA_REPO_TOKEN }}
+        run: |
+          echo "Laenge von BETA_REPO_TOKEN: ${#TOKEN}"
+          echo "Praefix: ${TOKEN:0:11}"
+          echo "--- API-Check gegen Fuxaro/FuxTools-Beta ---"
+          curl -s -o /tmp/api-check.json -w "HTTP-Status: %{http_code}\n" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Fuxaro/FuxTools-Beta
+          cat /tmp/api-check.json
+
       - name: Privates Beta-Repo als Remote hinzufügen und main-Stand dazuholen
         run: |
           if [ -z "${{ secrets.BETA_REPO_TOKEN }}" ]; then
