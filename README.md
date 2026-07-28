@@ -4,12 +4,12 @@
 
 # FuxTools
 
-Willkommen bei FuxTools – meinem ersten Script für [leitstellenspiel.de](https://www.leitstellenspiel.de)!
+Willkommen bei FuxTools
 
-Ein Tampermonkey-Script zur Wachen-, Fahrzeug- und Personalverwaltung: Fahrzeuge/Wachen/
-Leitstellen umbenennen, Ausbauten direkt bauen, Fahrzeuge automatisch mit passend ausgebildetem
-Personal besetzen, Wachen-Baupläne mit automatischer Personal-Bedarfsrechnung und fehlende
-Lehrgänge selbst starten.
+Ein Script zur Wachen-, Fahrzeug- und Personalverwaltung: Fahrzeuge/Wachen/Leitstellen
+umbenennen, Ausbauten direkt bauen, Fahrzeuge automatisch mit passend ausgebildetem Personal
+besetzen, Wachen-Baupläne mit automatischer Personal-Bedarfsrechnung anlegen und fehlende
+Lehrgänge direkt starten.
 
 ## Aktuelle Funktionen
 
@@ -60,7 +60,7 @@ Lehrgänge selbst starten.
 1. [Tampermonkey](https://www.tampermonkey.net/) installieren (falls noch nicht vorhanden).
 2. Auf **`fuxtools.user.js`** in diesem Repo klicken → "Raw" öffnen.
 3. Tampermonkey erkennt die Datei automatisch und bietet die Installation an.
-4. Seite neu laden → Eintrag **"FuxTools"** erscheint in der Navigation neben "AAO".
+4. Seite neu laden → Eintrag **"FuxTools"** erscheint in der Navigation.
 
 Das Script prüft automatisch (über `@updateURL`) auf neue Versionen aus diesem Repo –
 Tampermonkey zeigt sie unter *Dashboard → Utilities → Nach Updates suchen* an, oder automatisch
