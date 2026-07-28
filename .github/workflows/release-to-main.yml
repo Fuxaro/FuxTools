@@ -46,19 +46,6 @@ jobs:
         with:
           ref: main
 
-      - name: Debug - Secret pruefen (nur Laenge/Praefix, niemals der Wert selbst)
-        env:
-          TOKEN: ${{ secrets.BETA_REPO_TOKEN }}
-        run: |
-          echo "Laenge von BETA_REPO_TOKEN: ${#TOKEN}"
-          echo "Praefix: ${TOKEN:0:11}"
-          echo "--- API-Check gegen Fuxaro/FuxTools-Beta ---"
-          curl -s -o /tmp/api-check.json -w "HTTP-Status: %{http_code}\n" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/Fuxaro/FuxTools-Beta
-          cat /tmp/api-check.json
-
       - name: Privates Beta-Repo als Remote hinzufügen und main-Stand dazuholen
         run: |
           if [ -z "${{ secrets.BETA_REPO_TOKEN }}" ]; then
@@ -66,7 +53,14 @@ jobs:
             exit 1
           fi
           git remote add betarepo "https://x-access-token:${{ secrets.BETA_REPO_TOKEN }}@github.com/Fuxaro/FuxTools-Beta.git"
-          git fetch --depth 1 betarepo main
+          # actions/checkout hinterlässt ein lokales http.https://github.com/.extraheader
+          # mit dem eingebauten GITHUB_TOKEN - das gilt für JEDE github.com-URL, überschreibt
+          # also sonst hier stillschweigend die im Remote-URL eingebetteten Zugangsdaten von
+          # BETA_REPO_TOKEN. Da GITHUB_TOKEN keinen Zugriff auf das private Beta-Repo hat,
+          # meldet GitHub das als "Repository not found" statt als Auth-Fehler. Für DIESEN
+          # einen Fetch wird der Header deshalb gezielt geleert (spätere Schritte, z. B. der
+          # Push gegen origin, brauchen ihn weiterhin unverändert).
+          git -c http.https://github.com/.extraheader= fetch --depth 1 betarepo main
 
       - name: Node einrichten
         uses: actions/setup-node@v5
