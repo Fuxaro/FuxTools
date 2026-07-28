@@ -36,11 +36,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # Noetig, weil der Release-Branch auch .github/workflows/tag-release.yml enthaelt (kommt
-  # aus dem privaten Beta-Repo mit) - ohne diese Berechtigung verweigert GitHub jeden Push,
-  # der Dateien unter .github/workflows/ aendert (Schutz gegen Rechte-Eskalation durch einen
-  # Workflow, der sich selbst mehr Rechte verschafft).
-  workflows: write
 
 jobs:
   prepare-release:
@@ -78,8 +73,18 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BRANCH=release/v$VERSION" >> "$GITHUB_ENV"
           git checkout -b "release/v$VERSION"
+          # .github/workflows wird VORHER gesichert und HINTERHER unveraendert
+          # zurueckkopiert: GitHub verweigert dem eingebauten GITHUB_TOKEN grundsaetzlich
+          # jeden Push, der Dateien unter diesem Pfad aendert (Schutz gegen
+          # Rechte-Eskalation, laesst sich nicht per permissions:-Block freischalten). Beide
+          # Repos halten ihre Workflow-Dateien ohnehin manuell synchron, main behaelt hier
+          # also einfach byte-identisch seinen eigenen Stand - dadurch entsteht dafuer gar
+          # keine Aenderung, die gepusht werden muesste.
+          cp -r .github/workflows /tmp/main-workflows
           git rm -rf . > /dev/null
           git checkout betarepo/main -- .
+          rm -rf .github/workflows
+          cp -r /tmp/main-workflows .github/workflows
 
       - name: Abhängigkeiten installieren
         run: npm ci
