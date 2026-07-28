@@ -96,10 +96,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote remove betarepo
           git add -A
+          if git diff --cached --quiet; then
+            echo "Kein Unterschied zu main - der Beta-Stand (v$VERSION) ist inhaltlich bereits identisch mit main, es gibt nichts zu releasen."
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
           git commit -m "Main-Release v$VERSION: Kommentare entfernt, Kanal auf stable, Changelog aktualisiert"
           git push --force origin "$BRANCH"
 
       - name: Pull Request gegen main erstellen
+        if: env.SKIP_RELEASE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
