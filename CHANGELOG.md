@@ -2,7 +2,27 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.0)
+## Stable (v1.0.2)
+
+- Bugfix: das globale Fehler-Sicherheitsnetz zeigte fälschlich einen "FuxTools-Fehler"-Banner
+  an, wenn das Spiel selbst (nicht FuxTools) versucht, einen Sound abzuspielen, bevor man mit
+  der Seite interagiert hat (vom Browser blockiert, "NotAllowedError") - FuxTools spielt
+  nirgends Audio ab, dieser Fehlertyp wird jetzt ignoriert statt fälschlich zugeordnet.
+
+- Code-Aufräumen: unnötig vorsichtige Fallback-Selektoren beim Umbenennen entfernt (die
+  echten Formular-IDs waren längst bekannt), die Kandidatenliste beim Auslesen des
+  eingeloggten Namens auf einen Selektor reduziert (ein Kandidat war eine reine Teilmenge
+  eines anderen), doppelten Code beim Einlesen der Ausbildungs-Slugs sowie beim Auslesen der
+  Namens-Bausteine-Formularfelder (stand identisch an drei Stellen) jeweils in eine
+  gemeinsame Funktion zusammengeführt. Keine Verhaltensänderung.
+
+- Effizienz: Wachen (`/api/buildings`) und Fahrzeuge (`/api/v2/vehicles`) wurden bisher von
+  fast jedem Modul (Wachenausbau, Wachen-Check, Schulungen, Statistik, Fahrzeug-Besatzung,
+  Umbenennen) unabhängig voneinander neu abgerufen - bis zu 6x `/api/buildings` für denselben
+  Menü-Durchlauf. Es gibt jetzt einen zentralen, 60 Sekunden gültigen Cache: alle Module teilen
+  sich denselben Abruf, bei Wachen mit vielen Tausend Wachen/Fahrzeugen spürbar schneller beim
+  Wechseln zwischen den Bildschirmen. Die "Aktualisieren"-Buttons (Wachenausbau, Wachen-Check)
+  erzwingen weiterhin einen echten Neuabruf.
 
 - Beta-Entwicklung ist in dieses private Repo umgezogen (siehe README) - der öffentliche
   `beta`-Branch im Haupt-Repo wurde eingestellt. Den dafür überflüssig gewordenen "Zu Beta
