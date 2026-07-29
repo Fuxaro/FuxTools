@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.4
+// @version     1.0.6
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.4";
+  const SCRIPT_VERSION = "1.0.6";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -57,6 +57,7 @@
   const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1e3;
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
+  let levelBuildCancelled = false;
   let backgroundTaskBadgeEl = null;
   let taskCenterEntryEl = null;
   const backgroundTaskQueue = [];
@@ -2591,11 +2592,18 @@
     };
     const STATUS_RANK = {
       running: 0,
+      error: 1,
       cancelled: 1
     };
     const STATUS_LABEL = {
       running: "läuft/unterbrochen ...",
+      error: "Fehler",
       cancelled: "abgebrochen"
+    };
+    const STATUS_BADGE_CLASS = {
+      running: "label-warning",
+      error: "label-danger",
+      cancelled: "label-default"
     };
     function historySortKey(column, entry) {
       switch (column) {
@@ -2626,7 +2634,7 @@
         const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
         const costLabel = entry.cost == null ? "-" : entry.currency === "coins" ? `${entry.cost.toLocaleString("de-DE")} Coins` : `${entry.cost.toLocaleString("de-DE")} Credits`;
         const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
-        const statusBadge = STATUS_LABEL[entry.status] ? `<span class="label ${entry.status === "running" ? "label-warning" : "label-default"}">${STATUS_LABEL[entry.status]}</span>` : `<span class="label label-success">abgeschlossen</span>`;
+        const statusBadge = STATUS_LABEL[entry.status] ? `<span class="label ${STATUS_BADGE_CLASS[entry.status] || "label-default"}">${STATUS_LABEL[entry.status]}</span>` : `<span class="label label-success">abgeschlossen</span>`;
         return `\n            <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">\n              <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>\n              <td>${escapeHtml(date.toLocaleTimeString("de-DE", {
           hour: "2-digit",
           minute: "2-digit"
@@ -3350,6 +3358,15 @@
     });
     if (!res.ok) throw new Error(`Bauen fehlgeschlagen (${res.status})`);
   }
+  async function fetchBuildingLevel(buildingId) {
+    const res = await fetchWithTimeout(`/api/buildings/${buildingId}`, {
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error(`Fehler beim Pruefen des Ausbau-Stands: ${res.status}`);
+    const data = await res.json();
+    const building = data.result || data;
+    return typeof building?.level === "number" ? building.level : null;
+  }
   async function buildLevel(buildingId, currency, level) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
     const res = await fetchWithTimeout(`/buildings/${buildingId}/expand_do/${currency}?level=${level}`, {
@@ -3363,6 +3380,107 @@
     if (res.type !== "opaqueredirect" && !res.ok) {
       throw new Error(`Ausbauen fehlgeschlagen (${res.status})`);
     }
+  }
+  async function verifyLevelBuildResult(buildingId, expectedLevel) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (attempt > 1) await sleep(700);
+      const level = await fetchBuildingLevel(buildingId);
+      if (level !== null && level >= expectedLevel) return level;
+      if (attempt === 2) return level;
+    }
+    return null;
+  }
+  function executeBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack) {
+    const title = `Wache ausbauen (${stationName})`;
+    const queued = runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue));
+    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+  }
+  async function runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue) {
+    levelBuildCancelled = false;
+    const historyId = await startHistoryEntry({
+      type: "level",
+      label: `0/${levelsToBuild.length} Stufen gebaut ...`,
+      station: stationName
+    });
+    beginBackgroundTask(title, () => {
+      levelBuildCancelled = true;
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
+    });
+    if (!viaQueue) renderBackgroundTaskProgressScreen();
+    let builtCount = 0;
+    let spent = 0;
+    let error = null;
+    for (const level of levelsToBuild) {
+      if (levelBuildCancelled) break;
+      updateBackgroundTaskProgress(Math.round(builtCount / levelsToBuild.length * 100), `Baue Stufe ${level.id} (${builtCount + 1}/${levelsToBuild.length}) ...`);
+      try {
+        await buildLevel(buildingId, currency, level.id);
+        builtCount++;
+        spent += currency === "coins" ? level.coins : level.cost;
+      } catch (e) {
+        error = e;
+        break;
+      }
+    }
+    const cancelled = levelBuildCancelled && !error;
+    const plannedLevel = levelsToBuild.length ? levelsToBuild[0].id - 1 + builtCount : null;
+    let reachedLevel = plannedLevel;
+    let verifyFailed = false;
+    if (builtCount > 0 && plannedLevel !== null) {
+      updateBackgroundTaskProgress(100, "Prüfe Ergebnis ...");
+      const actualLevel = await verifyLevelBuildResult(buildingId, plannedLevel);
+      verifyFailed = actualLevel === null || actualLevel < plannedLevel;
+      if (actualLevel !== null) reachedLevel = actualLevel;
+    }
+    await updateHistoryEntry(historyId, {
+      label: verifyFailed ? `Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht - vermutlich nicht genug ${currency === "coins" ? "Coins" : "Credits"}` : `${builtCount}/${levelsToBuild.length} Stufen gebaut (jetzt Stufe ${reachedLevel})` + (error ? ` - abgebrochen: ${error.message}` : ""),
+      status: cancelled ? "cancelled" : verifyFailed || error ? "error" : "done",
+      cost: spent,
+      currency: currency
+    });
+    if (verifyFailed) {
+      reportError(`Wachenausbau (${stationName})`, new Error(`Geplant war Stufe ${plannedLevel}, tatsächlich nur Stufe ${reachedLevel} erreicht.`));
+    }
+    const renderResult = () => renderBuildLevelsResultScreen({
+      builtCount: builtCount,
+      total: levelsToBuild.length,
+      reachedLevel: reachedLevel,
+      plannedLevel: plannedLevel,
+      spent: spent,
+      currency: currency,
+      error: error,
+      cancelled: cancelled,
+      verifyFailed: verifyFailed,
+      goBack: goBack
+    });
+    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
+    if (stillOnOwnProgressScreen) renderResult();
+    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
+  }
+  function renderBuildLevelsResultScreen({builtCount: builtCount, total: total, reachedLevel: reachedLevel, plannedLevel: plannedLevel, spent: spent, currency: currency, error: error, cancelled: cancelled, verifyFailed: verifyFailed, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const currencyLabel = currency === "coins" ? "Coins" : "Credits";
+    const statusNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen.</p>` : error ? `<p class="text-danger"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen - Fehler: ${escapeHtml(error.message)}</p>` : verifyFailed ? `<p class="text-danger"><b>Nachprüfung fehlgeschlagen:</b> geplant war Stufe ${plannedLevel}, tatsächlich nur Stufe ${reachedLevel} erreicht - vermutlich nicht genug ${currencyLabel}.</p>` : "";
+    const resultLine = verifyFailed ? `<b>Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht.</b>` : `<b>${builtCount} von ${total} Stufen gebaut</b>${reachedLevel !== null ? ` (jetzt Stufe ${reachedLevel})` : ""}.`;
+    body.innerHTML = `\n      ${statusNote}\n      <p>\n        <span class="glyphicon ${verifyFailed ? "glyphicon-remove-sign text-danger" : "glyphicon-ok-sign text-success"}" aria-hidden="true"></span>\n        ${resultLine}\n      </p>\n      <p>Ausgegeben: <b>${spent.toLocaleString("de-DE")} ${currencyLabel}</b></p>\n      <p class="text-muted" style="font-size:12px;">Lade die Seite neu, um den neuen Ausbau-Stand im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
+  }
+  function renderBuildLevelsToMaxConfirmScreen({stationName: stationName, buildingId: buildingId, levelsToBuild: levelsToBuild, totalCost: totalCost, totalCoins: totalCoins, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `\n      <p>Bauen: <b>${levelsToBuild.length} Stufen (bis Stufe ${levelsToBuild[levelsToBuild.length - 1].id})</b></p>\n      <p class="text-muted" style="font-size:12px;">\n        Wird nacheinander Stufe für Stufe gebaut (das Spiel erlaubt keinen direkten Sprung) und\n        direkt danach der echte Ausbau-Stand geprüft - reichte das Guthaben nicht für alle\n        Stufen, zeigt das Ergebnis die tatsächlich erreichte Stufe. Womit soll bezahlt werden?\n      </p>\n      <div class="form-group">\n        <button id="vn-btn-pay-credits" type="button" class="btn btn-success">\n          Mit Credits bauen (${totalCost.toLocaleString("de-DE")})\n        </button>\n        <button id="vn-btn-pay-coins" type="button" class="btn btn-danger">\n          Mit Coins bauen (${totalCoins.toLocaleString("de-DE")})\n        </button>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-pay-credits").addEventListener("click", () => {
+      executeBuildLevelsToMax(buildingId, levelsToBuild, "credits", stationName, goBack);
+    });
+    document.getElementById("vn-btn-pay-coins").addEventListener("click", () => {
+      executeBuildLevelsToMax(buildingId, levelsToBuild, "coins", stationName, goBack);
+    });
   }
   async function loadBuildingsForCheck() {
     const {buildings: buildings, buildingsById: buildingsById} = await loadGameData();
@@ -3445,7 +3563,7 @@
     const remaining = station.levelCatalog.slice(station.currentLevel + 1, maxLevel + 1);
     const maxCost = remaining.reduce((sum, l) => sum + l.cost, 0);
     const maxCoins = remaining.reduce((sum, l) => sum + l.coins, 0);
-    return `\n      <div>${label}</div>\n      <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"\n              data-building-id="${station.id}" data-level="${nextLevel.id}"\n              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}"\n              data-station-name="${escapeHtml(station.name)}">\n        Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)\n      </button>\n      <button type="button" class="btn btn-xs vn-build-level-max vn-btn-max-level" style="margin-top:2px; margin-left:2px;"\n              data-building-id="${station.id}" data-level="${maxLevel}"\n              data-cost="${maxCost}" data-coins="${maxCoins}"\n              data-station-name="${escapeHtml(station.name)}"\n              title="Direkt auf Stufe ${maxLevel} ausbauen (springt alle verbleibenden Stufen auf einmal)">\n        Max ausbauen (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)\n      </button>\n    `;
+    return `\n      <div>${label}</div>\n      <button type="button" class="btn btn-xs btn-warning vn-build-level" style="margin-top:2px;"\n              data-building-id="${station.id}" data-level="${nextLevel.id}"\n              data-cost="${nextLevel.cost}" data-coins="${nextLevel.coins}"\n              data-station-name="${escapeHtml(station.name)}">\n        Nächste Stufe (${nextLevel.cost.toLocaleString("de-DE")} Credits / ${nextLevel.coins} Coins)\n      </button>\n      <button type="button" class="btn btn-xs vn-build-level-max vn-btn-max-level" style="margin-top:2px; margin-left:2px;"\n              data-building-id="${station.id}" data-level="${maxLevel}"\n              data-cost="${maxCost}" data-coins="${maxCoins}"\n              data-station-name="${escapeHtml(station.name)}"\n              title="Baut alle verbleibenden Stufen bis Stufe ${maxLevel} nacheinander (Fortschritt im Hintergrund-Task sichtbar)">\n        Max ausbauen (${maxCost.toLocaleString("de-DE")} Credits / ${maxCoins} Coins)\n      </button>\n    `;
   }
   function renderStorageCell(station) {
     if (!station.storageCatalog || !station.storageCatalog.length) return '<span class="text-muted">-</span>';
@@ -3680,7 +3798,7 @@
           });
         });
       });
-      body.querySelectorAll(".vn-build-level, .vn-build-level-max").forEach(btn => {
+      body.querySelectorAll(".vn-build-level").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
@@ -3696,6 +3814,24 @@
             historyLabel: `Ausbaustufe ${level}`,
             historyStation: btn.dataset.stationName,
             historyStationId: buildingId
+          });
+        });
+      });
+      body.querySelectorAll(".vn-build-level-max").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const buildingId = btn.dataset.buildingId;
+          const maxLevel = Number(btn.dataset.level);
+          const station = stations.find(s => String(s.id) === String(buildingId));
+          const levelsToBuild = station ? station.levelCatalog.slice(station.currentLevel + 1, maxLevel + 1) : [];
+          const savedState = currentState();
+          renderBuildLevelsToMaxConfirmScreen({
+            stationName: btn.dataset.stationName,
+            buildingId: buildingId,
+            levelsToBuild: levelsToBuild,
+            totalCost: Number(btn.dataset.cost),
+            totalCoins: Number(btn.dataset.coins),
+            goBack: () => renderStationCheckScreen(savedState)
           });
         });
       });
@@ -3935,7 +4071,6 @@
         const inTraining = scan.inTrainingCounts?.[slug] || scan.inTrainingCounts?.[realSlug] || 0;
         const minDeficit = Math.max(0, range.min - have - inTraining);
         const maxDeficit = Math.max(0, range.max - have - inTraining);
-        if (minDeficit <= 0 && maxDeficit <= 0 && inTraining <= 0) continue;
         const key = `${station.category}::${slug}`;
         if (!needs.has(key)) {
           needs.set(key, {
@@ -4432,12 +4567,13 @@
           const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
           const stationTitleFor = deficitField => need.stations.filter(s => s[deficitField] > 0).map(s => `${s.name} (${s[deficitField]} fehlen)`).join(", ");
           const inTrainingTitle = need.stations.filter(s => s.inTraining > 0).map(s => `${s.name}: ${s.inTrainingNames.join(", ") || s.inTraining}`).join(" · ");
-          const haveTitle = need.stations.map(s => `${s.name}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}`).join(" · ");
+          const stationsWithDeficit = need.stations.filter(s => s.minDeficit > 0 || s.maxDeficit > 0);
+          const haveBreakdown = need.stations.map(s => `${escapeHtml(s.name)}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}` + (s.minDeficit > 0 || s.maxDeficit > 0 ? "" : " ✓ voll")).join("<br>");
           const needKey = `${need.category}::${need.slug}`;
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
           const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch die laufende Schulung abgedeckt - keine weitere Aktion nötig, sobald diese fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Schulung läuft)\n                       </button>` : "";
           const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
-          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <small class="text-muted" title="${escapeHtml(haveTitle)}">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</small><br>\n                    <small class="text-muted">${need.stations.length} Wache(n)</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
         }).join("");
         return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
       }).join("");
@@ -6159,7 +6295,7 @@
           });
         });
       });
-      body.querySelectorAll(".vn-build-level, .vn-build-level-max").forEach(btn => {
+      body.querySelectorAll(".vn-build-level").forEach(btn => {
         btn.addEventListener("click", e => {
           e.stopPropagation();
           const buildingId = btn.dataset.buildingId;
@@ -6174,6 +6310,23 @@
             historyLabel: `Ausbaustufe ${level}`,
             historyStation: btn.dataset.stationName,
             historyStationId: buildingId
+          });
+        });
+      });
+      body.querySelectorAll(".vn-build-level-max").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const buildingId = btn.dataset.buildingId;
+          const maxLevel = Number(btn.dataset.level);
+          const station = matchingStations.find(s => String(s.id) === String(buildingId));
+          const levelsToBuild = station ? station.levelCatalog.slice(station.currentLevel + 1, maxLevel + 1) : [];
+          renderBuildLevelsToMaxConfirmScreen({
+            stationName: btn.dataset.stationName,
+            buildingId: buildingId,
+            levelsToBuild: levelsToBuild,
+            totalCost: Number(btn.dataset.cost),
+            totalCoins: Number(btn.dataset.coins),
+            goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter)
           });
         });
       });
