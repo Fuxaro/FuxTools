@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.8
+// @version     1.0.9
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.8";
+  const SCRIPT_VERSION = "1.0.9";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -1447,7 +1447,7 @@
       cost: 5e4,
       coins: 15
     }, ...Array.from({
-      length: 12
+      length: 13
     }, (_, i) => ({
       id: i + 2,
       cost: 1e5,
@@ -3993,24 +3993,39 @@
     const scan = scanData[station.id];
     if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
     const req = requirements[station.pseudoId] || {};
-    const slugs = new Set([ ...Object.keys(req).filter(slug => req[slug] > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
+    const reqByRealSlug = {};
+    for (const [slug, range] of Object.entries(req)) {
+      const realSlug = realSlugFor(slug);
+      const existing = reqByRealSlug[realSlug] || {
+        min: 0,
+        max: 0
+      };
+      existing.min += range.min;
+      existing.max += range.max;
+      reqByRealSlug[realSlug] = existing;
+    }
+    const slugs = new Set([ ...Object.keys(reqByRealSlug).filter(slug => reqByRealSlug[slug].max > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
     const badges = [ ...slugs ].sort((a, b) => qualificationNameFor(qualifications, a).localeCompare(qualificationNameFor(qualifications, b), "de")).map(slug => {
-      const required = req[slug] || 0;
+      const {min: reqMin, max: reqMax} = reqByRealSlug[slug] || {
+        min: 0,
+        max: 0
+      };
       const have = scan.counts[slug] || 0;
       const name = qualificationNameFor(qualifications, slug);
       const namesList = (scan.names?.[slug] || []).join(", ");
       const title = namesList ? `${name}: ${namesList}` : name;
+      const target = reqMax > reqMin ? `${reqMin}-${reqMax}` : `${reqMin}`;
       let cssClass;
       let label;
-      if (have < required) {
+      if (have < reqMin) {
         cssClass = "label-warning";
-        label = `${name} ${have}/${required} (${required - have} fehlen)`;
-      } else if (have === required) {
+        label = `${name} ${have}/${target} (${reqMin - have} fehlen)`;
+      } else if (have <= reqMax) {
         cssClass = "label-success";
-        label = `${name} ${have}/${required}`;
+        label = `${name} ${have}/${target}`;
       } else {
         cssClass = "label-danger";
-        label = `${name} ${have}/${required} (${have - required} zu viel)`;
+        label = `${name} ${have}/${target} (${have - reqMax} zu viel)`;
       }
       return `<span class="label ${cssClass}" style="margin:1px;" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
     });
@@ -4062,8 +4077,9 @@
       if (!schoolBuildingType) continue;
       const req = requirementRanges[station.pseudoId] || {};
       for (const [slug, range] of Object.entries(req)) {
-        const have = scan.counts[slug] || 0;
-        const inTraining = scan.inTrainingCounts?.[slug] || 0;
+        const realSlug = realSlugFor(slug);
+        const have = scan.counts[realSlug] || 0;
+        const inTraining = scan.inTrainingCounts?.[slug] || scan.inTrainingCounts?.[realSlug] || 0;
         const minDeficit = Math.max(0, range.min - have - inTraining);
         const maxDeficit = Math.max(0, range.max - have - inTraining);
         const key = `${station.category}::${slug}`;
@@ -4090,7 +4106,7 @@
           have: have,
           rangeMin: range.min,
           rangeMax: range.max,
-          inTrainingNames: scan.inTrainingNames?.[slug] || []
+          inTrainingNames: scan.inTrainingNames?.[slug] || scan.inTrainingNames?.[realSlug] || []
         });
         need.totalMinDeficit += minDeficit;
         need.totalMaxDeficit += maxDeficit;
@@ -4204,14 +4220,14 @@
       finishAt: new Date(run.finish_time).getTime()
     })).sort((a, b) => a.finishAt - b.finishAt);
   }
-  const SCHOOLING_CHECKBOX_ATTRIBUTE_ALIASES = {
+  const VEHICLE_CATALOG_SLUG_ALIASES = {
     dekon_p: "decontamination_personnel"
   };
-  function schoolingCheckboxAttributeFor(slug) {
-    return SCHOOLING_CHECKBOX_ATTRIBUTE_ALIASES[slug] || slug;
+  function realSlugFor(slug) {
+    return VEHICLE_CATALOG_SLUG_ALIASES[slug] || slug;
   }
   const KNOWN_QUALIFICATION_NAMES = {
-    dekon_p: "Dekon-P"
+    decontamination_personnel: "Dekon-P"
   };
   function qualificationNameFor(qualifications, slug) {
     return qualifications[slug] || KNOWN_QUALIFICATION_NAMES[slug] || slug;
@@ -4223,7 +4239,7 @@
     if (!selectRes.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${selectRes.status}).`);
     const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [ e.id, e ]));
     const doc = (new DOMParser).parseFromString(await selectRes.text(), "text/html");
-    const attribute = schoolingCheckboxAttributeFor(slug);
+    const attribute = realSlugFor(slug);
     return [ ...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`) ].filter(cb => cb.getAttribute(attribute) === "false").map(cb => ({
       id: cb.value,
       name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value
@@ -4556,9 +4572,9 @@
       }
       return CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
         const school = schoolByCategory[category];
-        const categoryNeeds = byCategory.get(category).sort((a, b) => qualificationNameFor(qualifications, a.slug).localeCompare(qualificationNameFor(qualifications, b.slug), "de"));
+        const categoryNeeds = byCategory.get(category).sort((a, b) => qualificationNameFor(qualifications, realSlugFor(a.slug)).localeCompare(qualificationNameFor(qualifications, realSlugFor(b.slug)), "de"));
         const rows = categoryNeeds.map(need => {
-          const qualificationName = qualificationNameFor(qualifications, need.slug);
+          const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
           const stationTitleFor = deficitField => need.stations.filter(s => s[deficitField] > 0).map(s => `${s.name} (${s[deficitField]} fehlen)`).join(", ");
           const inTrainingTitle = need.stations.filter(s => s.inTraining > 0).map(s => `${s.name}: ${s.inTrainingNames.join(", ") || s.inTraining}`).join(" · ");
           const stationsWithDeficit = need.stations.filter(s => s.minDeficit > 0 || s.maxDeficit > 0);
@@ -4615,7 +4631,7 @@
           const mode = btn.dataset.mode === "max" ? "max" : "min";
           const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"]`);
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
-          const qualificationName = qualificationNameFor(qualifications, need.slug);
+          const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
           siblingButtons.forEach(b => b.disabled = true);
           statusEl.textContent = "Lade Vorschau ...";
           try {
@@ -5586,18 +5602,6 @@
       name: v.caption
     })).sort((a, b) => a.name.localeCompare(b.name, "de"));
   }
-  function computeBlueprintPersonnelRequirements(blueprint) {
-    const totals = new Map;
-    for (const {vehicleTypeId: vehicleTypeId, quantity: quantity} of blueprint.vehicles) {
-      if (!(quantity > 0)) continue;
-      const requirement = getBlueprintTrainingRequirement(Number(vehicleTypeId));
-      if (!requirement) continue;
-      for (const req of requirement.requirements) {
-        totals.set(req.slug, (totals.get(req.slug) || 0) + req.min * quantity);
-      }
-    }
-    return totals;
-  }
   function computeBlueprintPersonnelRequirementRanges(blueprint) {
     const totals = new Map;
     for (const {vehicleTypeId: vehicleTypeId, quantity: quantity} of blueprint.vehicles) {
@@ -5886,7 +5890,7 @@
       const ranges = computeBlueprintPersonnelRequirementRanges({
         vehicles: vehicles
       });
-      const rows = [ ...ranges.entries() ].sort((a, b) => qualificationNameFor(qualifications, a[0]).localeCompare(qualificationNameFor(qualifications, b[0]), "de")).map(([slug, {min: min, max: max}]) => `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualificationNameFor(qualifications, slug))}</td></tr>`).join("");
+      const rows = [ ...ranges.entries() ].sort((a, b) => qualificationNameFor(qualifications, realSlugFor(a[0])).localeCompare(qualificationNameFor(qualifications, realSlugFor(b[0])), "de")).map(([slug, {min: min, max: max}]) => `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualificationNameFor(qualifications, realSlugFor(slug)))}</td></tr>`).join("");
       const summary = computeBlueprintPersonnelSummary({
         vehicles: vehicles
       });
@@ -6107,7 +6111,7 @@
       if (!byType.has(typeId)) byType.set(typeId, []);
       byType.get(typeId).push(String(v.id));
     }
-    const requiredPersonnel = computeBlueprintPersonnelRequirements(blueprint);
+    const requiredPersonnel = computeBlueprintPersonnelRequirementRanges(blueprint);
     const requirementsForBadges = {
       [blueprint.pseudoId]: Object.fromEntries(requiredPersonnel)
     };
@@ -6160,9 +6164,9 @@
       const scan = scanData[station.id];
       let personnelDeficit = scan ? 0 : -1;
       if (scan) {
-        for (const [slug, required] of requiredPersonnel) {
-          const have = scan.counts[slug] || 0;
-          if (have < required) personnelDeficit += required - have;
+        for (const [slug, range] of requiredPersonnel) {
+          const have = scan.counts[realSlugFor(slug)] || 0;
+          if (have < range.min) personnelDeficit += range.min - have;
         }
       }
       const personnelCell = `${renderPersonnelOverview(station, scanData)}<div style="margin-top:4px;">${renderPersonnelBadges(station, requirementsForBadges, qualifications, scanData)}</div>`;
