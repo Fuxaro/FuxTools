@@ -2,16 +2,26 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.8)
+## Stable (v1.0.9)
 
-- Bugfix (kritisch): Dekon-P wurde in der Schulungen-Übersicht und den Personal-Badges immer als
-  "0 vorhanden" angezeigt, egal wie viele Personen die Ausbildung im Account tatsächlich hatten.
-  Ursache: eine falsche Annahme, dass das Spiel für Dekon-P intern zwei verschiedene Namen benutzt
-  ("dekon_p" im Fahrzeug-Katalog, aber "decontamination_personnel" überall sonst) - per frischer
-  Live-Diagnose an einer echten Fahrzeug-Zuweisungsseite widerlegt: data-filterable-by benutzt
-  ebenfalls "dekon_p", identisch zum Fahrzeug-Katalog. Die Übersetzung wurde deshalb überall
-  entfernt, außer an der einen Stelle, wo sie nachweislich weiterhin nötig ist (Checkbox-Attribute
-  auf der Lehrgangs-Personal-Auswahlseite).
+- Bugfix: Wachenausbau zeigte bei jeder voll ausgebauten Polizeiwache "Stufe 14 / 13" an - der
+  Ausbaustufen-Katalog endete dort fälschlich schon bei Stufe 13 (wahre letzte Stufe ist 14),
+  analog zum selben, bereits früher behobenen Fund bei der Feuerwache (Stufe 19 statt 18). Wer
+  genau auf Stufe 13 steht, bekam dadurch fälschlich keinen "Nächste Stufe"-Button mehr angezeigt.
+
+- Bugfix (Regression aus v1.0.8): Dekon-P tauchte im Wachen-Check doppelt mit unterschiedlichen
+  Zahlen auf ("0/1 fehlen" und "6/0 zu viel" gleichzeitig). Die in v1.0.8 komplett entfernte
+  Slug-Übersetzung ("dekon_p" -> "decontamination_personnel") war nur für die Fahrzeug-
+  Zuweisungsseite falsch - die Personal-Seite einer Wache (die der Scan tatsächlich ausliest)
+  benutzt weiterhin den anderen Namen. Übersetzung dort wiederhergestellt, an der
+  Fahrzeug-Zuweisungsseite bleibt sie bewusst weg.
+
+- Bugfix: Personal-Badges im Wachen-Check zeigten bei Fahrzeugen, deren GESAMTE Besatzung eine
+  Ausbildung braucht (z.B. ELW 2), fälschlich "zu viel" an, sobald mehr als die Mindestbesatzung
+  geschult war - obwohl die Anzahl exakt der maximalen Besatzung entsprach. Die Badges verglichen
+  gegen einen einzelnen (Minimum-)Zielwert statt gegen das schon vorhandene Min/Max-Fenster. Jetzt
+  gilt jede Anzahl zwischen Minimum und voller Besatzung als passend, nur echt überzähliges
+  Personal (mehr als die volle Besatzung) als "zu viel".
 
 - Bugfix: "Max ausbauen" brach bei der zweiten Stufe direkt hintereinander mit einem 409-Fehler
   (Conflict) ab - vermutlich ein Cooldown des Spiels zwischen zwei Ausbau-Aktionen. Eine kurze
