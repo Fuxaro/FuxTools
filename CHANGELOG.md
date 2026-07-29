@@ -2,7 +2,16 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.7)
+## Stable (v1.0.8)
+
+- Bugfix (kritisch): Dekon-P wurde in der Schulungen-Übersicht und den Personal-Badges immer als
+  "0 vorhanden" angezeigt, egal wie viele Personen die Ausbildung im Account tatsächlich hatten.
+  Ursache: eine falsche Annahme, dass das Spiel für Dekon-P intern zwei verschiedene Namen benutzt
+  ("dekon_p" im Fahrzeug-Katalog, aber "decontamination_personnel" überall sonst) - per frischer
+  Live-Diagnose an einer echten Fahrzeug-Zuweisungsseite widerlegt: data-filterable-by benutzt
+  ebenfalls "dekon_p", identisch zum Fahrzeug-Katalog. Die Übersetzung wurde deshalb überall
+  entfernt, außer an der einen Stelle, wo sie nachweislich weiterhin nötig ist (Checkbox-Attribute
+  auf der Lehrgangs-Personal-Auswahlseite).
 
 - Bugfix: "Max ausbauen" brach bei der zweiten Stufe direkt hintereinander mit einem 409-Fehler
   (Conflict) ab - vermutlich ein Cooldown des Spiels zwischen zwei Ausbau-Aktionen. Eine kurze
