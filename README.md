@@ -94,8 +94,8 @@ derselben Lizenz weitergegeben werden.
 Der Fahrzeug-Katalog (Namen, Ausbildungsanforderungen) stammt von
 [lss-manager.de](https://www.lss-manager.de) – danke an das Team dafür!
 
-FuxTools ist komplett eigener Code (kein übernommener Quelltext). Bei ein paar Konzepten haben
-folgende Community-Skripte für leitstellenspiel.de als Inspiration gedient:
+Bei ein paar Konzepten haben folgende Community-Skripte für leitstellenspiel.de als Inspiration
+gedient:
 
 | Skript | Autor | Lizenz | Übernommenes Konzept |
 |---|---|---|---|
@@ -103,6 +103,5 @@ folgende Community-Skripte für leitstellenspiel.de als Inspiration gedient:
 | Personalzuweiser | BOS-Ernie | BSD-3-Clause | Ablauf/Spaltenaufbau der Zuweisungsseite bei der Fahrzeug-Besatzung |
 | FMS6 | LaLeLu4153 | nur `@copyright` angegeben | FMS-Status-Ablauf bei der Fahrzeug-Besatzung |
 | Wachenbaupläne | BOS-Ernie | BSD-3-Clause | Bauplan-Konzept + Verfügbar/Zugewiesen-Auswahl für Ausbauten beim Wachen-Bauplaner |
-
-In allen Fällen wurde nur das Konzept/Verhalten übernommen, nicht der Quelltext – eigene, komplett
-unabhängige Umsetzung mit anderem Code, anderer Struktur.
+| [LSS] Erweiterungs-Manager | Caddy21 | keine Lizenz-/Copyright-Angabe im Script | Anzeige fehlender Ausbauten/Ausbaustufen/Lagerräume je Wache samt Direktkauf (Wachenausbau) |
+| [LSS] Fahrzeug-Manager | Caddy21 | keine Lizenz-/Copyright-Angabe im Script | Anzeige fehlender Fahrzeuge je Wache samt Direktkauf (Wachen-Check) |
