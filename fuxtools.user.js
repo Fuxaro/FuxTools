@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.7
+// @version     1.0.8
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.7";
+  const SCRIPT_VERSION = "1.0.8";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -3993,14 +3993,9 @@
     const scan = scanData[station.id];
     if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
     const req = requirements[station.pseudoId] || {};
-    const reqByRealSlug = {};
-    for (const [slug, value] of Object.entries(req)) {
-      const realSlug = realSlugFor(slug);
-      reqByRealSlug[realSlug] = Math.max(reqByRealSlug[realSlug] || 0, value);
-    }
-    const slugs = new Set([ ...Object.keys(reqByRealSlug).filter(slug => reqByRealSlug[slug] > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
+    const slugs = new Set([ ...Object.keys(req).filter(slug => req[slug] > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
     const badges = [ ...slugs ].sort((a, b) => qualificationNameFor(qualifications, a).localeCompare(qualificationNameFor(qualifications, b), "de")).map(slug => {
-      const required = reqByRealSlug[slug] || 0;
+      const required = req[slug] || 0;
       const have = scan.counts[slug] || 0;
       const name = qualificationNameFor(qualifications, slug);
       const namesList = (scan.names?.[slug] || []).join(", ");
@@ -4067,9 +4062,8 @@
       if (!schoolBuildingType) continue;
       const req = requirementRanges[station.pseudoId] || {};
       for (const [slug, range] of Object.entries(req)) {
-        const realSlug = realSlugFor(slug);
-        const have = scan.counts[realSlug] || 0;
-        const inTraining = scan.inTrainingCounts?.[slug] || scan.inTrainingCounts?.[realSlug] || 0;
+        const have = scan.counts[slug] || 0;
+        const inTraining = scan.inTrainingCounts?.[slug] || 0;
         const minDeficit = Math.max(0, range.min - have - inTraining);
         const maxDeficit = Math.max(0, range.max - have - inTraining);
         const key = `${station.category}::${slug}`;
@@ -4096,7 +4090,7 @@
           have: have,
           rangeMin: range.min,
           rangeMax: range.max,
-          inTrainingNames: scan.inTrainingNames?.[slug] || scan.inTrainingNames?.[realSlug] || []
+          inTrainingNames: scan.inTrainingNames?.[slug] || []
         });
         need.totalMinDeficit += minDeficit;
         need.totalMaxDeficit += maxDeficit;
@@ -4177,14 +4171,13 @@
   }
   async function recordPendingSchoolingAssignment(plan, need) {
     const scanData = await getPersonnelScanData();
-    const realSlug = realSlugFor(need.slug);
     for (const {stationId: stationId, people: people} of plan.selectedByStation) {
       const scan = scanData[stationId];
       if (!scan) continue;
       scan.inTrainingCounts = scan.inTrainingCounts || {};
       scan.inTrainingNames = scan.inTrainingNames || {};
-      scan.inTrainingCounts[realSlug] = (scan.inTrainingCounts[realSlug] || 0) + people.length;
-      const names = scan.inTrainingNames[realSlug] || (scan.inTrainingNames[realSlug] = []);
+      scan.inTrainingCounts[need.slug] = (scan.inTrainingCounts[need.slug] || 0) + people.length;
+      const names = scan.inTrainingNames[need.slug] || (scan.inTrainingNames[need.slug] = []);
       people.forEach(p => {
         if (p.name) names.push(p.name);
       });
@@ -4211,14 +4204,14 @@
       finishAt: new Date(run.finish_time).getTime()
     })).sort((a, b) => a.finishAt - b.finishAt);
   }
-  const VEHICLE_CATALOG_SLUG_ALIASES = {
+  const SCHOOLING_CHECKBOX_ATTRIBUTE_ALIASES = {
     dekon_p: "decontamination_personnel"
   };
-  function realSlugFor(slug) {
-    return VEHICLE_CATALOG_SLUG_ALIASES[slug] || slug;
+  function schoolingCheckboxAttributeFor(slug) {
+    return SCHOOLING_CHECKBOX_ATTRIBUTE_ALIASES[slug] || slug;
   }
   const KNOWN_QUALIFICATION_NAMES = {
-    decontamination_personnel: "Dekon-P"
+    dekon_p: "Dekon-P"
   };
   function qualificationNameFor(qualifications, slug) {
     return qualifications[slug] || KNOWN_QUALIFICATION_NAMES[slug] || slug;
@@ -4230,7 +4223,7 @@
     if (!selectRes.ok) throw new Error(`Personal von Wache ${stationId} konnte nicht geladen werden (${selectRes.status}).`);
     const statusById = new Map(parsePersonalPageHtml(personalHtml).map(e => [ e.id, e ]));
     const doc = (new DOMParser).parseFromString(await selectRes.text(), "text/html");
-    const attribute = realSlugFor(slug);
+    const attribute = schoolingCheckboxAttributeFor(slug);
     return [ ...doc.querySelectorAll(`#personal_table_${stationId} input.schooling_checkbox`) ].filter(cb => cb.getAttribute(attribute) === "false").map(cb => ({
       id: cb.value,
       name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value
@@ -4563,9 +4556,9 @@
       }
       return CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
         const school = schoolByCategory[category];
-        const categoryNeeds = byCategory.get(category).sort((a, b) => qualificationNameFor(qualifications, realSlugFor(a.slug)).localeCompare(qualificationNameFor(qualifications, realSlugFor(b.slug)), "de"));
+        const categoryNeeds = byCategory.get(category).sort((a, b) => qualificationNameFor(qualifications, a.slug).localeCompare(qualificationNameFor(qualifications, b.slug), "de"));
         const rows = categoryNeeds.map(need => {
-          const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
+          const qualificationName = qualificationNameFor(qualifications, need.slug);
           const stationTitleFor = deficitField => need.stations.filter(s => s[deficitField] > 0).map(s => `${s.name} (${s[deficitField]} fehlen)`).join(", ");
           const inTrainingTitle = need.stations.filter(s => s.inTraining > 0).map(s => `${s.name}: ${s.inTrainingNames.join(", ") || s.inTraining}`).join(" · ");
           const stationsWithDeficit = need.stations.filter(s => s.minDeficit > 0 || s.maxDeficit > 0);
@@ -4622,7 +4615,7 @@
           const mode = btn.dataset.mode === "max" ? "max" : "min";
           const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"]`);
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
-          const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
+          const qualificationName = qualificationNameFor(qualifications, need.slug);
           siblingButtons.forEach(b => b.disabled = true);
           statusEl.textContent = "Lade Vorschau ...";
           try {
@@ -5893,7 +5886,7 @@
       const ranges = computeBlueprintPersonnelRequirementRanges({
         vehicles: vehicles
       });
-      const rows = [ ...ranges.entries() ].sort((a, b) => qualificationNameFor(qualifications, realSlugFor(a[0])).localeCompare(qualificationNameFor(qualifications, realSlugFor(b[0])), "de")).map(([slug, {min: min, max: max}]) => `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualificationNameFor(qualifications, realSlugFor(slug)))}</td></tr>`).join("");
+      const rows = [ ...ranges.entries() ].sort((a, b) => qualificationNameFor(qualifications, a[0]).localeCompare(qualificationNameFor(qualifications, b[0]), "de")).map(([slug, {min: min, max: max}]) => `<tr><td>${min}</td><td>${max}</td><td>${escapeHtml(qualificationNameFor(qualifications, slug))}</td></tr>`).join("");
       const summary = computeBlueprintPersonnelSummary({
         vehicles: vehicles
       });
@@ -6168,7 +6161,7 @@
       let personnelDeficit = scan ? 0 : -1;
       if (scan) {
         for (const [slug, required] of requiredPersonnel) {
-          const have = scan.counts[realSlugFor(slug)] || 0;
+          const have = scan.counts[slug] || 0;
           if (have < required) personnelDeficit += required - have;
         }
       }
