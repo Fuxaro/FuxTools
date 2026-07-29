@@ -2,7 +2,12 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.3)
+## Stable (v1.0.4)
+
+- Diagnose: Schulungen-Übersicht zeigt jetzt zusätzlich "X vorhanden / Ziel Y–Z" je Ausbildung
+  (Tooltip mit Aufschlüsselung pro Wache) - hilft nachzuvollziehen, warum ein Mangel angezeigt
+  wird, z.B. wenn der aktive Bauplan mehr Fahrzeuge eines Typs vorsieht, als aktuell an der Wache
+  stehen.
 
 - Bugfix: "SW Kats" landete im Bauplan-Editor fälschlich unter "Andere Fahrzeuge" statt bei den
   übrigen Schlauchwagen, ebenso "ELW Drohne"/"ELW2 Drohne"/"MTF Drohne" statt bei "Drohnen" und
