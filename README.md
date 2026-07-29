@@ -1,6 +1,6 @@
-&#60;p align="center"&#62;
-  &#60;img src="./logo.png" alt="FuxTools Logo" width="220"&#62;
-&#60;/p&#62;
+<p align="center">
+  <img src="./logo.png" alt="FuxTools Logo" width="220">
+</p>
 
 # FuxTools
 
@@ -52,8 +52,7 @@ Lehrgänge direkt starten.
 - **Verlauf**: alle über FuxTools durchgeführten Aktionen mit Datum, Kosten und Status, sortierbar.
 - Lang laufende Aktionen laufen im Hintergrund weiter, auch bei geschlossenem Fenster – eigenes
   Task-Center zeigt Fortschritt und laufende Lehrgänge.
-- Einstellungen: Update-Check, Kanal wechseln (Stable/Beta), Fehlerprotokoll, Sichern/
-  Wiederherstellen, Speicher löschen.
+- Einstellungen: Update-Check, Fehlerprotokoll, Sichern/Wiederherstellen, Speicher löschen.
 
 ## Installation
 
@@ -66,15 +65,6 @@ Das Script prüft automatisch (über `@updateURL`) auf neue Versionen aus diesem
 Tampermonkey zeigt sie unter *Dashboard → Utilities → Nach Updates suchen* an, oder automatisch
 im Hintergrund. Im Script selbst gibt es unter **Einstellungen** ebenfalls einen manuellen
 "Nach Updates suchen"-Button samt Anzeige der aktuellen Version.
-
-## Beta-Kanal
-
-Neuerungen landen zuerst auf dem `beta`-Branch und erst danach auf `main` (stabil). Unter
-**Einstellungen** im Script zeigt ein Button "Zu Beta wechseln" den aktuellen Kanal an und lässt
-dich jederzeit umschalten: Klick öffnet den Code des jeweils anderen Kanals in einem neuen Tab,
-Tampermonkey erkennt es (gleicher Script-Name) als Update und fragt einmal zur Bestätigung. Ab
-dann läuft der neue Kanal inklusive Auto-Update, bis du im selben Menü wieder zurückwechselst –
-keine separate Installation nötig.
 
 ## Datenschutz
 

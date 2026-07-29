@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.1.0
+// @version     1.2.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -14,6 +14,7 @@
 // @grant       GM.setValue
 // @grant       GM.getValue
 // @grant       GM.deleteValue
+// @grant       GM_info
 // @grant       unsafeWindow
 // ==/UserScript==
 
@@ -36,21 +37,12 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.1.0";
+  const SCRIPT_VERSION = GM_info.script.version;
   const CHANNEL = "stable";
-  const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
-  const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
-  const UPDATE_CHECK_URL = CHANNEL === "beta" ? BETA_URL : STABLE_URL;
+  const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
-  const VEHICLE_TYPES_FALLBACK_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
-  const VEHICLE_TYPES_FALLBACK_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/data/vehicle-types-fallback.json";
-  const VEHICLE_TYPES_FALLBACK_URL = CHANNEL === "beta" ? VEHICLE_TYPES_FALLBACK_BETA_URL : VEHICLE_TYPES_FALLBACK_STABLE_URL;
-  const CHANGELOG_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/CHANGELOG.md";
-  const CHANGELOG_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/CHANGELOG.md";
-  const CHANGELOG_URL = CHANNEL === "beta" ? CHANGELOG_BETA_URL : CHANGELOG_STABLE_URL;
-  const HOW_IT_WORKS_STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/HOW_IT_WORKS.md";
-  const HOW_IT_WORKS_BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/HOW_IT_WORKS.md";
-  const HOW_IT_WORKS_URL = CHANNEL === "beta" ? HOW_IT_WORKS_BETA_URL : HOW_IT_WORKS_STABLE_URL;
+  const VEHICLE_TYPES_FALLBACK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
+  const HOW_IT_WORKS_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/HOW_IT_WORKS.md";
   let modalFooterEl = null;
   let availableUpdateVersion = null;
   let lastUpdateCheckAt = 0;
@@ -58,6 +50,7 @@
   let pendingReloadAfterUpdate = false;
   let renameCancelled = false;
   let levelBuildCancelled = false;
+  let allianceTrainingCancelled = false;
   let backgroundTaskBadgeEl = null;
   let taskCenterEntryEl = null;
   const backgroundTaskQueue = [];
@@ -88,22 +81,10 @@
     if (!activeBackgroundTask) return;
     activeBackgroundTask.percent = percent;
     activeBackgroundTask.progressText = text;
-    const bar = document.getElementById("vn-exec-progress-bar");
-    const txt = document.getElementById("vn-exec-progress-text");
-    if (bar) bar.style.width = `${percent}%`;
-    if (txt) txt.textContent = text;
     const tcBar = document.getElementById("vn-tc-rename-bar");
     const tcTxt = document.getElementById("vn-tc-rename-text");
     if (tcBar) tcBar.style.width = `${percent}%`;
     if (tcTxt) tcTxt.textContent = text;
-  }
-  function renderBackgroundTaskProgressScreen() {
-    if (!activeBackgroundTask) return;
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle(activeBackgroundTask.title);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">Läuft im Hintergrund weiter, auch wenn du dieses Fenster schließt.</p>\n      <div class="progress" style="position:relative; margin-bottom: 12px; height: 24px;">\n        <div id="vn-exec-progress-bar" class="progress-bar" role="progressbar" style="width:${activeBackgroundTask.percent || 0}%;"></div>\n        <div id="vn-exec-progress-text" style="position:absolute; top:0; left:0; right:0; height:24px;\n             line-height:24px; font-size:12px; text-align:center; color:#000; white-space:nowrap;\n             overflow:hidden; text-overflow:ellipsis; padding:0 6px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>\n      </div>\n      <button id="vn-btn-cancel-run" type="button" class="btn btn-danger">\n        <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n      </button>\n    `;
-    document.getElementById("vn-btn-cancel-run").addEventListener("click", () => activeBackgroundTask?.cancel());
   }
   function runOrQueueBackgroundTask(title, start) {
     if (isBackgroundTaskSlotBusy()) {
@@ -111,6 +92,7 @@
         title: title,
         start: start
       });
+      renderBackgroundTaskLaunchedScreen(title, true);
       return "queued";
     }
     start(false);
@@ -121,7 +103,7 @@
     const next = backgroundTaskQueue.shift();
     next.start(true);
   }
-  function beginBackgroundTask(title, cancel) {
+  function beginBackgroundTask(title, cancel, viaQueue) {
     activeBackgroundTask = {
       title: title,
       percent: 0,
@@ -131,10 +113,11 @@
     finishedBackgroundTask = null;
     updateBackgroundTaskBadge();
     refreshTaskCenterIfVisible();
+    if (!viaQueue) renderBackgroundTaskLaunchedScreen(title);
   }
-  function finishBackgroundTask(title, renderResult, shownLive) {
+  function finishBackgroundTask(title, renderResult) {
     activeBackgroundTask = null;
-    finishedBackgroundTask = shownLive ? null : {
+    finishedBackgroundTask = {
       title: title,
       renderResult: renderResult
     };
@@ -142,12 +125,14 @@
     tryStartNextQueuedBackgroundTask();
     refreshTaskCenterIfVisible();
   }
-  function renderBackgroundTaskQueuedScreen(title, goBack) {
+  function renderBackgroundTaskLaunchedScreen(title, isQueued = false) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(title);
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-time" aria-hidden="true"></span>\n        <b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Fahrzeug-Besatzung")}</b> läuft noch -\n        <b>${escapeHtml(title)}</b> startet automatisch danach (Warteschlange, um nicht zu viele Anfragen\n        gleichzeitig zu stellen).\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    const message = isQueued ? `<b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Ein anderer Task")}</b> läuft noch - <b>${escapeHtml(title)}</b>\n         startet automatisch danach (Warteschlange, um nicht zu viele Anfragen gleichzeitig zu stellen).` : `<b>${escapeHtml(title)}</b> wurde gestartet und läuft im Hintergrund weiter, auch wenn du dieses\n         Fenster schließt oder woanders hin wechselst.`;
+    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-main-menu" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-home" aria-hidden="true"></span> Zurück zum Hauptmenü\n        </button>\n        <button id="vn-btn-launched-task-center" type="button" class="btn btn-primary">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> Task-Center öffnen\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-launched-main-menu").addEventListener("click", renderMainMenu);
+    document.getElementById("vn-btn-launched-task-center").addEventListener("click", renderTaskCenterScreen);
   }
   function renderTaskCenterScreen() {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -1834,14 +1819,27 @@
   async function saveNamesStore() {
     await storeData(namesStore, "names");
   }
+  const FETCH_JSON_DEDUP_MS = 3e3;
+  const fetchJSONCache = new Map;
   async function fetchJSON(path) {
-    const res = await fetchWithTimeout(path, {
-      credentials: "same-origin"
+    const now = Date.now();
+    const cached = fetchJSONCache.get(path);
+    if (cached && cached.expiresAt > now) return cached.promise;
+    const promise = (async () => {
+      const res = await fetchWithTimeout(path, {
+        credentials: "same-origin"
+      });
+      if (!res.ok) throw new Error(`Fehler beim Laden von ${path}: ${res.status}`);
+      const data = await res.json();
+      const result = data.result || data;
+      return Array.isArray(result) ? result : Object.values(result);
+    })();
+    fetchJSONCache.set(path, {
+      promise: promise,
+      expiresAt: now + FETCH_JSON_DEDUP_MS
     });
-    if (!res.ok) throw new Error(`Fehler beim Laden von ${path}: ${res.status}`);
-    const data = await res.json();
-    const result = data.result || data;
-    return Array.isArray(result) ? result : Object.values(result);
+    promise.catch(() => fetchJSONCache.delete(path));
+    return promise;
   }
   async function fetchAllPagesV2(firstPageUrl) {
     let items = [];
@@ -1996,8 +1994,7 @@
   const RENAME_CONCURRENCY = 5;
   function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
     const title = `${itemNoun} ${verb === "umbenannt" ? "umbenennen" : "zurücksetzen"}`;
-    const queued = runOrQueueBackgroundTask(title, viaQueue => runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue));
-    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+    runOrQueueBackgroundTask(title, viaQueue => runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue));
   }
   async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue) {
     renameCancelled = false;
@@ -2011,8 +2008,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    });
-    if (!viaQueue) renderBackgroundTaskProgressScreen();
+    }, viaQueue);
     let done = 0;
     let finished = 0;
     const failedItems = [];
@@ -2059,9 +2055,7 @@
       itemNoun: itemNoun,
       renameFn: renameFn
     });
-    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
-    if (stillOnOwnProgressScreen) renderResult();
-    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
+    finishBackgroundTask(title, renderResult);
   }
   function renderCompletionScreen({verb: verb, done: done, failed: failed, plan: plan, errors: errors, failedItems: failedItems, goBack: goBack, cancelled: cancelled, itemNoun: itemNoun = "Fahrzeug(e)", renameFn: renameFn = renameVehicle}) {
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2163,11 +2157,47 @@
       });
     };
   }
+  function wireLeitstelleCheckboxGroups({body: body, masterSelector: masterSelector, checkboxSelector: checkboxSelector, rowSelector: rowSelector, countSelector: countSelector}) {
+    function computeMasterState(master, id) {
+      const childCheckboxes = [ ...body.querySelectorAll(checkboxSelector(id)) ];
+      const visible = childCheckboxes.filter(cb => cb.closest(rowSelector)?.style.display !== "none");
+      const checkedCount = visible.filter(cb => cb.checked).length;
+      master.checked = visible.length > 0 && checkedCount === visible.length;
+      master.indeterminate = checkedCount > 0 && checkedCount < visible.length;
+    }
+    function updateSelectedCount(id) {
+      const countEl = body.querySelector(countSelector(id));
+      if (countEl) countEl.textContent = body.querySelectorAll(`${checkboxSelector(id)}:checked`).length;
+    }
+    body.querySelectorAll(masterSelector).forEach(master => {
+      master.addEventListener("click", e => e.stopPropagation());
+      master.closest("label")?.addEventListener("click", e => e.stopPropagation());
+      const id = master.dataset.leitstelleId;
+      const childCheckboxes = [ ...body.querySelectorAll(checkboxSelector(id)) ];
+      master.addEventListener("change", () => {
+        childCheckboxes.forEach(cb => {
+          if (cb.closest(rowSelector)?.style.display !== "none") cb.checked = master.checked;
+        });
+        updateSelectedCount(id);
+      });
+      childCheckboxes.forEach(cb => cb.addEventListener("change", () => {
+        computeMasterState(master, id);
+        updateSelectedCount(id);
+      }));
+      computeMasterState(master, id);
+      updateSelectedCount(id);
+    });
+    return {
+      refreshAllMasters() {
+        body.querySelectorAll(masterSelector).forEach(master => computeMasterState(master, master.dataset.leitstelleId));
+      }
+    };
+  }
   function addCustomStyles() {
     if (document.getElementById("fuxtools-custom-styles")) return;
     const style = document.createElement("style");
     style.id = "fuxtools-custom-styles";
-    style.textContent = `\n      #vehicle-naming-modal-body .vn-menu-item {\n        display: flex;\n        align-items: center;\n        gap: 8px;\n        padding: 8px 14px;\n        background-color: rgba(255, 255, 255, 0.06);\n        color: inherit;\n        border-color: rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-body .vn-menu-item:hover,\n      #vehicle-naming-modal-body .vn-menu-item:focus {\n        background-color: rgba(255, 255, 255, 0.14);\n        color: inherit;\n      }\n      #vehicle-naming-modal-body .vn-menu-item .glyphicon {\n        font-size: 16px;\n        width: 18px;\n        text-align: center;\n      }\n      #vehicle-naming-modal-body .vn-settings-card {\n        padding: 12px 14px;\n        background-color: rgba(255, 255, 255, 0.04);\n        border: 1px solid rgba(255, 255, 255, 0.12);\n        border-radius: 4px;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level {\n        background-color: #7a2020;\n        border-color: #6b1c1c;\n        color: #fff;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level:hover,\n      #vehicle-naming-modal-body .vn-btn-max-level:focus {\n        background-color: #8f2626;\n        border-color: #7a2020;\n        color: #fff;\n      }\n      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme\n         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,\n         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */\n      #vehicle-naming-modal-body .text-danger {\n        color: #ff6b6b;\n      }\n      #vehicle-naming-modal-body .vn-changelog h3,\n      #vehicle-naming-modal-body .vn-how-it-works h3 {\n        margin-top: 0;\n      }\n      #vehicle-naming-modal-body .vn-changelog h4,\n      #vehicle-naming-modal-body .vn-how-it-works h4 {\n        margin: 18px 0 8px;\n      }\n      #vehicle-naming-modal-body .vn-changelog h5,\n      #vehicle-naming-modal-body .vn-how-it-works h5 {\n        margin: 14px 0 6px;\n      }\n      #vehicle-naming-modal-body .vn-changelog ul,\n      #vehicle-naming-modal-body .vn-how-it-works ul {\n        padding-left: 20px;\n      }\n      #vehicle-naming-modal-body .vn-changelog li,\n      #vehicle-naming-modal-body .vn-how-it-works li {\n        margin-bottom: 6px;\n      }\n      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-\n         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter\n         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange\n         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */\n      .vn-sticky-footer {\n        margin-top: 10px;\n        padding: 10px 0 2px;\n        background: var(--vn-modal-bg, #333);\n        border-top: 1px solid rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-actions {\n        flex-shrink: 0;\n        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf\n           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier\n           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit\n           Abstand zum Rand. */\n        padding: 0 15px;\n      }\n      #vehicle-naming-modal-actions:empty {\n        display: none;\n      }\n      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei\n         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-\n         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher\n         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am\n         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe\n         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf\n         JEDEM Screen gleich.\n       */\n      #vehicle-naming-modal-dialog .modal-content {\n        display: flex;\n        flex-direction: column;\n        max-height: 90vh;\n      }\n      #vehicle-naming-modal-dialog .modal-header,\n      #vehicle-naming-modal-dialog .modal-footer {\n        flex-shrink: 0;\n      }\n      #vehicle-naming-modal-body {\n        flex: 1 1 auto;\n        overflow-y: auto;\n        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein\n           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die\n           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height\n           hinaus wachsen lassen). */\n        min-height: 0;\n      }\n      .vn-task-spin {\n        display:inline-block;\n        animation: vn-task-spin 1s linear infinite;\n      }\n      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-\n         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -\n         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */\n      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei\n         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge\n         gewinnen kann. */\n      .vn-category-heading {\n        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;\n        border-left:3px solid #337ab7 !important; border-radius:3px !important;\n        padding:6px 10px !important; margin-bottom:2px !important;\n      }\n      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }\n      .vn-category-heading .glyphicon-chevron-right,\n      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }\n      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }\n      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */\n      summary.vn-category-heading { list-style:none; }\n      summary.vn-category-heading::-webkit-details-marker { display:none; }\n      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }\n      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle\n         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche\n         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */\n      .vn-btn-group-box {\n        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;\n        border:1px solid rgba(128,128,128,0.4); border-radius:4px;\n        padding:5px 8px; background:rgba(128,128,128,0.08);\n      }\n      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }\n      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/\n         wartender Aufgabe. */\n      .vn-task-center-item {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:8px 10px; margin-bottom:8px;\n      }\n      /* Bauplan-Editor: grauer Kasten um Fahrzeugname+Anzahl-Feld (siehe vehicleGridHtml) -\n         ohne sichtbare Trennung zwischen den Zeilen/Spalten des Grids war auf einen Blick\n         schwer erkennbar, welches Eingabefeld zu welchem Fahrzeugnamen gehoert. */\n      .vn-vehicle-qty-box {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:5px 8px;\n      }\n    `;
+    style.textContent = `\n      #vehicle-naming-modal-body .vn-menu-item {\n        display: flex;\n        align-items: center;\n        gap: 8px;\n        padding: 8px 14px;\n        background-color: rgba(255, 255, 255, 0.06);\n        color: inherit;\n        border-color: rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-body .vn-menu-item:hover,\n      #vehicle-naming-modal-body .vn-menu-item:focus {\n        background-color: rgba(255, 255, 255, 0.14);\n        color: inherit;\n      }\n      #vehicle-naming-modal-body .vn-menu-item .glyphicon {\n        font-size: 16px;\n        width: 18px;\n        text-align: center;\n      }\n      #vehicle-naming-modal-body .vn-settings-card {\n        padding: 12px 14px;\n        background-color: rgba(255, 255, 255, 0.04);\n        border: 1px solid rgba(255, 255, 255, 0.12);\n        border-radius: 4px;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level {\n        background-color: #7a2020;\n        border-color: #6b1c1c;\n        color: #fff;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level:hover,\n      #vehicle-naming-modal-body .vn-btn-max-level:focus {\n        background-color: #8f2626;\n        border-color: #7a2020;\n        color: #fff;\n      }\n      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme\n         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,\n         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */\n      #vehicle-naming-modal-body .text-danger {\n        color: #ff6b6b;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h3 {\n        margin-top: 0;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h4 {\n        margin: 18px 0 8px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h5 {\n        margin: 14px 0 6px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works ul {\n        padding-left: 20px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works li {\n        margin-bottom: 6px;\n      }\n      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-\n         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter\n         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange\n         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */\n      .vn-sticky-footer {\n        margin-top: 10px;\n        padding: 10px 0 2px;\n        background: var(--vn-modal-bg, #333);\n        border-top: 1px solid rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-actions {\n        flex-shrink: 0;\n        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf\n           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier\n           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit\n           Abstand zum Rand. */\n        padding: 0 15px;\n      }\n      #vehicle-naming-modal-actions:empty {\n        display: none;\n      }\n      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei\n         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-\n         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher\n         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am\n         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe\n         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf\n         JEDEM Screen gleich.\n       */\n      #vehicle-naming-modal-dialog .modal-content {\n        display: flex;\n        flex-direction: column;\n        max-height: 90vh;\n      }\n      #vehicle-naming-modal-dialog .modal-header,\n      #vehicle-naming-modal-dialog .modal-footer {\n        flex-shrink: 0;\n      }\n      #vehicle-naming-modal-body {\n        flex: 1 1 auto;\n        overflow-y: auto;\n        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein\n           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die\n           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height\n           hinaus wachsen lassen). */\n        min-height: 0;\n      }\n      .vn-task-spin {\n        display:inline-block;\n        animation: vn-task-spin 1s linear infinite;\n      }\n      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-\n         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -\n         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */\n      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei\n         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge\n         gewinnen kann. */\n      .vn-category-heading {\n        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;\n        border-left:3px solid #337ab7 !important; border-radius:3px !important;\n        padding:6px 10px !important; margin-bottom:2px !important;\n      }\n      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }\n      .vn-category-heading .glyphicon-chevron-right,\n      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }\n      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }\n      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */\n      summary.vn-category-heading { list-style:none; }\n      summary.vn-category-heading::-webkit-details-marker { display:none; }\n      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }\n      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle\n         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche\n         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */\n      .vn-btn-group-box {\n        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;\n        border:1px solid rgba(128,128,128,0.4); border-radius:4px;\n        padding:5px 8px; background:rgba(128,128,128,0.08);\n      }\n      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }\n      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/\n         wartender Aufgabe. */\n      .vn-task-center-item {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:8px 10px; margin-bottom:8px;\n      }\n      /* Bauplan-Editor: grauer Kasten um Fahrzeugname+Anzahl-Feld (siehe vehicleGridHtml) -\n         ohne sichtbare Trennung zwischen den Zeilen/Spalten des Grids war auf einen Blick\n         schwer erkennbar, welches Eingabefeld zu welchem Fahrzeugnamen gehoert. */\n      .vn-vehicle-qty-box {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:5px 8px;\n      }\n    `;
     document.head.appendChild(style);
   }
   async function initModal() {
@@ -2282,7 +2312,7 @@
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
     const sectionLabelStyle = "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
-    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Schulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
+    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Schulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Verbandsschulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
       currentMode = "rename";
       renderLeitstelleSelection();
@@ -2296,6 +2326,7 @@
     document.getElementById("vn-menu-station-check").addEventListener("click", renderStationCheckScreen);
     document.getElementById("vn-menu-station-apply-check").addEventListener("click", () => renderStationCheckBlueprintSelection());
     document.getElementById("vn-menu-schooling").addEventListener("click", () => renderSchoolingBlueprintSelection());
+    document.getElementById("vn-menu-alliance-schooling").addEventListener("click", () => renderSchoolingBlueprintSelection(renderMainMenu, true));
     document.getElementById("vn-menu-statistics").addEventListener("click", () => renderStationStatisticsScreen());
     document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewLeitstelleSelection());
     document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
@@ -2377,10 +2408,9 @@
     setScreenTitle("Einstellungen");
     const body = document.getElementById("vehicle-naming-modal-body");
     const channelLabel = CHANNEL === "beta" ? "Beta" : "Stable";
-    body.innerHTML = `\n      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">\n        <div class="vn-settings-card">\n          <p style="margin-top:0;">\n            Version <b>${escapeHtml(SCRIPT_VERSION)}</b>\n            <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>\n          </p>\n          <p class="text-muted" style="font-size:12px;">\n            ${CHANNEL === "beta" ? "Du nutzt den Beta-Kanal (eigener Branch, kann instabiler sein)." : "Du nutzt den Stable-Kanal (main-Branch)."}\n          </p>\n          <div class="form-group">\n            <button id="vn-btn-check-update" type="button" class="btn btn-primary">\n              <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen\n            </button>\n            <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen\n            </button>\n            <button id="vn-btn-show-changelog" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Changelog anzeigen\n            </button>\n          </div>\n          <p class="text-muted" style="font-size:11px;">\n            Erzwingt den Installations-Dialog für den aktuellen Kanal (${channelLabel}), auch wenn sich\n            die Versionsnummer nicht geändert hat.\n          </p>\n          <div id="vn-update-status"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachenausbau)</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Legt fest, welche Ausbauten im Wachenausbau je Gebäudetyp orange als "gefordert"\n            markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.\n          </p>\n          <button id="vn-btn-required-extensions" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen\n          </button>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Einstellungen sichern</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Wachen-Bauplaner, geforderte\n            Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder\n            her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.\n          </p>\n          <button id="vn-btn-export-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Herunterladen\n          </button>\n          <button id="vn-btn-import-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-upload" aria-hidden="true"></span> Hochladen\n          </button>\n          <input type="file" id="vn-import-settings-file" accept="application/json" style="display:none;">\n          <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Fehlerprotokoll</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Speichert die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler (mit Zeitstempel\n            und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird\n            nirgendwo automatisch hochgeladen.\n          </p>\n          <button id="vn-btn-show-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Anzeigen\n          </button>\n          <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren\n          </button>\n          <div id="vn-errorlog-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card" style="border-color:#a94442;">\n          <p style="margin-top:0;"><b>Speicher löschen</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten\n            Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.\n          </p>\n          <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">\n            <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen\n          </button>\n        </div>\n      </div>\n\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">\n        <div class="vn-settings-card">\n          <p style="margin-top:0;">\n            Version <b>${escapeHtml(SCRIPT_VERSION)}</b>\n            <span class="label ${CHANNEL === "beta" ? "label-warning" : "label-success"}" style="margin-left:6px;">${channelLabel}</span>\n          </p>\n          <p class="text-muted" style="font-size:12px;">\n            ${CHANNEL === "beta" ? "Interne Testkopie - aktualisiert sich automatisch auf die nächste veröffentlichte Version." : "Du nutzt die veröffentlichte Version."}\n          </p>\n          <div class="form-group">\n            <button id="vn-btn-check-update" type="button" class="btn btn-primary">\n              <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span> Nach Updates suchen\n            </button>\n            <button id="vn-btn-force-reinstall" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span> Neuinstallation erzwingen\n            </button>\n          </div>\n          <p class="text-muted" style="font-size:11px;">\n            Erzwingt den Installations-Dialog, auch wenn sich die Versionsnummer nicht geändert hat.\n          </p>\n          <div id="vn-update-status"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Geforderte Ausbauten (Wachenausbau)</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Legt fest, welche Ausbauten im Wachenausbau je Gebäudetyp orange als "gefordert"\n            markiert werden. Standardmäßig eine feste Empfehlungs-Liste - hier anpassbar.\n          </p>\n          <button id="vn-btn-required-extensions" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Geforderte Ausbauten anpassen\n          </button>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Einstellungen sichern</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Lädt alle FuxTools-Einstellungen (Namens-Bausteine, Wachen-Bauplaner, geforderte\n            Ausbauten, Verlauf) als Datei herunter bzw. stellt sie aus so einer Datei wieder\n            her - praktisch vor einer Neuinstallation oder für einen anderen Rechner.\n          </p>\n          <button id="vn-btn-export-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Herunterladen\n          </button>\n          <button id="vn-btn-import-settings" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-upload" aria-hidden="true"></span> Hochladen\n          </button>\n          <input type="file" id="vn-import-settings-file" accept="application/json" style="display:none;">\n          <div id="vn-settings-transfer-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card">\n          <p style="margin-top:0;"><b>Fehlerprotokoll</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Speichert die letzten ${ERROR_LOG_MAX_ENTRIES} kritischen Fehler (mit Zeitstempel\n            und Version) - hilfreich für Bug-Reports während der Beta. Rein lokal, wird\n            nirgendwo automatisch hochgeladen.\n          </p>\n          <button id="vn-btn-show-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Anzeigen\n          </button>\n          <button id="vn-btn-export-errorlog" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-download" aria-hidden="true"></span> Fehlerprotokoll exportieren\n          </button>\n          <div id="vn-errorlog-status" style="margin-top:10px;"></div>\n        </div>\n\n        <div class="vn-settings-card" style="border-color:#a94442;">\n          <p style="margin-top:0;"><b>Speicher löschen</b></p>\n          <p class="text-muted" style="font-size:12px;">\n            Setzt FuxTools auf den Zustand einer Neuinstallation zurück: alle gespeicherten\n            Fahrzeugtyp-Namen und Namens-Bausteine-Einstellungen werden gelöscht.\n          </p>\n          <button id="vn-btn-clear-storage" type="button" class="btn btn-danger">\n            <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Speicher löschen\n          </button>\n        </div>\n      </div>\n\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-btn-required-extensions").addEventListener("click", () => renderRequiredExtensionsSettingsScreen());
-    document.getElementById("vn-btn-show-changelog").addEventListener("click", () => renderChangelogScreen(renderSettingsScreen));
     document.getElementById("vn-btn-export-settings").addEventListener("click", async () => {
       const statusEl = document.getElementById("vn-settings-transfer-status");
       statusEl.innerHTML = `<em>Einstellungen werden zusammengestellt ...</em>`;
@@ -2474,23 +2504,6 @@
     });
     if (availableUpdateVersion) {
       renderUpdateAvailableStatus(document.getElementById("vn-update-status"), availableUpdateVersion);
-    }
-  }
-  async function renderChangelogScreen(goBack) {
-    setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle("Einstellungen › Changelog");
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `\n      <div class="vn-changelog"><p><em>Changelog wird geladen ...</em></p></div>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    try {
-      const res = await fetchWithTimeout(`${CHANGELOG_URL}?_=${Date.now()}`, {
-        cache: "no-store"
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const markdown = await res.text();
-      body.querySelector(".vn-changelog").innerHTML = renderMarkdownLite(markdown);
-    } catch (e) {
-      body.querySelector(".vn-changelog").innerHTML = `<p class="text-danger">Changelog konnte nicht geladen werden: ${escapeHtml(e.message)}</p>`;
     }
   }
   function renderUpdateAvailableStatus(statusEl, version) {
@@ -3275,33 +3288,36 @@
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
     return csrfToken;
   }
-  const PENDING_VEHICLE_CHANGE_TTL_MS = 90 * 1e3;
+  const PENDING_VEHICLE_MAX_LIFETIME_MS = 10 * 60 * 1e3;
   const pendingVehicleChanges = new Map;
-  function recordPendingVehicleChange(stationId, vehicleTypeId, delta) {
+  function recordPendingVehicleChange(stationId, vehicleTypeId, delta, baselineHave) {
     const key = `${stationId}::${vehicleTypeId}`;
     const existing = pendingVehicleChanges.get(key);
-    const stillFresh = existing && Date.now() - existing.since < PENDING_VEHICLE_CHANGE_TTL_MS;
+    const stillPending = existing && Date.now() - existing.since < PENDING_VEHICLE_MAX_LIFETIME_MS;
     pendingVehicleChanges.set(key, {
-      delta: (stillFresh ? existing.delta : 0) + delta,
-      since: Date.now()
+      delta: (stillPending ? existing.delta : 0) + delta,
+      since: Date.now(),
+      baselineHave: stillPending ? existing.baselineHave : baselineHave
     });
   }
-  function getPendingVehicleDelta(stationId, vehicleTypeId) {
+  function getPendingVehicleDelta(stationId, vehicleTypeId, realHave) {
     const key = `${stationId}::${vehicleTypeId}`;
     const entry = pendingVehicleChanges.get(key);
     if (!entry) return 0;
-    if (Date.now() - entry.since >= PENDING_VEHICLE_CHANGE_TTL_MS) {
+    if (entry.baselineHave != null && realHave !== entry.baselineHave) {
+      pendingVehicleChanges.delete(key);
+      return 0;
+    }
+    if (Date.now() - entry.since >= PENDING_VEHICLE_MAX_LIFETIME_MS) {
       pendingVehicleChanges.delete(key);
       return 0;
     }
     return entry.delta;
   }
-  function hasFreshPendingVehicleChanges() {
-    for (const entry of pendingVehicleChanges.values()) {
-      if (Date.now() - entry.since < PENDING_VEHICLE_CHANGE_TTL_MS) return true;
-    }
-    return false;
+  function hasPendingVehicleChanges() {
+    return pendingVehicleChanges.size > 0;
   }
+  const PENDING_VEHICLE_RECONCILE_INTERVAL_MS = 20 * 1e3;
   let vehicleReconcileTimer = null;
   function scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter) {
     if (vehicleReconcileTimer) clearTimeout(vehicleReconcileTimer);
@@ -3309,9 +3325,10 @@
       vehicleReconcileTimer = null;
       const tbody = document.getElementById("vn-bp-apply-tbody");
       if (tbody?.dataset.blueprintId === blueprintId) {
+        invalidateGameDataCache();
         renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter);
       }
-    }, PENDING_VEHICLE_CHANGE_TTL_MS + 2e3);
+    }, PENDING_VEHICLE_RECONCILE_INTERVAL_MS);
   }
   async function buildExtension(buildingId, extensionId, currency) {
     const csrfToken = getCsrfTokenOrThrow(buildingId);
@@ -3392,8 +3409,7 @@
   }
   function executeBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack) {
     const title = `Wache ausbauen (${stationName})`;
-    const queued = runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue));
-    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+    runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue));
   }
   async function runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue) {
     levelBuildCancelled = false;
@@ -3408,8 +3424,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    });
-    if (!viaQueue) renderBackgroundTaskProgressScreen();
+    }, viaQueue);
     let builtCount = 0;
     let spent = 0;
     let error = null;
@@ -3457,9 +3472,7 @@
       verifyFailed: verifyFailed,
       goBack: goBack
     });
-    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
-    if (stillOnOwnProgressScreen) renderResult();
-    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
+    finishBackgroundTask(title, renderResult);
   }
   function renderBuildLevelsResultScreen({builtCount: builtCount, total: total, reachedLevel: reachedLevel, plannedLevel: plannedLevel, spent: spent, currency: currency, error: error, cancelled: cancelled, verifyFailed: verifyFailed, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3628,32 +3641,156 @@
     const idsListHtml = vehicleIds.map(id => `<li>${escapeHtml(id)}</li>`).join("");
     body.innerHTML = `\n      <p class="text-danger"><b>${vehicleIds.length}x "${escapeHtml(vehicleName)}" wirklich verkaufen?</b></p>\n      <p>\n        ${escapeHtml(stationName)} - diese Fahrzeug-IDs werden unwiderruflich zerstört/verkauft,\n        das kann NICHT rückgängig gemacht werden:\n      </p>\n      <ul style="max-height:140px; overflow-y:auto; font-size:12px;">${idsListHtml}</ul>\n      <div id="vn-sell-status" style="margin-top:10px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-sell-confirm" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> ${vehicleIds.length}x verkaufen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    const statusEl = document.getElementById("vn-sell-status");
-    const confirmBtn = document.getElementById("vn-btn-sell-confirm");
-    confirmBtn.addEventListener("click", async () => {
-      confirmBtn.disabled = true;
-      let ok = 0;
-      let failed = 0;
-      for (const vehicleId of vehicleIds) {
-        statusEl.innerHTML = `<em>Verkaufe ${ok + failed + 1}/${vehicleIds.length} (Fahrzeug-ID ${escapeHtml(vehicleId)}) ...</em>`;
-        try {
-          await sellVehicle(vehicleId);
-          await logHistoryEntry({
-            type: "vehicle_sell",
-            label: `${vehicleName} (${vehicleId})`,
-            station: stationName
-          });
-          onSold?.(vehicleId);
-          ok++;
-        } catch (e) {
-          failed++;
-          logErrorToStorage(`Verkaufen fehlgeschlagen: ${vehicleName} (Fahrzeug-ID ${vehicleId})`, e.message).catch(() => {});
-        }
-        await new Promise(r => setTimeout(r, 150));
-      }
-      statusEl.innerHTML = failed ? `<span class="text-danger">${ok} verkauft, ${failed} fehlgeschlagen - Details im Fehlerprotokoll (Einstellungen).</span>` : `<span class="text-success">${ok} verkauft. Lade neu ...</span>`;
-      setTimeout(goBack, failed ? 1500 : 700);
+    document.getElementById("vn-btn-sell-confirm").addEventListener("click", () => {
+      document.getElementById("vn-btn-sell-confirm").disabled = true;
+      executeVehicleBulkSell({
+        vehicleIds: vehicleIds,
+        vehicleName: vehicleName,
+        stationName: stationName,
+        goBack: goBack,
+        onSold: onSold
+      });
     });
+  }
+  function executeVehicleBulkSell({vehicleIds: vehicleIds, vehicleName: vehicleName, stationName: stationName, goBack: goBack, onSold: onSold}) {
+    const title = `${vehicleIds.length}x ${vehicleName} verkaufen`;
+    runOrQueueBackgroundTask(title, viaQueue => runVehicleBulkSell({
+      vehicleIds: vehicleIds,
+      vehicleName: vehicleName,
+      stationName: stationName,
+      goBack: goBack,
+      onSold: onSold
+    }, title, viaQueue));
+  }
+  async function runVehicleBulkSell({vehicleIds: vehicleIds, vehicleName: vehicleName, stationName: stationName, goBack: goBack, onSold: onSold}, title, viaQueue) {
+    let cancelled = false;
+    const historyId = await startHistoryEntry({
+      type: "vehicle_sell",
+      label: `0/${vehicleIds.length} ${vehicleName} verkauft ...`,
+      station: stationName
+    });
+    beginBackgroundTask(title, () => {
+      cancelled = true;
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
+    }, viaQueue);
+    let ok = 0;
+    let failed = 0;
+    for (const vehicleId of vehicleIds) {
+      if (cancelled) break;
+      updateBackgroundTaskProgress(Math.round((ok + failed) / vehicleIds.length * 100), `Verkaufe ${ok + failed + 1}/${vehicleIds.length} (Fahrzeug-ID ${vehicleId}) ...`);
+      try {
+        await sellVehicle(vehicleId);
+        onSold?.(vehicleId);
+        ok++;
+      } catch (e) {
+        failed++;
+        logErrorToStorage(`Verkaufen fehlgeschlagen: ${vehicleName} (Fahrzeug-ID ${vehicleId})`, e.message).catch(() => {});
+      }
+      updateBackgroundTaskProgress(Math.round((ok + failed) / vehicleIds.length * 100), `${ok + failed}/${vehicleIds.length} verarbeitet ...`);
+    }
+    const summary = cancelled ? `Abgebrochen - ${ok} verkauft, ${vehicleIds.length - ok - failed} übersprungen${failed ? `, ${failed} fehlgeschlagen` : ""}.` : failed ? `${ok} verkauft, ${failed} fehlgeschlagen - Details im Fehlerprotokoll (Einstellungen).` : `${ok} verkauft.`;
+    await updateHistoryEntry(historyId, {
+      label: `${ok}x ${vehicleName}${failed ? ` (${failed} fehlgeschlagen)` : ""}`,
+      status: cancelled ? "cancelled" : failed ? "error" : "done"
+    });
+    const renderResult = () => renderBulkActionResultScreen({
+      summary: summary,
+      failed: failed > 0,
+      goBack: goBack
+    });
+    finishBackgroundTask(title, renderResult);
+  }
+  function renderBulkActionResultScreen({summary: summary, failed: failed, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `\n      <p class="${failed ? "text-danger" : "text-success"}">${escapeHtml(summary)}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+  }
+  function renderVehicleBulkBuyConfirmScreen({stationId: stationId, vehicleTypeId: vehicleTypeId, name: name, missing: missing, costCredits: costCredits, costCoins: costCoins, stationName: stationName, goBack: goBack, onDone: onDone}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = `\n      <p>Bauen: <b>${missing}x ${escapeHtml(name)}</b></p>\n      <p class="text-muted" style="font-size:12px;">Womit soll bezahlt werden?</p>\n      <div class="form-group">\n        <button id="vn-btn-pay-credits" type="button" class="btn btn-success">\n          Mit Credits bauen (${costCredits.toLocaleString("de-DE")})\n        </button>\n        <button id="vn-btn-pay-coins" type="button" class="btn btn-danger">\n          Mit Coins bauen (${costCoins.toLocaleString("de-DE")})\n        </button>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    const start = currency => {
+      const cost = currency === "coins" ? costCoins : costCredits;
+      executeVehicleBulkBuy({
+        stationId: stationId,
+        vehicleTypeId: vehicleTypeId,
+        name: name,
+        missing: missing,
+        currency: currency,
+        cost: cost,
+        stationName: stationName,
+        goBack: goBack,
+        onDone: onDone
+      });
+    };
+    document.getElementById("vn-btn-pay-credits").addEventListener("click", () => start("credits"));
+    document.getElementById("vn-btn-pay-coins").addEventListener("click", () => start("coins"));
+  }
+  function executeVehicleBulkBuy({stationId: stationId, vehicleTypeId: vehicleTypeId, name: name, missing: missing, currency: currency, cost: cost, stationName: stationName, goBack: goBack, onDone: onDone}) {
+    const title = `${missing}x ${name} kaufen`;
+    runOrQueueBackgroundTask(title, viaQueue => runVehicleBulkBuy({
+      stationId: stationId,
+      vehicleTypeId: vehicleTypeId,
+      name: name,
+      missing: missing,
+      currency: currency,
+      cost: cost,
+      stationName: stationName,
+      goBack: goBack,
+      onDone: onDone
+    }, title, viaQueue));
+  }
+  async function runVehicleBulkBuy({stationId: stationId, vehicleTypeId: vehicleTypeId, name: name, missing: missing, currency: currency, cost: cost, stationName: stationName, goBack: goBack, onDone: onDone}, title, viaQueue) {
+    let cancelled = false;
+    const historyId = await startHistoryEntry({
+      type: "vehicle",
+      label: `0/${missing} ${name} gekauft ...`,
+      station: stationName
+    });
+    beginBackgroundTask(title, () => {
+      cancelled = true;
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
+    }, viaQueue);
+    let ok = 0;
+    let error = null;
+    const unitCost = missing > 0 ? cost / missing : 0;
+    for (let i = 0; i < missing; i++) {
+      if (cancelled) break;
+      updateBackgroundTaskProgress(Math.round(i / missing * 100), `Kaufe ${i + 1}/${missing} ...`);
+      try {
+        await buyVehicle(stationId, vehicleTypeId, currency);
+        ok++;
+      } catch (e) {
+        error = e;
+        break;
+      }
+      updateBackgroundTaskProgress(Math.round((i + 1) / missing * 100), `${i + 1}/${missing} gekauft ...`);
+    }
+    if (ok > 0) onDone?.(ok);
+    if (error) {
+      logErrorToStorage(`Kauf fehlgeschlagen: ${name} (${stationName})`, error.message).catch(() => {});
+    }
+    const summary = cancelled ? `Abgebrochen - ${ok}/${missing} gekauft.` : error ? `${ok}/${missing} gekauft, dann Fehler: ${error.message}` : `${ok}x ${name} gekauft.`;
+    await updateHistoryEntry(historyId, {
+      label: `${ok}x ${name}` + (error ? ` - abgebrochen: ${error.message}` : ""),
+      status: cancelled ? "cancelled" : error ? "error" : "done",
+      cost: Math.round(unitCost * ok),
+      currency: currency
+    });
+    const renderResult = () => renderBulkActionResultScreen({
+      summary: summary,
+      failed: !!error,
+      goBack: goBack
+    });
+    finishBackgroundTask(title, renderResult);
   }
   const CLEAR_STORAGE_CONFIRM_WORD = "löschen";
   function renderClearStorageConfirmScreen(goBack) {
@@ -3862,7 +3999,7 @@
     renderTable();
   }
   const PERSONNEL_SCAN_CONCURRENCY = 5;
-  async function loadPersonnelCheckStations() {
+  async function loadPersonnelScanStations() {
     const {buildings: buildings} = await loadGameData();
     const leitstelleIds = new Set;
     for (const b of buildings) {
@@ -3920,7 +4057,7 @@
   }
   const PERSONNEL_SCAN_STALE_MS = 15 * 60 * 1e3;
   async function scanAllPersonnel(onProgress) {
-    const stations = await loadPersonnelCheckStations();
+    const stations = await loadPersonnelScanStations();
     const scanData = await getPersonnelScanData();
     const qualifications = await getPersonnelQualifications();
     let nextIndex = 0;
@@ -4047,6 +4184,9 @@
     THW: 10,
     Seenotrettung: 27
   };
+  function categoryForSchoolBuildingType(buildingType) {
+    return Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === buildingType);
+  }
   const SCHOOLING_SEATS_PER_ROOM = 10;
   const SCHOOL_CLASSROOM_EXTENSION_IDS = [ 0, 1, 2 ];
   function countSchoolClassrooms(building) {
@@ -4058,7 +4198,7 @@
     const {buildings: buildings} = await loadGameData();
     const byCategory = {};
     for (const b of buildings) {
-      const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type);
+      const category = categoryForSchoolBuildingType(b.building_type);
       if (!category) continue;
       (byCategory[category] || (byCategory[category] = [])).push({
         id: String(b.id),
@@ -4070,6 +4210,71 @@
   }
   function pickSchoolForCategory(schoolsByCategory, category) {
     return (schoolsByCategory[category] || [])[0] || null;
+  }
+  async function fetchAllianceSchoolPermissionIds() {
+    const res = await fetchWithTimeout("/verband/gebauede", {
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error(`Verbandsgebäude konnten nicht geladen werden (${res.status}).`);
+    const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
+    const ids = new Set;
+    doc.querySelectorAll("#alliance_buildings_table tbody tr").forEach(row => {
+      const link = row.querySelector("a.btn-success[href^='/buildings/']");
+      const idMatch = link?.getAttribute("href").match(/\/buildings\/(\d+)/);
+      if (idMatch) ids.add(idMatch[1]);
+    });
+    return ids;
+  }
+  const ALLIANCE_SCHOOLS_CACHE_TTL_MS = 60 * 1e3;
+  let allianceSchoolsCache = null;
+  let allianceSchoolsFetchPromise = null;
+  async function loadAllianceSchoolsByCategory(forceRefresh = false) {
+    if (!forceRefresh && allianceSchoolsCache && Date.now() - allianceSchoolsCache.fetchedAt < ALLIANCE_SCHOOLS_CACHE_TTL_MS) {
+      return allianceSchoolsCache.data;
+    }
+    if (!forceRefresh && allianceSchoolsFetchPromise) {
+      return allianceSchoolsFetchPromise;
+    }
+    allianceSchoolsFetchPromise = (async () => {
+      const [permittedIds, buildings] = await Promise.all([ fetchAllianceSchoolPermissionIds(), fetchJSON("/api/alliance_buildings") ]);
+      const byCategory = {};
+      for (const b of buildings) {
+        if (!permittedIds.has(String(b.id))) continue;
+        const category = categoryForSchoolBuildingType(b.building_type);
+        if (!category) continue;
+        (byCategory[category] || (byCategory[category] = [])).push({
+          id: String(b.id),
+          name: b.caption || `Schule ${b.id}`,
+          maxRooms: countSchoolClassrooms(b),
+          schoolings: Array.isArray(b.schoolings) ? b.schoolings : []
+        });
+      }
+      allianceSchoolsCache = {
+        data: byCategory,
+        fetchedAt: Date.now()
+      };
+      return byCategory;
+    })();
+    try {
+      return await allianceSchoolsFetchPromise;
+    } finally {
+      allianceSchoolsFetchPromise = null;
+    }
+  }
+  function countActiveSchoolings(schoolings, finishTimeField) {
+    const now = Date.now();
+    return schoolings.filter(s => new Date(s[finishTimeField]).getTime() > now).length;
+  }
+  function earliestActiveFinish(schoolings, finishTimeField) {
+    const now = Date.now();
+    const finishTimes = schoolings.map(s => new Date(s[finishTimeField]).getTime()).filter(t => t > now);
+    return finishTimes.length ? Math.min(...finishTimes) : null;
+  }
+  function countOccupiedRoomsFromEmbeddedSchoolings(schoolings) {
+    return countActiveSchoolings(schoolings || [], "education_end_time");
+  }
+  function earliestEmbeddedSchoolingFinish(schoolings) {
+    return earliestActiveFinish(schoolings || [], "education_end_time");
   }
   function computeTrainingNeeds(stations, requirementRanges, scanData, minStaff) {
     const needs = new Map;
@@ -4162,32 +4367,33 @@
     return await fetchJSON("/api/schoolings");
   }
   function countOccupiedRooms(schoolingRuns, schoolId) {
-    const now = Date.now();
-    return schoolingRuns.filter(run => String(run.building_id) === String(schoolId) && new Date(run.finish_time).getTime() > now).length;
+    return countActiveSchoolings(schoolingRuns.filter(run => String(run.building_id) === String(schoolId)), "finish_time");
   }
-  const PENDING_SCHOOLING_TTL_MS = 90 * 1e3;
+  const PENDING_SCHOOLING_MAX_LIFETIME_MS = 10 * 60 * 1e3;
   const pendingSchoolingRooms = new Map;
-  function recordPendingSchoolingRooms(schoolId, rooms) {
+  function recordPendingSchoolingRooms(schoolId, rooms, baselineOccupied) {
     const key = String(schoolId);
     const existing = pendingSchoolingRooms.get(key);
-    const stillFresh = existing && Date.now() - existing.since < PENDING_SCHOOLING_TTL_MS;
+    const stillPending = existing && Date.now() - existing.since < PENDING_SCHOOLING_MAX_LIFETIME_MS;
     pendingSchoolingRooms.set(key, {
-      rooms: (stillFresh ? existing.rooms : 0) + rooms,
-      since: Date.now()
+      rooms: (stillPending ? existing.rooms : 0) + rooms,
+      since: Date.now(),
+      baselineOccupied: stillPending ? existing.baselineOccupied : baselineOccupied
     });
   }
-  function getPendingSchoolingRooms(schoolId) {
+  function getPendingSchoolingRooms(schoolId, currentRawOccupied) {
     const key = String(schoolId);
     const entry = pendingSchoolingRooms.get(key);
     if (!entry) return 0;
-    if (Date.now() - entry.since >= PENDING_SCHOOLING_TTL_MS) {
+    if (entry.baselineOccupied != null && currentRawOccupied !== entry.baselineOccupied) {
+      pendingSchoolingRooms.delete(key);
+      return 0;
+    }
+    if (Date.now() - entry.since >= PENDING_SCHOOLING_MAX_LIFETIME_MS) {
       pendingSchoolingRooms.delete(key);
       return 0;
     }
     return entry.rooms;
-  }
-  function occupiedRoomsWithPending(schoolingRuns, schoolId) {
-    return countOccupiedRooms(schoolingRuns, schoolId) + getPendingSchoolingRooms(schoolId);
   }
   async function recordPendingSchoolingAssignment(plan, need) {
     const scanData = await getPersonnelScanData();
@@ -4207,9 +4413,7 @@
     await storeData(scanData, PERSONNEL_SCAN_KEY);
   }
   function earliestSchoolingFinish(schoolingRuns, schoolId) {
-    const now = Date.now();
-    const finishTimes = schoolingRuns.filter(run => String(run.building_id) === String(schoolId)).map(run => new Date(run.finish_time).getTime()).filter(t => t > now);
-    return finishTimes.length ? Math.min(...finishTimes) : null;
+    return earliestActiveFinish(schoolingRuns.filter(run => String(run.building_id) === String(schoolId)), "finish_time");
   }
   async function loadRunningSchoolingsOverview() {
     const [schoolingRuns, schoolsByCategory] = await Promise.all([ fetchSchoolingRuns(), loadOwnedSchoolsByCategory() ]);
@@ -4253,11 +4457,11 @@
       return !!entry && entry.statusText.includes("Verfügbar");
     });
   }
-  async function planTrainingRun(need, school, mode) {
+  async function planTrainingRun(need, school, mode, isAlliance = false) {
     const schoolId = school.id;
     const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
-    const schoolingRuns = await fetchSchoolingRuns();
-    const occupied = occupiedRoomsWithPending(schoolingRuns, schoolId);
+    const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(await fetchSchoolingRuns(), schoolId);
+    const occupied = rawOccupied + getPendingSchoolingRooms(schoolId, rawOccupied);
     const freeRooms = Math.max(0, school.maxRooms - occupied);
     if (freeRooms <= 0) {
       throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
@@ -4297,18 +4501,44 @@
       finishEstimate: finishEstimate,
       actualRooms: actualRooms,
       selectedByStation: selectedByStation,
-      selected: selected
+      selected: selected,
+      isAlliance: isAlliance,
+      rawOccupiedBeforeAction: rawOccupied
     };
   }
-  async function submitTrainingRun(plan) {
+  async function fetchAllianceSchoolings() {
+    return await fetchJSON("/api/alliance_schoolings");
+  }
+  async function joinOpenSchoolingRun(runId, personalIds) {
+    const csrfToken = getCsrfTokenOrThrow(runId);
+    const params = new URLSearchParams;
+    params.append("utf8", "✓");
+    params.append("authenticity_token", csrfToken);
+    personalIds.forEach(id => params.append("personal_ids[]", id));
+    const res = await fetchWithTimeout(`/schoolings/${runId}/education`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
+    });
+    if (!res.ok || !res.redirected) {
+      throw new Error(`Personal konnte nicht in den Lehrgang eingetragen werden (HTTP ${res.status}).`);
+    }
+  }
+  async function submitTrainingRun(plan, onProgress = () => {}) {
     const params = new URLSearchParams;
     params.append("utf8", "✓");
     params.append("authenticity_token", plan.authenticityToken);
     params.append("building_rooms_use", String(plan.actualRooms));
     params.append("education_select", plan.educationValue);
-    params.append("alliance[duration]", "0");
+    params.append("alliance[duration]", plan.isAlliance ? "3600" : "0");
     params.append("alliance[cost]", "0");
-    plan.selected.forEach(p => params.append("personal_ids[]", p.id));
+    if (!plan.isAlliance) {
+      plan.selected.forEach(p => params.append("personal_ids[]", p.id));
+    }
+    const beforeRunIds = plan.isAlliance ? new Set((await fetchAllianceSchoolings()).filter(r => String(r.building_id) === String(plan.schoolId)).map(r => String(r.id))) : null;
     const res = await fetchWithTimeout(`/buildings/${plan.schoolId}/education`, {
       method: "POST",
       credentials: "same-origin",
@@ -4320,6 +4550,83 @@
     if (!res.ok || !res.redirected) {
       throw new Error(`Ausbildung wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
     }
+    if (!plan.isAlliance) return;
+    const maxAttempts = 5;
+    const pollIntervalMs = 6e4;
+    let newRun = null;
+    for (let attempt = 1; attempt <= maxAttempts && !newRun; attempt++) {
+      if (allianceTrainingCancelled) break;
+      if (attempt > 1) {
+        onProgress(`Lehrgang noch nicht in der Spiel-API sichtbar - nächste Prüfung in 60 Sekunden (Versuch ${attempt}/${maxAttempts}) ...`);
+        await sleep(pollIntervalMs);
+        if (allianceTrainingCancelled) break;
+      }
+      const afterRuns = await fetchAllianceSchoolings();
+      const candidates = afterRuns.filter(r => String(r.building_id) === String(plan.schoolId) && !beforeRunIds.has(String(r.id)));
+      if (candidates.length) {
+        newRun = candidates.reduce((a, b) => Number(b.id) > Number(a.id) ? b : a);
+      }
+    }
+    if (allianceTrainingCancelled && !newRun) {
+      throw new Error("Abgebrochen, während auf die Bestätigung durch das Spiel gewartet wurde - der Lehrgang wurde an der Schule geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell nachtragen.");
+    }
+    if (!newRun) {
+      throw new Error(`Lehrgang wurde an der Verbandschule geöffnet, aber auch nach ${maxAttempts} Versuchen nicht in der Lehrgangsliste (/api/alliance_schoolings) aufgetaucht - Personal wurde NICHT zugewiesen, bitte manuell nachtragen.`);
+    }
+    await joinOpenSchoolingRun(newRun.id, plan.selected.map(p => p.id));
+  }
+  function executeAllianceTrainingRun(need, school, qualificationName, plan, goBack) {
+    const title = `Verbandsschulung (${qualificationName})`;
+    runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue));
+  }
+  async function runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue) {
+    allianceTrainingCancelled = false;
+    const historyId = await startHistoryEntry({
+      type: "schooling_start",
+      label: `${qualificationName} (Verbandschule) - wird geöffnet ...`,
+      station: school.name
+    });
+    beginBackgroundTask(title, () => {
+      allianceTrainingCancelled = true;
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
+    }, viaQueue);
+    updateBackgroundTaskProgress(10, "Öffne Lehrgang an der Verbandschule ...");
+    let error = null;
+    try {
+      await submitTrainingRun(plan, message => updateBackgroundTaskProgress(50, message));
+      recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms, plan.rawOccupiedBeforeAction);
+      await recordPendingSchoolingAssignment(plan, need);
+    } catch (e) {
+      error = e;
+    }
+    const personIds = plan.selected.map(p => p.id).join(", ");
+    await updateHistoryEntry(historyId, {
+      label: error ? `${qualificationName} (Verbandschule) - Fehler: ${error.message}` : `${qualificationName} (Verbandschule, ${plan.selected.length} Person(en): ${personIds})`,
+      status: error ? allianceTrainingCancelled ? "cancelled" : "error" : "done"
+    });
+    if (error && !allianceTrainingCancelled) {
+      reportError(`Verbandsschulung (${school.name})`, error);
+    }
+    const renderResult = () => renderAllianceTrainingResultScreen({
+      qualificationName: qualificationName,
+      school: school,
+      plan: plan,
+      error: error,
+      cancelled: allianceTrainingCancelled,
+      goBack: goBack
+    });
+    finishBackgroundTask(title, renderResult);
+  }
+  function renderAllianceTrainingResultScreen({qualificationName: qualificationName, school: school, plan: plan, error: error, cancelled: cancelled, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle(`Verbandsschulung (${qualificationName})`);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const statusHtml = cancelled ? `<span class="text-warning">Abgebrochen - Lehrgang wurde ggf. bereits geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell prüfen.</span>` : error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">Lehrgang gestartet und mit ${plan.selected.length} Person(en) besetzt.</span>`;
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
   function renderSchoolingConfirmScreen({need: need, school: school, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -4329,38 +4636,47 @@
       dateStyle: "medium",
       timeStyle: "short"
     }) : "unbekannt (Lehrgangsdauer nicht erkannt)";
-    body.innerHTML = `\n      <p>\n        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>\n        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <p>\n        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>\n        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p>\n        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>\n        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <p>\n        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>\n        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n        ${plan.isAlliance ? "Der Lehrgang wird dabei für 1 Stunde im Verband freigegeben (0 Credits) - reichen die Plätze nicht für unser eigenes Personal, können in dieser Stunde auch andere Mitglieder mitnutzen." : ""}\n      </p>\n      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-confirm-schooling").addEventListener("click", async () => {
+    document.getElementById("vn-btn-confirm-schooling").addEventListener("click", () => {
+      if (plan.isAlliance) {
+        executeAllianceTrainingRun(need, school, qualificationName, plan, goBack);
+        return;
+      }
       const confirmBtn = document.getElementById("vn-btn-confirm-schooling");
       const backBtn = document.getElementById("vn-btn-back");
       const statusEl = document.getElementById("vn-schooling-confirm-status");
       confirmBtn.disabled = true;
       backBtn.disabled = true;
       statusEl.innerHTML = `<em>Wird gestartet ...</em>`;
-      try {
-        await submitTrainingRun(plan);
-        recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms);
-        await recordPendingSchoolingAssignment(plan, need);
-        await logHistoryEntry({
-          type: "schooling_start",
-          label: qualificationName,
-          station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`
-        });
-        statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
-        setTimeout(goBack, 600);
-      } catch (e) {
-        statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
-        const personIds = plan.selected.map(p => p.id).join(", ");
-        logErrorToStorage(`Schulung fehlgeschlagen: ${qualificationName} (${school.name}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
-        confirmBtn.disabled = false;
-        backBtn.disabled = false;
-      }
+      (async () => {
+        try {
+          await submitTrainingRun(plan, message => {
+            statusEl.innerHTML = `<em>${escapeHtml(message)}</em>`;
+          });
+          recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms, plan.rawOccupiedBeforeAction);
+          await recordPendingSchoolingAssignment(plan, need);
+          await logHistoryEntry({
+            type: "schooling_start",
+            label: qualificationName,
+            station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`
+          });
+          statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
+          setTimeout(goBack, 600);
+        } catch (e) {
+          statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+          const personIds = plan.selected.map(p => p.id).join(", ");
+          logErrorToStorage(`Schulung fehlgeschlagen: ${qualificationName} (${school.name}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
+          confirmBtn.disabled = false;
+          backBtn.disabled = false;
+        }
+      })();
     });
   }
-  async function renderSchoolingBlueprintSelection(goBack = renderMainMenu) {
+  async function renderSchoolingBlueprintSelection(goBack = renderMainMenu, isAlliance = false) {
+    const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle("Schulungen › Bauplan wählen");
+    setScreenTitle(`${titlePrefix} › Bauplan wählen`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
     const blueprints = await getStationBlueprints();
@@ -4369,22 +4685,22 @@
       body.innerHTML = `\n        <p class="text-muted">Noch keine Baupläne vorhanden - lege zuerst einen im Wachen-Bauplaner an.</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button id="vn-schooling-goto-blueprints" type="button" class="btn btn-primary">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner öffnen\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       document.getElementById("vn-schooling-goto-blueprints").addEventListener("click", () => {
-        renderStationBlueprintsListScreen(() => renderSchoolingBlueprintSelection(goBack));
+        renderStationBlueprintsListScreen(() => renderSchoolingBlueprintSelection(goBack, isAlliance));
       });
       return;
     }
     const rows = entries.map(bp => `\n        <button type="button" class="list-group-item vn-menu-item vn-schooling-bp-pick" data-id="${escapeHtml(bp.id)}">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n          <span><b>${escapeHtml(bp.name)}</b> <span class="text-muted">- ${escapeHtml(typeNameForPseudoId(bp.pseudoId))}</span></span>\n        </button>\n      `).join("");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welchen Bauplan sollen Schulungen geprüft werden? Danach folgen noch die Wachen.\n      </p>\n      <div class="list-group" style="max-height:55vh; overflow:auto;">${rows}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welchen Bauplan sollen ${isAlliance ? "Verbandsschulungen" : "Schulungen"} geprüft werden? Danach folgen noch die Wachen.\n      </p>\n      <div class="list-group" style="max-height:55vh; overflow:auto;">${rows}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     body.querySelectorAll(".vn-schooling-bp-pick").forEach(btn => {
       btn.addEventListener("click", () => {
-        renderSchoolingStationSelection(blueprints[btn.dataset.id], goBack);
+        renderSchoolingStationSelection(blueprints[btn.dataset.id], goBack, isAlliance);
       });
     });
   }
-  async function renderSchoolingStationSelection(blueprint, goBack = renderMainMenu) {
+  async function renderSchoolingStationSelection(blueprint, goBack = renderMainMenu, isAlliance = false) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle(`Schulungen › ${blueprint.name} › Wachen wählen`);
+    setScreenTitle(`${isAlliance ? "Verbandsschulungen" : "Schulungen"} › ${blueprint.name} › Wachen wählen`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen ...</p>`;
     let allStations, savedSelection;
@@ -4417,34 +4733,16 @@
       return `\n        <div class="panel panel-default vn-schooling-leitstelle-panel" data-leitstelle-id="${escapeHtml(id)}" style="margin-bottom: 8px;">\n          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">\n            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>\n            <b>${escapeHtml(info.name)}</b>\n            <span class="text-muted">\n              (${info.stations.length} Wachen,\n              <span class="vn-schooling-leitstelle-count" data-leitstelle-id="${escapeHtml(id)}">${initialSelectedCount}</span>\n              ausgewählt)\n            </span>\n            <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">\n              <input type="checkbox" class="vn-schooling-leitstelle-master" data-leitstelle-id="${escapeHtml(id)}">\n              alle auswählen\n            </label>\n          </div>\n          <div id="${collapseId}" class="panel-collapse collapse">\n            <div class="panel-body" style="column-count: 2; column-gap: 20px;">\n              ${stationRows}\n            </div>\n          </div>\n        </div>`;
     }).join("");
     body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan: <b>${escapeHtml(blueprint.name)}</b>. Wähle die Wachen aus, die für Schulungen\n        geprüft werden sollen (Leitstelle anklicken zum Auf-/Zuklappen).\n      </p>\n      <input type="text" id="vn-schooling-station-search" class="form-control input-sm" style="max-width:280px; margin-bottom:8px;"\n             placeholder="Wache suchen ...">\n      <div style="max-height: 50vh; overflow-y: auto; padding: 4px;">\n        ${groupBlocks || '<p class="text-muted"><em>Keine passenden Wachen gefunden.</em></p>'}\n      </div>\n      <p id="vn-schooling-station-search-empty" class="text-muted" style="display:none;"><em>Keine Wache passt zur Suche.</em></p>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-go" type="button" class="btn btn-primary">\n          Los <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", () => renderSchoolingBlueprintSelection(goBack));
+    document.getElementById("vn-btn-back").addEventListener("click", () => renderSchoolingBlueprintSelection(goBack, isAlliance));
     body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
       icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
     });
-    body.querySelectorAll(".vn-schooling-leitstelle-master").forEach(master => {
-      master.addEventListener("click", e => e.stopPropagation());
-      master.closest("label").addEventListener("click", e => e.stopPropagation());
-      const id = master.dataset.leitstelleId;
-      const childCheckboxes = [ ...body.querySelectorAll(`.vn-schooling-station-check[data-leitstelle-id="${id}"]`) ];
-      function updateSelectedCount() {
-        const countEl = body.querySelector(`.vn-schooling-leitstelle-count[data-leitstelle-id="${id}"]`);
-        if (countEl) countEl.textContent = childCheckboxes.filter(cb => cb.checked).length;
-      }
-      master.addEventListener("change", () => {
-        childCheckboxes.forEach(cb => {
-          if (cb.closest(".vn-schooling-station-row").style.display !== "none") cb.checked = master.checked;
-        });
-        updateSelectedCount();
-      });
-      function updateMasterState() {
-        const visible = childCheckboxes.filter(cb => cb.closest(".vn-schooling-station-row").style.display !== "none");
-        const checkedCount = visible.filter(cb => cb.checked).length;
-        master.checked = visible.length > 0 && checkedCount === visible.length;
-        master.indeterminate = checkedCount > 0 && checkedCount < visible.length;
-        updateSelectedCount();
-      }
-      childCheckboxes.forEach(cb => cb.addEventListener("change", updateMasterState));
-      updateMasterState();
+    const {refreshAllMasters: refreshAllMasters} = wireLeitstelleCheckboxGroups({
+      body: body,
+      masterSelector: ".vn-schooling-leitstelle-master",
+      checkboxSelector: id => `.vn-schooling-station-check[data-leitstelle-id="${id}"]`,
+      rowSelector: ".vn-schooling-station-row",
+      countSelector: id => `.vn-schooling-leitstelle-count[data-leitstelle-id="${id}"]`
     });
     const searchInput = document.getElementById("vn-schooling-station-search");
     function applyStationFilter() {
@@ -4471,13 +4769,7 @@
       });
       const emptyNote = document.getElementById("vn-schooling-station-search-empty");
       if (emptyNote) emptyNote.style.display = query && !anyVisible ? "" : "none";
-      body.querySelectorAll(".vn-schooling-leitstelle-master").forEach(master => {
-        const id = master.dataset.leitstelleId;
-        const visible = [ ...body.querySelectorAll(`.vn-schooling-station-check[data-leitstelle-id="${id}"]`) ].filter(cb => cb.closest(".vn-schooling-station-row").style.display !== "none");
-        const checkedCount = visible.filter(cb => cb.checked).length;
-        master.checked = visible.length > 0 && checkedCount === visible.length;
-        master.indeterminate = checkedCount > 0 && checkedCount < visible.length;
-      });
+      refreshAllMasters();
     }
     searchInput.addEventListener("input", applyStationFilter);
     document.getElementById("vn-btn-schooling-go").addEventListener("click", async () => {
@@ -4488,17 +4780,18 @@
       }
       const selectedStations = stations.filter(s => selectedIds.includes(s.id));
       await saveSchoolingStationSelection(blueprint.id, selectedIds);
-      renderSchoolingScreen(blueprint, selectedStations, () => renderSchoolingStationSelection(blueprint, goBack));
+      renderSchoolingScreen(blueprint, selectedStations, () => renderSchoolingStationSelection(blueprint, goBack, isAlliance), isAlliance);
     });
   }
-  async function renderSchoolingScreen(blueprint, stations, goBack = renderMainMenu) {
+  async function renderSchoolingScreen(blueprint, stations, goBack = renderMainMenu, isAlliance = false) {
+    const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle(`Schulungen › ${blueprint.name}`);
+    setScreenTitle(`${titlePrefix} › ${blueprint.name}`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Bedarf ...</p>`;
     let schoolsByCategory;
     try {
-      schoolsByCategory = await loadOwnedSchoolsByCategory();
+      schoolsByCategory = isAlliance ? await loadAllianceSchoolsByCategory() : await loadOwnedSchoolsByCategory();
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
@@ -4531,10 +4824,11 @@
     }
     for (const school of Object.values(schoolByCategory)) {
       if (!school) continue;
-      const occupied = occupiedRoomsWithPending(schoolingRuns, school.id);
+      const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(schoolingRuns, school.id);
+      const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+      const occupied = rawOccupied + pending;
       const freeRooms = Math.max(0, school.maxRooms - occupied);
-      const nextFreeAt = earliestSchoolingFinish(schoolingRuns, school.id);
-      const pending = getPendingSchoolingRooms(school.id);
+      const nextFreeAt = isAlliance ? earliestEmbeddedSchoolingFinish(school.schoolings) : earliestSchoolingFinish(schoolingRuns, school.id);
       capacityBySchoolId[school.id] = {
         maxRooms: school.maxRooms,
         freeRooms: freeRooms,
@@ -4548,7 +4842,9 @@
     }
     recomputeNeeds();
     function capacityLabel(school) {
-      if (!school) return `<span class="text-muted">Keine eigene Schule</span>`;
+      if (!school) {
+        return isAlliance ? `<span class="text-muted">Keine Verbandschule mit Lehrgangs-Recht gefunden</span>` : `<span class="text-muted">Keine eigene Schule</span>`;
+      }
       const info = capacityBySchoolId[school.id];
       if (!info) return "";
       if (info.error) {
@@ -4561,9 +4857,10 @@
       return `${escapeHtml(school.name)} · ${statusBadge}`;
     }
     function renderSchoolOverview() {
-      const categoriesWithSchool = CATEGORY_ORDER.filter(cat => schoolByCategory[cat]);
-      if (!categoriesWithSchool.length) return "";
-      const cards = categoriesWithSchool.map(category => `\n            <div class="vn-settings-card" style="flex:1; min-width:220px;">\n              <b>${escapeHtml(category)}</b><br>\n              <small>${capacityLabel(schoolByCategory[category])}</small>\n            </div>\n          `).join("");
+      const categoriesWithNeeds = new Set(needs.map(n => n.category));
+      const relevantCategories = CATEGORY_ORDER.filter(cat => schoolByCategory[cat] || categoriesWithNeeds.has(cat));
+      if (!relevantCategories.length) return "";
+      const cards = relevantCategories.map(category => `\n            <div class="vn-settings-card" style="flex:1; min-width:220px;">\n              <b>${escapeHtml(category)}</b><br>\n              <small>${capacityLabel(schoolByCategory[category])}</small>\n            </div>\n          `).join("");
       return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
     }
     function renderGroups() {
@@ -4594,9 +4891,9 @@
       }).join("");
     }
     function render() {
-      body.innerHTML = `\n        <p class="text-muted" style="font-size:12px;">\n          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven\n          Wachenbauplan) und startet echte Lehrgänge - Personal steht währenddessen nicht für\n          Einsätze zur Verfügung, Anzahl vorher prüfen.\n        </p>\n        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>\n        <div class="form-inline" style="margin-bottom:10px;">\n          <label for="vn-schooling-min-staff" style="font-size:12px;">\n            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?\n          </label>\n          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"\n                 value="${minStaff}" style="width:70px; margin-left:8px;">\n        </div>\n        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>\n        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n          </button>\n          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n          </button>\n          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">\n            ${scanMeta.lastScanAt ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}` : "Noch nie gescannt"}\n          </span>\n        </div>\n      `;
+      body.innerHTML = `\n        <p class="text-muted" style="font-size:12px;">\n          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven\n          Wachenbauplan) und startet echte Lehrgänge${isAlliance ? " an Verbandschulen, für 1 Stunde im Verband freigegeben (0 Credits) - reicht nicht die ganze Zeit, können andere Mitglieder die restlichen Plätze mitnutzen" : ""} - Personal steht währenddessen nicht für\n          Einsätze zur Verfügung, Anzahl vorher prüfen.\n        </p>\n        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>\n        <div class="form-inline" style="margin-bottom:10px;">\n          <label for="vn-schooling-min-staff" style="font-size:12px;">\n            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?\n          </label>\n          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"\n                 value="${minStaff}" style="width:70px; margin-left:8px;">\n        </div>\n        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>\n        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n          </button>\n          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n          </button>\n          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">\n            ${scanMeta.lastScanAt ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}` : "Noch nie gescannt"}\n          </span>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
-      document.getElementById("vn-schooling-goto-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingBlueprintSelection(renderMainMenu)));
+      document.getElementById("vn-schooling-goto-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingBlueprintSelection(renderMainMenu, isAlliance)));
       document.getElementById("vn-schooling-min-staff").addEventListener("change", async e => {
         minStaff = Math.max(0, parseInt(e.target.value, 10) || 0);
         await storeData(minStaff, PERSONNEL_SCHOOLING_MIN_STAFF_KEY);
@@ -4640,13 +4937,13 @@
           siblingButtons.forEach(b => b.disabled = true);
           statusEl.textContent = "Lade Vorschau ...";
           try {
-            const plan = await planTrainingRun(need, school, mode);
+            const plan = await planTrainingRun(need, school, mode, isAlliance);
             renderSchoolingConfirmScreen({
               need: need,
               school: school,
               qualificationName: qualificationName,
               plan: plan,
-              goBack: () => renderSchoolingScreen(blueprint, stations, goBack)
+              goBack: () => renderSchoolingScreen(blueprint, stations, goBack, isAlliance)
             });
           } catch (e) {
             statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
@@ -5523,8 +5820,7 @@
   }
   function executeUnassignAllPlan(vehicles, goBack) {
     const title = "Alle Zuweisungen rückgängig machen";
-    const queued = runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue));
-    if (queued === "queued") renderBackgroundTaskQueuedScreen(title, goBack);
+    runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue));
   }
   async function runUnassignAllPlan(vehicles, goBack, title, viaQueue) {
     const historyId = await startHistoryEntry({
@@ -5538,8 +5834,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    });
-    if (!viaQueue) renderBackgroundTaskProgressScreen();
+    }, viaQueue);
     const stationGroups = new Map;
     for (const v of vehicles) {
       if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
@@ -5580,9 +5875,7 @@
       cancelled: cancelled,
       goBack: goBack
     });
-    const stillOnOwnProgressScreen = !!document.getElementById("vn-exec-progress-bar");
-    if (stillOnOwnProgressScreen) renderResult();
-    finishBackgroundTask(title, renderResult, stillOnOwnProgressScreen);
+    finishBackgroundTask(title, renderResult);
   }
   function renderUnassignAllResultScreen({summary: summary, cancelled: cancelled, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -6017,30 +6310,12 @@
     body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
       icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
     });
-    body.querySelectorAll(".vn-station-check-leitstelle-master").forEach(master => {
-      master.addEventListener("click", e => e.stopPropagation());
-      master.closest("label").addEventListener("click", e => e.stopPropagation());
-      const id = master.dataset.leitstelleId;
-      const childCheckboxes = [ ...body.querySelectorAll(`.vn-station-check-station-check[data-leitstelle-id="${id}"]`) ];
-      function updateSelectedCount() {
-        const countEl = body.querySelector(`.vn-station-check-leitstelle-count[data-leitstelle-id="${id}"]`);
-        if (countEl) countEl.textContent = childCheckboxes.filter(cb => cb.checked).length;
-      }
-      master.addEventListener("change", () => {
-        childCheckboxes.forEach(cb => {
-          if (cb.closest(".vn-station-check-station-row").style.display !== "none") cb.checked = master.checked;
-        });
-        updateSelectedCount();
-      });
-      function updateMasterState() {
-        const visible = childCheckboxes.filter(cb => cb.closest(".vn-station-check-station-row").style.display !== "none");
-        const checkedCount = visible.filter(cb => cb.checked).length;
-        master.checked = visible.length > 0 && checkedCount === visible.length;
-        master.indeterminate = checkedCount > 0 && checkedCount < visible.length;
-        updateSelectedCount();
-      }
-      childCheckboxes.forEach(cb => cb.addEventListener("change", updateMasterState));
-      updateMasterState();
+    const {refreshAllMasters: refreshAllMasters} = wireLeitstelleCheckboxGroups({
+      body: body,
+      masterSelector: ".vn-station-check-leitstelle-master",
+      checkboxSelector: id => `.vn-station-check-station-check[data-leitstelle-id="${id}"]`,
+      rowSelector: ".vn-station-check-station-row",
+      countSelector: id => `.vn-station-check-leitstelle-count[data-leitstelle-id="${id}"]`
     });
     const searchInput = document.getElementById("vn-station-check-station-search");
     function applyStationFilter() {
@@ -6067,13 +6342,7 @@
       });
       const emptyNote = document.getElementById("vn-station-check-station-search-empty");
       if (emptyNote) emptyNote.style.display = query && !anyVisible ? "" : "none";
-      body.querySelectorAll(".vn-station-check-leitstelle-master").forEach(master => {
-        const id = master.dataset.leitstelleId;
-        const visible = [ ...body.querySelectorAll(`.vn-station-check-station-check[data-leitstelle-id="${id}"]`) ].filter(cb => cb.closest(".vn-station-check-station-row").style.display !== "none");
-        const checkedCount = visible.filter(cb => cb.checked).length;
-        master.checked = visible.length > 0 && checkedCount === visible.length;
-        master.indeterminate = checkedCount > 0 && checkedCount < visible.length;
-      });
+      refreshAllMasters();
     }
     searchInput.addEventListener("input", applyStationFilter);
     document.getElementById("vn-btn-station-check-go").addEventListener("click", async () => {
@@ -6134,7 +6403,7 @@
       const trackedTypeIds = new Set(blueprint.vehicles.map(bv => String(bv.vehicleTypeId)));
       const trackedCell = blueprint.vehicles.map(bv => {
         const ownIds = byType.get(String(bv.vehicleTypeId)) || [];
-        const pendingDelta = getPendingVehicleDelta(station.id, bv.vehicleTypeId);
+        const pendingDelta = getPendingVehicleDelta(station.id, bv.vehicleTypeId, ownIds.length);
         const have = Math.max(0, ownIds.length + pendingDelta);
         const missing = Math.max(bv.quantity - have, 0);
         const surplus = Math.max(have - bv.quantity, 0);
@@ -6155,7 +6424,7 @@
         return `${label}\n            <button type="button" class="btn btn-xs btn-primary vn-bp-buy-vehicle" style="margin:1px;"\n                    data-station-id="${station.id}" data-vehicle-type-id="${bv.vehicleTypeId}" data-name="${escapeHtml(name)}"\n                    data-missing="${missing}" data-cost="${(catalogEntry.credits || 0) * missing}" data-coins="${(catalogEntry.coins || 0) * missing}">\n              <span class="glyphicon glyphicon-shopping-cart" aria-hidden="true"></span> ${missing}x kaufen\n            </button>`;
       }).join(" ");
       const untrackedCell = [ ...byType.entries() ].filter(([typeId]) => !trackedTypeIds.has(typeId)).map(([typeId, ownIds]) => {
-        const pendingDelta = getPendingVehicleDelta(station.id, typeId);
+        const pendingDelta = getPendingVehicleDelta(station.id, typeId, ownIds.length);
         const have = Math.max(0, ownIds.length + pendingDelta);
         if (have <= 0) return "";
         vehicleSurplus += have;
@@ -6264,22 +6533,22 @@
         btn.addEventListener("click", () => {
           const stationName = matchingStations.find(s => s.id === btn.dataset.stationId)?.name;
           const missing = Number(btn.dataset.missing);
-          renderBuildConfirmScreen({
-            title: `${missing}x ${btn.dataset.name}`,
+          const vehicleTypeId = Number(btn.dataset.vehicleTypeId);
+          const stationId = btn.dataset.stationId;
+          renderVehicleBulkBuyConfirmScreen({
+            stationId: stationId,
+            vehicleTypeId: vehicleTypeId,
+            name: btn.dataset.name,
+            missing: missing,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
-            onConfirm: async currency => {
-              for (let i = 0; i < missing; i++) {
-                await buyVehicle(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), currency);
-              }
-              recordPendingVehicleChange(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), missing);
-              scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter);
-            },
+            stationName: stationName,
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter),
-            historyType: "vehicle",
-            historyLabel: `${missing}x ${btn.dataset.name}`,
-            historyStation: stationName,
-            historyStationId: btn.dataset.stationId
+            onDone: ok => {
+              const baselineHave = (vehiclesByStationAndType.get(stationId)?.get(String(vehicleTypeId)) || []).length;
+              recordPendingVehicleChange(stationId, vehicleTypeId, ok, baselineHave);
+              scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter);
+            }
           });
         });
       });
@@ -6292,7 +6561,10 @@
             stationName: stationName,
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter),
             onSold: () => {
-              recordPendingVehicleChange(btn.dataset.stationId, Number(btn.dataset.vehicleTypeId), -1);
+              const sellStationId = btn.dataset.stationId;
+              const sellVehicleTypeId = Number(btn.dataset.vehicleTypeId);
+              const baselineHave = (vehiclesByStationAndType.get(sellStationId)?.get(String(sellVehicleTypeId)) || []).length;
+              recordPendingVehicleChange(sellStationId, sellVehicleTypeId, -1, baselineHave);
               scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter);
             }
           });
@@ -6348,7 +6620,7 @@
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindSortHeaders();
     bindRowActions();
-    if (hasFreshPendingVehicleChanges()) scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter);
+    if (hasPendingVehicleChanges()) scheduleVehicleReconcile(blueprintId, goBack, stationIdFilter);
     document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
       const btn = document.getElementById("vn-bp-apply-refresh");
       btn.disabled = true;
