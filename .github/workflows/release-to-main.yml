@@ -5,10 +5,11 @@ name: Main-Release vorbereiten
 # aktuellen Stand aus dem PRIVATEN Beta-Repo (Fuxaro/FuxTools-Beta, Branch main) und bringt ihn
 # auf main-Stand hier in diesem (öffentlichen) Repo: interne Entwickler-Kommentare raus
 # (scripts/strip-comments.js), Kanal/Update-Links auf stable/main umgestellt
-# (scripts/set-stable-channel.js), CHANGELOG.md "Beta"-Abschnitt wird zum neuen
-# "Stable"-Abschnitt (scripts/promote-changelog.js). Das Ergebnis landet als Pull Request gegen
-# main, damit der Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann -
-# kein direkter Push.
+# (scripts/set-stable-channel.js). CHANGELOG.md ist ein rein internes Beta-Repo-Dokument (Notizen
+# für uns) und landet deshalb NIE auf main - wird nach dem Einspielen des Beta-Stands explizit
+# wieder entfernt (siehe unten). Das Ergebnis landet als Pull Request gegen main, damit der
+# Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann - kein direkter
+# Push.
 #
 # Beta-Entwicklung läuft im privaten Repo Fuxaro/FuxTools-Beta, damit interne Entwickler-
 # Kommentare/Zwischenstände nicht öffentlich einsehbar sind. Dieser Workflow braucht deshalb
@@ -21,15 +22,14 @@ name: Main-Release vorbereiten
 #
 # WICHTIG: Der Release-Branch wird bewusst von main (nicht vom Beta-Repo) abgezweigt und bekommt
 # DANACH den kompletten Beta-Inhalt aufgespielt - nicht andersrum. main und das Beta-Repo
-# enthalten fuxtools.user.js/CHANGELOG.md nämlich dauerhaft in unterschiedlichen "Übersetzungen"
-# (main = kommentarlos/stable-Kanal, Beta-Repo = kommentiert/beta-Kanal), und das Beta-Repo
-# bekommt diese Übersetzung nie zurückgespielt. Ein Release-Branch direkt vom Beta-Stand
-# abgezweigt hätte bei JEDEM Release erneut genau dieselben Zeilen (Versions-Header,
-# CHANNEL-Konstante, "## Beta"-Überschrift im Changelog) unabhängig vom letzten main-Release
-# umgeschrieben - Git meldete das beim Zurückmergen zuverlässig als Konflikt, weil beide Seiten
-# (main vom letzten Mal, der neue Release-Branch jetzt) dieselbe Stelle unabhängig voneinander
-# verändert hatten. Mit main als Basis ist der neue Commit stattdessen ein einfacher Kind-Commit
-# von mains aktuellem Stand - der Merge danach hat nichts mehr gegenzuprüfen.
+# enthalten fuxtools.user.js dauerhaft in unterschiedlichen "Übersetzungen" (main = kommentarlos/
+# stable-Kanal, Beta-Repo = kommentiert/beta-Kanal), und das Beta-Repo bekommt diese Übersetzung
+# nie zurückgespielt. Ein Release-Branch direkt vom Beta-Stand abgezweigt hätte bei JEDEM Release
+# erneut genau dieselben Zeilen (Versions-Header, CHANNEL-Konstante) unabhängig vom letzten
+# main-Release umgeschrieben - Git meldete das beim Zurückmergen zuverlässig als Konflikt, weil
+# beide Seiten (main vom letzten Mal, der neue Release-Branch jetzt) dieselbe Stelle unabhängig
+# voneinander verändert hatten. Mit main als Basis ist der neue Commit stattdessen ein einfacher
+# Kind-Commit von mains aktuellem Stand - der Merge danach hat nichts mehr gegenzuprüfen.
 on:
   workflow_dispatch: {}
 
@@ -85,6 +85,11 @@ jobs:
           git checkout betarepo/main -- .
           rm -rf .github/workflows
           cp -r /tmp/main-workflows .github/workflows
+          # CHANGELOG.md ist ein rein internes Beta-Repo-Dokument (Notizen fuer uns, keine
+          # Nutzer-Doku) - kommt zwangslaeufig mit dem "git checkout betarepo/main -- ."
+          # oben mit rein, gehoert aber NIE auf main. Wird deshalb hier wieder entfernt (git
+          # add -A im Commit-Schritt weiter unten erfasst das als Loeschung).
+          rm -f CHANGELOG.md
 
       - name: Abhängigkeiten installieren
         run: npm ci
@@ -94,11 +99,6 @@ jobs:
           node scripts/strip-comments.js /tmp/fuxtools.stripped.js
           node scripts/set-stable-channel.js /tmp/fuxtools.stripped.js fuxtools.user.js
           node -c fuxtools.user.js
-
-      - name: CHANGELOG.md auf main-Stand bringen
-        run: |
-          node scripts/promote-changelog.js CHANGELOG.md /tmp/CHANGELOG.main.md "$VERSION"
-          mv /tmp/CHANGELOG.main.md CHANGELOG.md
 
       - name: Release-Branch committen und pushen
         run: |
@@ -111,7 +111,7 @@ jobs:
             echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          git commit -m "Main-Release v$VERSION: Kommentare entfernt, Kanal auf stable, Changelog aktualisiert"
+          git commit -m "Main-Release v$VERSION: Kommentare entfernt, Kanal auf stable"
           git push --force origin "$BRANCH"
 
       - name: Pull Request gegen main erstellen
@@ -128,7 +128,6 @@ jobs:
 
           - Interne Entwickler-Kommentare entfernt (\`scripts/strip-comments.js\`)
           - Kanal auf \`stable\` umgestellt, \`@updateURL\`/\`@downloadURL\` auf \`main\` (\`scripts/set-stable-channel.js\`)
-          - CHANGELOG.md aktualisiert: \`## Beta\`-Abschnitt wird zu \`## Stable (v$VERSION)\` (\`scripts/promote-changelog.js\`)
 
           Bitte den Diff vor dem Merge kurz gegenprüfen - erst nach dem Merge ziehen sich Stable-Nutzer die neue Version." 2>&1)
           STATUS=$?
