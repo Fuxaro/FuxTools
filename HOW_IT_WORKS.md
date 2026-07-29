@@ -46,7 +46,7 @@ Live-Vorschau.
 - **Statistik**: Wachen je Gebäudetyp und Leitstelle.
 - **Verlauf**: alle Aktionen mit Datum, Kosten und Status.
 - **Task-Center**: Fortschritt laufender Hintergrund-Aufgaben, egal welcher Bildschirm offen ist.
-- **Einstellungen**: Update-Kanal, Fehlerprotokoll, Sichern/Wiederherstellen.
+- **Einstellungen**: Update-Check, Fehlerprotokoll, Sichern/Wiederherstellen.
 
 ## Tipps
 
