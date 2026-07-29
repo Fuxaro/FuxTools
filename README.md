@@ -1,6 +1,6 @@
-<p align="center">
-  <img src="./logo.png" alt="FuxTools Logo" width="220">
-</p>
+&#60;p align="center"&#62;
+  &#60;img src="./logo.png" alt="FuxTools Logo" width="220"&#62;
+&#60;/p&#62;
 
 # FuxTools
 
@@ -76,10 +76,6 @@ Tampermonkey erkennt es (gleicher Script-Name) als Update und fragt einmal zur B
 dann läuft der neue Kanal inklusive Auto-Update, bis du im selben Menü wieder zurückwechselst –
 keine separate Installation nötig.
 
-## Changelog
-
-Siehe [CHANGELOG.md](./CHANGELOG.md).
-
 ## Datenschutz
 
 FuxTools läuft komplett lokal in deinem Browser und sendet keine Daten an Server von Fuxaro
@@ -89,9 +85,8 @@ oder sonstige Dritte:
   zuweisen, ...) laufen über deine bestehende, eingeloggte Spiel-Session.
 - **api.lss-manager.de**: liefert nur den öffentlichen Fahrzeug-Katalog (Namen,
   Ausbildungsanforderungen) – es werden keine Daten an diese Seite gesendet, nur abgerufen.
-- **raw.githubusercontent.com** (dieses Repo): für den automatischen Update-Check, den
-  Changelog-Button in den Einstellungen und als Notfall-Fallback für den Fahrzeug-Katalog –
-  ebenfalls nur Abruf, kein Versand.
+- **raw.githubusercontent.com** (dieses Repo): für den automatischen Update-Check und als
+  Notfall-Fallback für den Fahrzeug-Katalog – ebenfalls nur Abruf, kein Versand.
 
 Alle Einstellungen, Namen und der Verlauf werden ausschließlich lokal über den
 Tampermonkey-eigenen Speicher (`GM.setValue`/`GM.getValue`) gespeichert – kein Tracking, keine
