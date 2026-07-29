@@ -2,7 +2,15 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.9)
+## Stable (v1.1.0)
+
+- Bugfix (Dekon-P weiterhin doppelt trotz v1.0.9-Fix): der feste Uebersetzungs-Slug fuer Dekon-P
+  ("dekon_p" <-> "decontamination_personnel") hat sich als nicht zuverlaessig in eine Richtung
+  vorhersagbar erwiesen - je nach Wache tauchte Dekon-P weiterhin doppelt auf (einmal mit der
+  Anforderung ohne Personen, einmal mit den echten Personen ohne Anforderung). Die Personal-Badges
+  (renderPersonnelBadges) führen Anforderung und vorhandenes Personal jetzt über den Anzeigenamen
+  zusammen statt über den internen Slug - das funktioniert unabhängig davon, welche Slug-Variante
+  gerade auftaucht.
 
 - Bugfix: Wachenausbau zeigte bei jeder voll ausgebauten Polizeiwache "Stufe 14 / 13" an - der
   Ausbaustufen-Katalog endete dort fälschlich schon bei Stufe 13 (wahre letzte Stufe ist 14),

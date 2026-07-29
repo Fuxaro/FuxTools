@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.9
+// @version     1.1.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.9";
+  const SCRIPT_VERSION = "1.1.0";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -3993,26 +3993,30 @@
     const scan = scanData[station.id];
     if (!scan) return '<span class="label label-default">Nicht gescannt</span>';
     const req = requirements[station.pseudoId] || {};
-    const reqByRealSlug = {};
-    for (const [slug, range] of Object.entries(req)) {
-      const realSlug = realSlugFor(slug);
-      const existing = reqByRealSlug[realSlug] || {
-        min: 0,
-        max: 0
-      };
-      existing.min += range.min;
-      existing.max += range.max;
-      reqByRealSlug[realSlug] = existing;
-    }
-    const slugs = new Set([ ...Object.keys(reqByRealSlug).filter(slug => reqByRealSlug[slug].max > 0), ...Object.keys(scan.counts).filter(slug => scan.counts[slug] > 0) ]);
-    const badges = [ ...slugs ].sort((a, b) => qualificationNameFor(qualifications, a).localeCompare(qualificationNameFor(qualifications, b), "de")).map(slug => {
-      const {min: reqMin, max: reqMax} = reqByRealSlug[slug] || {
-        min: 0,
-        max: 0
-      };
-      const have = scan.counts[slug] || 0;
+    const byName = new Map;
+    const entryFor = slug => {
       const name = qualificationNameFor(qualifications, slug);
-      const namesList = (scan.names?.[slug] || []).join(", ");
+      if (!byName.has(name)) byName.set(name, {
+        min: 0,
+        max: 0,
+        have: 0,
+        names: []
+      });
+      return byName.get(name);
+    };
+    for (const [slug, range] of Object.entries(req)) {
+      const entry = entryFor(slug);
+      entry.min += range.min;
+      entry.max += range.max;
+    }
+    for (const [slug, count] of Object.entries(scan.counts)) {
+      if (!(count > 0)) continue;
+      const entry = entryFor(slug);
+      entry.have += count;
+      entry.names.push(...scan.names?.[slug] || []);
+    }
+    const badges = [ ...byName.entries() ].filter(([, e]) => e.max > 0 || e.have > 0).sort(([a], [b]) => a.localeCompare(b, "de")).map(([name, {min: reqMin, max: reqMax, have: have, names: names}]) => {
+      const namesList = names.join(", ");
       const title = namesList ? `${name}: ${namesList}` : name;
       const target = reqMax > reqMin ? `${reqMin}-${reqMax}` : `${reqMin}`;
       let cssClass;
@@ -4227,6 +4231,7 @@
     return VEHICLE_CATALOG_SLUG_ALIASES[slug] || slug;
   }
   const KNOWN_QUALIFICATION_NAMES = {
+    dekon_p: "Dekon-P",
     decontamination_personnel: "Dekon-P"
   };
   function qualificationNameFor(qualifications, slug) {
