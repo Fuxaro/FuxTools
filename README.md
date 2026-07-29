@@ -1,6 +1,6 @@
-&#60;p align="center"&#62;
-  &#60;img src="./logo.png" alt="FuxTools Logo" width="220"&#62;
-&#60;/p&#62;
+<p align="center">
+  <img src="./logo.png" alt="FuxTools Logo" width="220">
+</p>
 
 # FuxTools
 

@@ -7,12 +7,17 @@ lokal bzw. bei der Vorbereitung eines main/Stable-Releases.
 
 GitHub-Repo → Tab **Actions** → Workflow **"Main-Release vorbereiten"** → Button **"Run
 workflow"**. Das nimmt automatisch den aktuellen `beta`-Stand und bringt ihn komplett auf
-main-Stand (siehe die drei Skripte unten), dann öffnet es einen Pull Request gegen `main` mit
+main-Stand (siehe die beiden Skripte unten), dann öffnet es einen Pull Request gegen `main` mit
 dem fertigen Ergebnis – **kein direkter Push**, der PR-Diff kann erst noch gegengeprüft und
 dann per Klick gemerged werden. Erst mit dem Merge ziehen sich Stable-Nutzer die neue Version.
 
-Betrifft `fuxtools.user.js` und `CHANGELOG.md`. Andere Dateien (README, Logo, ...) werden davon
-nicht angefasst und müssten für einen echten Release ggf. separat aktualisiert werden.
+Übernimmt den kompletten Beta-Stand 1:1 auf main (README, Logo, Skripte, ...) - `fuxtools.user.js`
+wird dabei zusätzlich kommentarlos/stable-Kanal umgeschaltet. Einzige Ausnahme: `CHANGELOG.md`
+ist ein rein internes Dokument des privaten Beta-Repos (Notizen für uns, keine Nutzer-Doku) und
+landet NIE auf main - der Workflow entfernt sie dort explizit wieder, direkt nach dem Einspielen
+des Beta-Stands. Deshalb: alles, was in README.md/scripts/README.md/etc. steht, muss für BEIDE
+Repos (privates Beta-Repo und öffentliches main) Sinn ergeben - keine beta-spezifischen
+Formulierungen wie "dieses Repo ist privat" hier reinschreiben.
 
 ## Die einzelnen Skripte (auch manuell nutzbar)
 
@@ -41,16 +46,6 @@ main gegenüber beta immer angepasst werden müssen.
 node scripts/set-stable-channel.js fuxtools.user.js.stripped fuxtools.user.js.main
 ```
 
-### promote-changelog.js
-
-Macht aus dem `## Beta`-Abschnitt der `CHANGELOG.md` den neuen `## Stable (vX.Y.Z)`-Abschnitt
-– der alte, jetzt überholte `## Stable (...)`-Abschnitt entfällt dabei (die neue Stable-Version
-enthält ja bereits alles, was vorher unter Beta stand).
-
-```bash
-node scripts/promote-changelog.js CHANGELOG.md CHANGELOG.md.main 0.9.27
-```
-
-Danach `node -c fuxtools.user.js.main` als minimalen Syntax-Check, dann beide Dateien als
-Inhalt von `fuxtools.user.js`/`CHANGELOG.md` auf `main` committen – oder eben einfach die
-GitHub Action oben nutzen, die genau diese drei Schritte automatisch verkettet.
+Danach `node -c fuxtools.user.js.main` als minimalen Syntax-Check, dann die Datei als Inhalt von
+`fuxtools.user.js` auf `main` committen – oder eben einfach die GitHub Action oben nutzen, die
+genau diese Schritte automatisch verkettet (und `CHANGELOG.md` dabei bewusst NICHT übernimmt).
