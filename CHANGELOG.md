@@ -2,7 +2,11 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.6)
+## Stable (v1.0.7)
+
+- Bugfix: "Max ausbauen" brach bei der zweiten Stufe direkt hintereinander mit einem 409-Fehler
+  (Conflict) ab - vermutlich ein Cooldown des Spiels zwischen zwei Ausbau-Aktionen. Eine kurze
+  Pause (600ms) vor jeder weiteren Stufe behebt das.
 
 - Bugfix (kritisch): "Max ausbauen" im Wachenausbau baute bisher nur eine einzige Stufe statt bis
   zur Zielstufe durchzubauen und zog auch nur deren Einzelpreis ab, obwohl die Gesamtkosten aller

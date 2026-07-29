@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.6
+// @version     1.0.7
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.6";
+  const SCRIPT_VERSION = "1.0.7";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -3415,6 +3415,7 @@
     let error = null;
     for (const level of levelsToBuild) {
       if (levelBuildCancelled) break;
+      if (builtCount > 0) await sleep(600);
       updateBackgroundTaskProgress(Math.round(builtCount / levelsToBuild.length * 100), `Baue Stufe ${level.id} (${builtCount + 1}/${levelsToBuild.length}) ...`);
       try {
         await buildLevel(buildingId, currency, level.id);
