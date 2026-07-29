@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.3
+// @version     1.0.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.3";
+  const SCRIPT_VERSION = "1.0.4";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -3944,7 +3944,10 @@
             stations: [],
             totalMinDeficit: 0,
             totalMaxDeficit: 0,
-            totalInTraining: 0
+            totalInTraining: 0,
+            totalHave: 0,
+            totalRangeMin: 0,
+            totalRangeMax: 0
           });
         }
         const need = needs.get(key);
@@ -3954,11 +3957,17 @@
           minDeficit: minDeficit,
           maxDeficit: maxDeficit,
           inTraining: inTraining,
+          have: have,
+          rangeMin: range.min,
+          rangeMax: range.max,
           inTrainingNames: scan.inTrainingNames?.[slug] || scan.inTrainingNames?.[realSlug] || []
         });
         need.totalMinDeficit += minDeficit;
         need.totalMaxDeficit += maxDeficit;
         need.totalInTraining += inTraining;
+        need.totalHave += have;
+        need.totalRangeMin += range.min;
+        need.totalRangeMax += range.max;
       }
     }
     return [ ...needs.values() ].filter(n => n.totalMinDeficit > 0 || n.totalMaxDeficit > 0);
@@ -4423,11 +4432,12 @@
           const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
           const stationTitleFor = deficitField => need.stations.filter(s => s[deficitField] > 0).map(s => `${s.name} (${s[deficitField]} fehlen)`).join(", ");
           const inTrainingTitle = need.stations.filter(s => s.inTraining > 0).map(s => `${s.name}: ${s.inTrainingNames.join(", ") || s.inTraining}`).join(" · ");
+          const haveTitle = need.stations.map(s => `${s.name}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}`).join(" · ");
           const needKey = `${need.category}::${need.slug}`;
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
           const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch die laufende Schulung abgedeckt - keine weitere Aktion nötig, sobald diese fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Schulung läuft)\n                       </button>` : "";
           const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
-          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <small class="text-muted">${need.stations.length} Wache(n)</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <small class="text-muted" title="${escapeHtml(haveTitle)}">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</small><br>\n                    <small class="text-muted">${need.stations.length} Wache(n)</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
         }).join("");
         return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
       }).join("");
