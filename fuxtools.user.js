@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.2.0
+// @version     1.2.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -86,13 +86,13 @@
     if (tcBar) tcBar.style.width = `${percent}%`;
     if (tcTxt) tcTxt.textContent = text;
   }
-  function runOrQueueBackgroundTask(title, start) {
+  function runOrQueueBackgroundTask(title, start, goBack) {
     if (isBackgroundTaskSlotBusy()) {
       backgroundTaskQueue.push({
         title: title,
         start: start
       });
-      renderBackgroundTaskLaunchedScreen(title, true);
+      renderBackgroundTaskLaunchedScreen(title, true, goBack);
       return "queued";
     }
     start(false);
@@ -103,7 +103,7 @@
     const next = backgroundTaskQueue.shift();
     next.start(true);
   }
-  function beginBackgroundTask(title, cancel, viaQueue) {
+  function beginBackgroundTask(title, cancel, viaQueue, goBack) {
     activeBackgroundTask = {
       title: title,
       percent: 0,
@@ -113,7 +113,7 @@
     finishedBackgroundTask = null;
     updateBackgroundTaskBadge();
     refreshTaskCenterIfVisible();
-    if (!viaQueue) renderBackgroundTaskLaunchedScreen(title);
+    if (!viaQueue) renderBackgroundTaskLaunchedScreen(title, false, goBack);
   }
   function finishBackgroundTask(title, renderResult) {
     activeBackgroundTask = null;
@@ -125,13 +125,13 @@
     tryStartNextQueuedBackgroundTask();
     refreshTaskCenterIfVisible();
   }
-  function renderBackgroundTaskLaunchedScreen(title, isQueued = false) {
+  function renderBackgroundTaskLaunchedScreen(title, isQueued = false, goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(title);
     const body = document.getElementById("vehicle-naming-modal-body");
     const message = isQueued ? `<b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Ein anderer Task")}</b> läuft noch - <b>${escapeHtml(title)}</b>\n         startet automatisch danach (Warteschlange, um nicht zu viele Anfragen gleichzeitig zu stellen).` : `<b>${escapeHtml(title)}</b> wurde gestartet und läuft im Hintergrund weiter, auch wenn du dieses\n         Fenster schließt oder woanders hin wechselst.`;
-    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-main-menu" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-home" aria-hidden="true"></span> Zurück zum Hauptmenü\n        </button>\n        <button id="vn-btn-launched-task-center" type="button" class="btn btn-primary">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> Task-Center öffnen\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-launched-main-menu").addEventListener("click", renderMainMenu);
+    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-launched-task-center" type="button" class="btn btn-primary">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> Task-Center öffnen\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-launched-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-launched-task-center").addEventListener("click", renderTaskCenterScreen);
   }
   function renderTaskCenterScreen() {
@@ -1994,7 +1994,7 @@
   const RENAME_CONCURRENCY = 5;
   function executeRenamePlan(plan, verb, goBack, renameFn = renameVehicle, itemNoun = "Fahrzeug(e)") {
     const title = `${itemNoun} ${verb === "umbenannt" ? "umbenennen" : "zurücksetzen"}`;
-    runOrQueueBackgroundTask(title, viaQueue => runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue));
+    runOrQueueBackgroundTask(title, viaQueue => runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue), goBack);
   }
   async function runRenamePlan(plan, verb, goBack, renameFn, itemNoun, title, viaQueue) {
     renameCancelled = false;
@@ -2008,7 +2008,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     let done = 0;
     let finished = 0;
     const failedItems = [];
@@ -2070,9 +2070,8 @@
     }
     const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>` : "";
     const retryButton = failedItems && failedItems.length ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">\n             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>\n             Fehlgeschlagene erneut versuchen (${failedItems.length})\n           </button>` : "";
-    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}\n        (von ${plan.length} geplant).\n      </p>\n      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>\n      ${errorBlock}\n      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        ${retryButton}\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
+    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}\n        (von ${plan.length} geplant).\n      </p>\n      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>\n      ${errorBlock}\n      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        ${retryButton}\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
     if (failedItems && failedItems.length) {
       document.getElementById("vn-btn-retry").addEventListener("click", () => {
         executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
@@ -3409,7 +3408,7 @@
   }
   function executeBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack) {
     const title = `Wache ausbauen (${stationName})`;
-    runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue));
+    runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue), goBack);
   }
   async function runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue) {
     levelBuildCancelled = false;
@@ -3424,7 +3423,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     let builtCount = 0;
     let spent = 0;
     let error = null;
@@ -3480,9 +3479,8 @@
     const currencyLabel = currency === "coins" ? "Coins" : "Credits";
     const statusNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen.</p>` : error ? `<p class="text-danger"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen - Fehler: ${escapeHtml(error.message)}</p>` : verifyFailed ? `<p class="text-danger"><b>Nachprüfung fehlgeschlagen:</b> geplant war Stufe ${plannedLevel}, tatsächlich nur Stufe ${reachedLevel} erreicht - vermutlich nicht genug ${currencyLabel}.</p>` : "";
     const resultLine = verifyFailed ? `<b>Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht.</b>` : `<b>${builtCount} von ${total} Stufen gebaut</b>${reachedLevel !== null ? ` (jetzt Stufe ${reachedLevel})` : ""}.`;
-    body.innerHTML = `\n      ${statusNote}\n      <p>\n        <span class="glyphicon ${verifyFailed ? "glyphicon-remove-sign text-danger" : "glyphicon-ok-sign text-success"}" aria-hidden="true"></span>\n        ${resultLine}\n      </p>\n      <p>Ausgegeben: <b>${spent.toLocaleString("de-DE")} ${currencyLabel}</b></p>\n      <p class="text-muted" style="font-size:12px;">Lade die Seite neu, um den neuen Ausbau-Stand im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
+    body.innerHTML = `\n      ${statusNote}\n      <p>\n        <span class="glyphicon ${verifyFailed ? "glyphicon-remove-sign text-danger" : "glyphicon-ok-sign text-success"}" aria-hidden="true"></span>\n        ${resultLine}\n      </p>\n      <p>Ausgegeben: <b>${spent.toLocaleString("de-DE")} ${currencyLabel}</b></p>\n      <p class="text-muted" style="font-size:12px;">Lade die Seite neu, um den neuen Ausbau-Stand im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
   }
   function renderBuildLevelsToMaxConfirmScreen({stationName: stationName, buildingId: buildingId, levelsToBuild: levelsToBuild, totalCost: totalCost, totalCoins: totalCoins, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3660,7 +3658,7 @@
       stationName: stationName,
       goBack: goBack,
       onSold: onSold
-    }, title, viaQueue));
+    }, title, viaQueue), goBack);
   }
   async function runVehicleBulkSell({vehicleIds: vehicleIds, vehicleName: vehicleName, stationName: stationName, goBack: goBack, onSold: onSold}, title, viaQueue) {
     let cancelled = false;
@@ -3675,7 +3673,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     let ok = 0;
     let failed = 0;
     for (const vehicleId of vehicleIds) {
@@ -3743,7 +3741,7 @@
       stationName: stationName,
       goBack: goBack,
       onDone: onDone
-    }, title, viaQueue));
+    }, title, viaQueue), goBack);
   }
   async function runVehicleBulkBuy({stationId: stationId, vehicleTypeId: vehicleTypeId, name: name, missing: missing, currency: currency, cost: cost, stationName: stationName, goBack: goBack, onDone: onDone}, title, viaQueue) {
     let cancelled = false;
@@ -3758,7 +3756,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     let ok = 0;
     let error = null;
     const unitCost = missing > 0 ? cost / missing : 0;
@@ -4577,7 +4575,7 @@
   }
   function executeAllianceTrainingRun(need, school, qualificationName, plan, goBack) {
     const title = `Verbandsschulung (${qualificationName})`;
-    runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue));
+    runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue), goBack);
   }
   async function runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue) {
     allianceTrainingCancelled = false;
@@ -4592,7 +4590,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     updateBackgroundTaskProgress(10, "Öffne Lehrgang an der Verbandschule ...");
     let error = null;
     try {
@@ -5820,7 +5818,7 @@
   }
   function executeUnassignAllPlan(vehicles, goBack) {
     const title = "Alle Zuweisungen rückgängig machen";
-    runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue));
+    runOrQueueBackgroundTask(title, viaQueue => runUnassignAllPlan(vehicles, goBack, title, viaQueue), goBack);
   }
   async function runUnassignAllPlan(vehicles, goBack, title, viaQueue) {
     const historyId = await startHistoryEntry({
@@ -5834,7 +5832,7 @@
         status: "cancelled",
         label: "Abbruch angefordert ..."
       });
-    }, viaQueue);
+    }, viaQueue, goBack);
     const stationGroups = new Map;
     for (const v of vehicles) {
       if (!stationGroups.has(v.stationId)) stationGroups.set(v.stationId, []);
@@ -5882,9 +5880,8 @@
     setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
     const body = document.getElementById("vehicle-naming-modal-body");
     const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen.</b></p>` : "";
-    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${escapeHtml(summary)}</b>\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-main-menu" type="button" class="btn btn-primary">Hauptmenü</button>\n      </div>\n    `;
+    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${escapeHtml(summary)}</b>\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-main-menu").addEventListener("click", renderMainMenu);
   }
   function generateBlueprintId() {
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
