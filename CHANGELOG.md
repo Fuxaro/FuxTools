@@ -2,7 +2,30 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.2)
+## Stable (v1.0.3)
+
+- Bugfix: "SW Kats" landete im Bauplan-Editor fälschlich unter "Andere Fahrzeuge" statt bei den
+  übrigen Schlauchwagen, ebenso "ELW Drohne"/"ELW2 Drohne"/"MTF Drohne" statt bei "Drohnen" und
+  "HLF Schiene" statt bei "Bahnrettung" - der Fahrzeugkatalog (api.lss-manager.de) schreibt diese
+  Namen mit Leerzeichen, unsere Zuordnungstabelle kannte nur die Bindestrich-Schreibweise aus der
+  In-Game-Anzeige. Systematisch gegen den kompletten Katalog geprüft, keine weiteren Treffer.
+
+- Effizienz: Wachen werden jetzt über `/api/v2/buildings` geladen statt über `/api/buildings`.
+
+- Effizienz: Wachen- und Fahrzeugdaten werden zusätzlich nach dem in der Community diskutierten
+  Cache-Format (`sessionStorage`-Schlüssel `aVehicles`/`aBuildings`, 5 Minuten gültig) abgelegt.
+  Dadurch übersteht der Cache jetzt auch Seitenwechsel (vorher nur innerhalb eines einzelnen
+  Seitenaufrufs gültig) und wird geteilt, falls andere Scripte sich an dasselbe Format halten.
+
+- Code-Aufräumen: die seitenweise Lade-Logik für `/api/v2/vehicles` (`paging.next_page`) und
+  `/api/v2/buildings` in eine gemeinsame Funktion (`fetchAllPagesV2`) zusammengeführt - beide
+  laden jetzt automatisch nach, falls `next_page` in der Antwort vorhanden ist, sonst bleibt es
+  bei einer einzigen Anfrage. Kein Verhaltensunterschied für Accounts unter der jeweiligen
+  Seitengröße (aktuell einziger bekannter Fall).
+
+- Code-Aufräumen: der eingeloggte Name wird jetzt direkt aus der vom Spiel bereitgestellten
+  globalen Variable gelesen, statt ihn per DOM-Selektor aus dem Profil-Link in der Navbar zu
+  scrapen (der bleibt nur noch als Fallback).
 
 - Bugfix: das globale Fehler-Sicherheitsnetz zeigte fälschlich einen "FuxTools-Fehler"-Banner
   an, wenn das Spiel selbst (nicht FuxTools) versucht, einen Sound abzuspielen, bevor man mit
