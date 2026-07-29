@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.0.0
+// @version     1.0.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -36,7 +36,7 @@
 // -----------------------------------------------------------------------------
 
 (async function() {
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "1.0.2";
   const CHANNEL = "stable";
   const STABLE_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const BETA_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/beta/fuxtools.user.js";
@@ -1855,13 +1855,35 @@
     }
     return vehicles;
   }
-  async function loadGameData() {
-    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
-    return {
-      vehicles: vehicles,
-      buildingsById: buildingsById
-    };
+  const GAME_DATA_CACHE_TTL_MS = 60 * 1e3;
+  let gameDataCache = null;
+  let gameDataFetchPromise = null;
+  function invalidateGameDataCache() {
+    gameDataCache = null;
+  }
+  async function loadGameData(forceRefresh = false) {
+    if (!forceRefresh && gameDataCache && Date.now() - gameDataCache.fetchedAt < GAME_DATA_CACHE_TTL_MS) {
+      return gameDataCache;
+    }
+    if (!forceRefresh && gameDataFetchPromise) {
+      return gameDataFetchPromise;
+    }
+    gameDataFetchPromise = (async () => {
+      const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
+      const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+      gameDataCache = {
+        vehicles: vehicles,
+        buildings: buildings,
+        buildingsById: buildingsById,
+        fetchedAt: Date.now()
+      };
+      return gameDataCache;
+    })();
+    try {
+      return await gameDataFetchPromise;
+    } finally {
+      gameDataFetchPromise = null;
+    }
   }
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
@@ -1874,8 +1896,8 @@
     const html = await res.text();
     const container = document.createElement("div");
     container.innerHTML = html;
-    const input = container.querySelector(`#vehicle_new_name_${vehicleId}`) || container.querySelector('input[type="text"]');
-    const form = container.querySelector(`#vehicle_form_${vehicleId}`) || container.querySelector("form");
+    const input = container.querySelector(`#vehicle_new_name_${vehicleId}`);
+    const form = container.querySelector(`#vehicle_form_${vehicleId}`);
     if (!input || !form) throw new Error(`Formular-Elemente für Fahrzeug ${vehicleId} nicht gefunden.`);
     input.value = newName;
     const action = form.getAttribute("action") || form.action;
@@ -1899,8 +1921,8 @@
     const html = await res.text();
     const container = document.createElement("div");
     container.innerHTML = html;
-    const input = container.querySelector("#building_name") || container.querySelector('input[type="text"]');
-    const form = container.querySelector(`#edit_building_${buildingId}`) || container.querySelector("form");
+    const input = container.querySelector("#building_name");
+    const form = container.querySelector(`#edit_building_${buildingId}`);
     if (!input || !form) throw new Error(`Formular-Elemente für Gebäude ${buildingId} nicht gefunden.`);
     input.value = newName;
     const action = form.getAttribute("action") || form.action;
@@ -2200,13 +2222,8 @@
     pageJQuery(modal).modal("hide");
   }
   function getCurrentUsername() {
-    const candidates = [ 'a[href="/profile"]', 'a[href^="/profile"]', '.dropdown-toggle[href^="/profile"]' ];
-    for (const selector of candidates) {
-      const el = document.querySelector(selector);
-      const text = el?.textContent?.trim();
-      if (text) return text;
-    }
-    return null;
+    const el = document.querySelector('a[href^="/profile"], .dropdown-toggle[href^="/profile"]');
+    return el?.textContent?.trim() || null;
   }
   let currentMode = "rename";
   function renderMainMenu() {
@@ -2802,6 +2819,16 @@
     if (tpl.useNumber) segments.push(padding ? String(nr).padStart(2, "0") : String(nr));
     return segments.join(" ") || enteredName || caption;
   }
+  function readNamingTemplateFromForm() {
+    return {
+      useText1: document.getElementById("vn-use-text1").checked,
+      text1: document.getElementById("vn-text1").value.trim(),
+      useType: document.getElementById("vn-use-type").checked,
+      useText2: document.getElementById("vn-use-text2").checked,
+      text2: document.getElementById("vn-text2").value.trim(),
+      useNumber: document.getElementById("vn-use-number").checked
+    };
+  }
   function renderNameForm(selectedStations) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2842,14 +2869,7 @@
       });
     });
     function persistTemplate() {
-      namesStore.__template = {
-        useText1: document.getElementById("vn-use-text1").checked,
-        text1: document.getElementById("vn-text1").value.trim(),
-        useType: document.getElementById("vn-use-type").checked,
-        useText2: document.getElementById("vn-use-text2").checked,
-        text2: document.getElementById("vn-text2").value.trim(),
-        useNumber: document.getElementById("vn-use-number").checked
-      };
+      namesStore.__template = readNamingTemplateFromForm();
       saveNamesStore();
     }
     [ "vn-use-text1", "vn-text1", "vn-use-type", "vn-use-text2", "vn-text2", "vn-use-number" ].forEach(id => {
@@ -2880,14 +2900,7 @@
     syncTypeNameInputs();
     const previewEl = document.getElementById("vn-preview-text");
     function updatePreview() {
-      const previewTpl = {
-        useText1: document.getElementById("vn-use-text1").checked,
-        text1: document.getElementById("vn-text1").value.trim(),
-        useType: document.getElementById("vn-use-type").checked,
-        useText2: document.getElementById("vn-use-text2").checked,
-        text2: document.getElementById("vn-text2").value.trim(),
-        useNumber: document.getElementById("vn-use-number").checked
-      };
+      const previewTpl = readNamingTemplateFromForm();
       const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
       const padding = document.getElementById("vn-padding").checked;
       const firstRow = body.querySelector(".vn-type-row");
@@ -2916,14 +2929,7 @@
     const startNr = parseInt(document.getElementById("vn-start-nr").value, 10) || 1;
     const padding = document.getElementById("vn-padding").checked;
     const statusEl = document.getElementById("vn-status");
-    const tpl = {
-      useText1: document.getElementById("vn-use-text1").checked,
-      text1: document.getElementById("vn-text1").value.trim(),
-      useType: document.getElementById("vn-use-type").checked,
-      useText2: document.getElementById("vn-use-text2").checked,
-      text2: document.getElementById("vn-text2").value.trim(),
-      useNumber: document.getElementById("vn-use-number").checked
-    };
+    const tpl = readNamingTemplateFromForm();
     namesStore.__template = tpl;
     const plan = [];
     body.querySelectorAll(".vn-type-row").forEach(row => {
@@ -2997,8 +3003,7 @@
     executeRenamePlan(plan, "zurückgesetzt", () => renderResetScreen(selectedStations));
   }
   async function loadAllBuildings() {
-    const buildings = await fetchJSON("/api/buildings");
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    const {buildings: buildings, buildingsById: buildingsById} = await loadGameData();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
@@ -3313,13 +3318,12 @@
     }
   }
   async function loadBuildingsForCheck() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings, buildingsById: buildingsById} = await loadGameData();
     const requiredExtensionOverrides = await getRequiredExtensionsOverrides();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
     }
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
     return buildings.filter(b => !leitstelleIds.has(String(b.id)) && categoryForBuilding(b) !== "Unbekannt").map(b => {
       const pseudoId = getPseudoBuildingTypeId(b);
       const buildingKey = getBuildingKey(b);
@@ -3668,13 +3672,14 @@
       renderRequiredExtensionsSettingsScreen(() => renderStationCheckScreen(savedState));
     });
     document.getElementById("vn-station-check-refresh").addEventListener("click", () => {
+      invalidateGameDataCache();
       renderStationCheckScreen(currentState());
     });
     renderTable();
   }
   const PERSONNEL_SCAN_CONCURRENCY = 5;
   async function loadPersonnelCheckStations() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings} = await loadGameData();
     const leitstelleIds = new Set;
     for (const b of buildings) {
       if (b.leitstelle_building_id != null) leitstelleIds.add(String(b.leitstelle_building_id));
@@ -3691,18 +3696,20 @@
       };
     });
   }
+  function parseFilterableBySlugs(row) {
+    try {
+      const slugs = JSON.parse(row.dataset.filterableBy || "[]");
+      return Array.isArray(slugs) ? slugs : [];
+    } catch {
+      return [];
+    }
+  }
   function parsePersonalPageHtml(html) {
     const doc = (new DOMParser).parseFromString(html, "text/html");
     const rows = doc.querySelectorAll("#personal_table tbody tr");
     const entries = [];
     rows.forEach(row => {
-      let slugs;
-      try {
-        slugs = JSON.parse(row.dataset.filterableBy || "[]");
-      } catch {
-        slugs = [];
-      }
-      if (!Array.isArray(slugs)) slugs = [];
+      const slugs = parseFilterableBySlugs(row);
       const id = row.querySelector("input.personal-delete-checkbox")?.value || null;
       const name = row.children[1]?.textContent.trim() || "";
       const educationText = row.children[2]?.textContent.trim() || "";
@@ -3850,7 +3857,7 @@
     return 1 + builtExtraRooms;
   }
   async function loadOwnedSchoolsByCategory() {
-    const buildings = await fetchJSON("/api/buildings");
+    const {buildings: buildings} = await loadGameData();
     const byCategory = {};
     for (const b of buildings) {
       const category = Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY).find(cat => SCHOOL_BUILDING_TYPE_BY_CATEGORY[cat] === b.building_type);
@@ -4449,7 +4456,7 @@
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
     let allStations, vehicles;
     try {
-      [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2() ]);
+      [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles) ]);
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
@@ -4609,8 +4616,7 @@
     return slugs;
   }
   async function loadCrewCheckVehicles() {
-    const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
-    const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
+    const {vehicles: vehicles, buildingsById: buildingsById} = await loadGameData();
     return vehicles.map(v => {
       const typeId = v.vehicle_type ?? v.type;
       const info = getVehicleTypeCrewTarget(typeId);
@@ -4652,15 +4658,9 @@
     }
     const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
     const people = [ ...doc.querySelectorAll("#personal_table tr[data-filterable-by]") ].map(row => {
-      let slugs;
-      try {
-        slugs = JSON.parse(row.dataset.filterableBy || "[]");
-      } catch {
-        slugs = [];
-      }
       const assignBtn = row.querySelector("a.btn-success[personal_id], a.btn-warning[personal_id]");
       return {
-        slugs: Array.isArray(slugs) ? slugs : [],
+        slugs: parseFilterableBySlugs(row),
         inTraining: row.textContent.includes("Im Unterricht"),
         assignedHere: !!row.querySelector("a.btn-assigned"),
         assignedElsewhere: !!row.querySelector("a.btn-warning[personal_id]"),
@@ -5904,7 +5904,7 @@
     }
     let allStations, vehicles, scanData, qualifications, scanMeta;
     try {
-      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), fetchAllVehiclesV2(), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
+      [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
@@ -6139,6 +6139,7 @@
     document.getElementById("vn-bp-apply-refresh").addEventListener("click", async () => {
       const btn = document.getElementById("vn-bp-apply-refresh");
       btn.disabled = true;
+      invalidateGameDataCache();
       body.insertAdjacentHTML("beforeend", `<p id="vn-bp-apply-refresh-status"><em>Wachen, Fahrzeuge und Personal werden neu geladen ...</em></p>`);
       try {
         await scanAllPersonnel((done, of) => {
