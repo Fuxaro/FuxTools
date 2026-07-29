@@ -400,7 +400,7 @@
   const FIRE_VEHICLE_NAME_CATEGORIES = {
     "Löschfahrzeuge": [ "HLF10", "HLF20", "LF20", "LF10", "TSF-W", "KLF", "MLF", "LF8/6", "LF20/16", "LF10/6", "LF16-TS" ],
     "Tanklöschfahrzeuge": [ "PTLF4000", "GTLF" ],
-    Schlauchwagen: [ "GW-L2-Wasser", "SW1000", "SW2000", "SW2000-Tr", "SW-KatS", "Anh Schlauch" ],
+    Schlauchwagen: [ "GW-L2-Wasser", "SW1000", "SW2000", "SW2000-Tr", "SW-KatS", "SW Kats", "Anh Schlauch" ],
     "Andere Fahrzeuge": [ "DLK23", "ELW1", "RW", "GW-A", "GW-Öl", "GW-Messtechnik", "GW-Gefahrgut", "GW-Höhenrettung", "ELW2", "MTW", "Dekon-P", "FwK", "Kleintankwagen", "Tankwagen" ],
     Rettungsdienst: [ "RTW", "NEF", "KTW", "GRTW", "NAW", "ITW" ],
     Wasserrettung: [ "GW-Taucher", "GW-Wasserrettung", "MZB" ],
@@ -409,9 +409,9 @@
     "Logistik-Fahrzeuge": [ "GW-L1", "GW-L2", "MTF-L", "LF-L", "AB-L" ],
     Netzersatzanlagen: [ "NEA50", "NEA200", "AB-NEA50", "AB-NEA200" ],
     "Lüfter": [ "GW-Lüfter", "Anh Lüfter", "AB-Lüfter" ],
-    Drohnen: [ "MTF-Drohne", "ELW-Drohne", "ELW2-Drohne" ],
+    Drohnen: [ "MTF-Drohne", "MTF Drohne", "ELW-Drohne", "ELW Drohne", "ELW2-Drohne", "ELW2 Drohne" ],
     Verpflegungsdienst: [ "GW-Verpflegung", "GW-Küche", "MTW-Verpflegung", "FKH" ],
-    Bahnrettung: [ "RW-Schiene", "HLF-Schiene", "AB-Schiene" ],
+    Bahnrettung: [ "RW-Schiene", "HLF-Schiene", "HLF Schiene", "AB-Schiene" ],
     "Sonderlöschmittel": [ "SLF", "Anh Sonderlöschmittel", "AB-Sonderlöschmittel", "AB-Wasser/Schaum" ],
     "Abrollbehälter": [ "WLF" ]
   };
@@ -1842,25 +1842,63 @@
     const result = data.result || data;
     return Array.isArray(result) ? result : Object.values(result);
   }
-  async function fetchAllVehiclesV2() {
-    let vehicles = [];
-    let nextPage = "/api/v2/vehicles?limit=2000";
+  async function fetchAllPagesV2(firstPageUrl) {
+    let items = [];
+    let nextPage = firstPageUrl;
     while (nextPage) {
       const res = await fetchWithTimeout(nextPage, {
         credentials: "same-origin"
       });
-      if (!res.ok) throw new Error(`Fehler beim Laden der Fahrzeuge: ${res.status}`);
+      if (!res.ok) throw new Error(`Fehler beim Laden von ${nextPage}: ${res.status}`);
       const data = await res.json();
-      vehicles = vehicles.concat(data.result || []);
+      items = items.concat(data.result || []);
       nextPage = data.paging?.next_page || null;
     }
-    return vehicles;
+    return items;
+  }
+  async function fetchAllVehiclesV2() {
+    return fetchAllPagesV2("/api/v2/vehicles?limit=2000");
+  }
+  async function fetchAllBuildingsV2() {
+    return fetchAllPagesV2("/api/v2/buildings");
   }
   const GAME_DATA_CACHE_TTL_MS = 60 * 1e3;
   let gameDataCache = null;
   let gameDataFetchPromise = null;
+  const SESSION_CACHE_TTL_MS = 5 * 60 * 1e3;
+  function readSessionCache(key) {
+    try {
+      const parsed = JSON.parse(sessionStorage.getItem(key));
+      if (!parsed || !Array.isArray(parsed.value)) return null;
+      const userId = getCurrentUserId();
+      if (userId !== null && parsed.user_id !== userId) return null;
+      if (Date.now() - parsed.lastUpdate >= SESSION_CACHE_TTL_MS) return null;
+      return parsed.value;
+    } catch {
+      return null;
+    }
+  }
+  function writeSessionCache(key, value) {
+    const userId = getCurrentUserId();
+    if (userId === null) return;
+    try {
+      sessionStorage.setItem(key, JSON.stringify({
+        value: value,
+        lastUpdate: Date.now(),
+        user_id: userId
+      }));
+    } catch {}
+  }
+  async function loadWithSessionCache(key, cachedValue, fetchFn) {
+    if (cachedValue) return cachedValue;
+    const value = await fetchFn();
+    writeSessionCache(key, value);
+    return value;
+  }
   function invalidateGameDataCache() {
     gameDataCache = null;
+    sessionStorage.removeItem("aVehicles");
+    sessionStorage.removeItem("aBuildings");
   }
   async function loadGameData(forceRefresh = false) {
     if (!forceRefresh && gameDataCache && Date.now() - gameDataCache.fetchedAt < GAME_DATA_CACHE_TTL_MS) {
@@ -1870,7 +1908,9 @@
       return gameDataFetchPromise;
     }
     gameDataFetchPromise = (async () => {
-      const [vehicles, buildings] = await Promise.all([ fetchAllVehiclesV2(), fetchJSON("/api/buildings") ]);
+      const cachedVehicles = !forceRefresh ? readSessionCache("aVehicles") : null;
+      const cachedBuildings = !forceRefresh ? readSessionCache("aBuildings") : null;
+      const [vehicles, buildings] = await Promise.all([ loadWithSessionCache("aVehicles", cachedVehicles, fetchAllVehiclesV2), loadWithSessionCache("aBuildings", cachedBuildings, fetchAllBuildingsV2) ]);
       const buildingsById = new Map(buildings.map(b => [ String(b.id), b ]));
       gameDataCache = {
         vehicles: vehicles,
@@ -2223,8 +2263,14 @@
     pageJQuery(modal).modal("hide");
   }
   function getCurrentUsername() {
+    if (typeof unsafeWindow.user_name === "string" && unsafeWindow.user_name) {
+      return unsafeWindow.user_name;
+    }
     const el = document.querySelector('a[href^="/profile"], .dropdown-toggle[href^="/profile"]');
     return el?.textContent?.trim() || null;
+  }
+  function getCurrentUserId() {
+    return typeof unsafeWindow.user_id === "number" ? unsafeWindow.user_id : null;
   }
   let currentMode = "rename";
   function renderMainMenu() {
