@@ -2,12 +2,22 @@
 
 Kurzer Überblick über die wichtigsten Neuerungen von FuxTools.
 
-## Stable (v1.0.4)
+## Stable (v1.0.6)
 
-- Diagnose: Schulungen-Übersicht zeigt jetzt zusätzlich "X vorhanden / Ziel Y–Z" je Ausbildung
-  (Tooltip mit Aufschlüsselung pro Wache) - hilft nachzuvollziehen, warum ein Mangel angezeigt
-  wird, z.B. wenn der aktive Bauplan mehr Fahrzeuge eines Typs vorsieht, als aktuell an der Wache
-  stehen.
+- Bugfix (kritisch): "Max ausbauen" im Wachenausbau baute bisher nur eine einzige Stufe statt bis
+  zur Zielstufe durchzubauen und zog auch nur deren Einzelpreis ab, obwohl die Gesamtkosten aller
+  fehlenden Stufen angezeigt wurden (das Spiel erlaubt pro Anfrage nur eine Stufe). Zusätzlich
+  meldete FuxTools jeden Ausbau-Versuch als erfolgreich, ohne zu prüfen, ob das Spiel ihn mangels
+  Guthaben überhaupt durchgeführt hat (der Ausbau-Endpunkt leitet bei Erfolg UND Fehlschlag auf
+  dieselbe Seite weiter). "Max ausbauen" baut jetzt echt Stufe für Stufe durch und prüft direkt
+  im Anschluss den tatsächlichen Ausbau-Stand per API - Ergebnis-Bildschirm und Verlaufs-Eintrag
+  zeigen die wirklich erreichte Stufe samt Fehlermeldung, falls das Guthaben nicht gereicht hat.
+
+- Diagnose: Schulungen-Übersicht zeigt jetzt zusätzlich "X vorhanden / Ziel Y–Z" je Ausbildung,
+  aufklappbar mit Aufschlüsselung pro Wache (auch bereits ausreichend besetzte Wachen, als "voll"
+  markiert) - hilft nachzuvollziehen, warum ein Mangel angezeigt wird, z.B. wenn der aktive
+  Bauplan mehr Fahrzeuge eines Typs vorsieht, als aktuell an der Wache stehen, oder wenn eine
+  Wache schlicht schon ausreichend besetzt ist und deshalb woanders nicht mitgezählt wird.
 
 - Bugfix: "SW Kats" landete im Bauplan-Editor fälschlich unter "Andere Fahrzeuge" statt bei den
   übrigen Schlauchwagen, ebenso "ELW Drohne"/"ELW2 Drohne"/"MTF Drohne" statt bei "Drohnen" und
