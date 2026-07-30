@@ -36,9 +36,12 @@ Lehrgänge direkt starten.
   Ausbauten/Fahrzeuge direkt kaufen und überzählige Fahrzeuge verkaufen.
 
 **Schulungen**
-- Gleicher Auswahl-Assistent wie Wachen-Check (Bauplan, dann Wachen) - zeigt fehlendes
-  Ausbildungspersonal und startet Lehrgänge direkt (Minimum oder Maximum), berücksichtigt bereits
-  laufende Lehrgänge.
+- Ähnlicher Auswahl-Assistent wie Wachen-Check (Baupläne, dann Wachen), aber mit mehreren
+  gleichzeitig wählbaren Bauplänen (je Gebäudetyp höchstens einer) - so lässt sich z. B.
+  Kleinwache + Normalwache zusammen prüfen, damit sich deren Personalbedarf dieselben
+  Klassenräume teilt statt getrennt teilweise nicht vollständig gefüllte Lehrgänge zu benötigen.
+  Zeigt fehlendes Ausbildungspersonal und startet Lehrgänge direkt (Minimum oder Maximum),
+  berücksichtigt bereits laufende Lehrgänge.
 
 **Fahrzeug-Besatzung**
 - Weist automatisch passend ausgebildetes Personal zu (z. B. Notarzt), wahlweise Minimum- oder
