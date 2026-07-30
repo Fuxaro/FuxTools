@@ -35,13 +35,16 @@ Lehrgänge direkt starten.
   Soll/Ist je Wache für Ausbauten, Fahrzeuge und Personal (inkl. Gesamtübersicht), kann fehlende
   Ausbauten/Fahrzeuge direkt kaufen und überzählige Fahrzeuge verkaufen.
 
-**Schulungen**
+**Lehrgänge**
 - Ähnlicher Auswahl-Assistent wie Wachen-Check (Baupläne, dann Wachen), aber mit mehreren
   gleichzeitig wählbaren Bauplänen (je Gebäudetyp höchstens einer) - so lässt sich z. B.
   Kleinwache + Normalwache zusammen prüfen, damit sich deren Personalbedarf dieselben
   Klassenräume teilt statt getrennt teilweise nicht vollständig gefüllte Lehrgänge zu benötigen.
   Zeigt fehlendes Ausbildungspersonal und startet Lehrgänge direkt (Minimum oder Maximum),
-  berücksichtigt bereits laufende Lehrgänge.
+  berücksichtigt bereits laufende Lehrgänge. Bei Verbandslehrgängen zusätzlich: passendes
+  eigenes Personal auch in bereits offene, von anderen Mitgliedern gestartete Lehrgänge
+  eintragen, ohne selbst einen neuen zu öffnen - funktioniert auch ohne eigenes
+  Öffnen-Recht im Verband.
 
 **Fahrzeug-Besatzung**
 - Weist automatisch passend ausgebildetes Personal zu (z. B. Notarzt), wahlweise Minimum- oder

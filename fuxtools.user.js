@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.2
+// @version     1.3.6
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -157,12 +157,7 @@
       finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">\n            Gesehen\n          </button>\n        </div>\n      `);
     }
     const emptyState = !items.length && !finishedBlocks.length ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
-    body.innerHTML = `\n      <div id="vn-task-center-marker" style="display:none;"></div>\n      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div id="vn-tc-schoolings"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
-    loadRunningSchoolingsOverview().then(runs => {
-      const container = document.getElementById("vn-tc-schoolings");
-      if (!container || !runs.length) return;
-      container.innerHTML = `\n          <p class="text-muted" style="font-size:12px; margin:10px 0 4px;"><b>Laufende Schulungen</b></p>\n          ${runs.map(r => `\n                <div class="vn-task-center-item text-muted" style="display:flex; justify-content:space-between; gap:8px;">\n                  <span><span class="glyphicon glyphicon-education" aria-hidden="true"></span> <b>${escapeHtml(r.schoolName)}</b>: ${escapeHtml(r.title)}</span>\n                  <span>fertig ${escapeHtml(new Date(r.finishAt).toLocaleString("de-DE"))}</span>\n                </div>\n              `).join("")}\n        `;
-    }).catch(e => console.warn("[FuxTools] Laufende Schulungen konnten nicht geladen werden:", e));
+    body.innerHTML = `\n      <div id="vn-task-center-marker" style="display:none;"></div>\n      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderHistoryScreen);
     body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -201,7 +196,15 @@
     dialog.style.minWidth = `min(${px}px, 95%)`;
     dialog.style.maxWidth = `min(${px}px, 95%)`;
   }
+  let screenRenderGeneration = 0;
+  function currentRenderToken() {
+    return screenRenderGeneration;
+  }
+  function isCurrentRenderToken(token) {
+    return token === screenRenderGeneration;
+  }
   function setScreenTitle(text) {
+    screenRenderGeneration++;
     const el = document.getElementById("vehicle-naming-modal-breadcrumb");
     if (el) el.textContent = text ? `› ${text}` : "";
   }
@@ -1566,7 +1569,7 @@
     leitstelle_rename: "Leitstellen umbenennen",
     required_extensions_config: "Geforderte Ausbauten",
     personnel_requirements_config: "Personal-Standard",
-    schooling_start: "Schulung gestartet",
+    schooling_start: "Lehrgang gestartet",
     crew_assignment: "Fahrzeug-Besatzung",
     crew_unassign_all: "Besatzung abgezogen"
   };
@@ -2311,7 +2314,7 @@
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
     const sectionLabelStyle = "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
-    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Schulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Verbandsschulungen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
+    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Lehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Verbandslehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
       currentMode = "rename";
       renderLeitstelleSelection();
@@ -2526,9 +2529,11 @@
   async function renderRequiredExtensionsSettingsScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Einstellungen › Geforderte Ausbauten");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
     const overrides = await getRequiredExtensionsOverrides();
+    if (!isCurrentRenderToken(renderToken)) return;
     const types = requiredExtensionsConfigurableTypes();
     function isChecked(pseudoId, extensionId) {
       const list = overrides ? overrides[pseudoId] || [] : getDefaultRequiredExtensions(pseudoId);
@@ -2588,9 +2593,11 @@
   async function renderHistoryScreen() {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Verlauf");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Verlauf ...</p>`;
     const history = await getHistory();
+    if (!isCurrentRenderToken(renderToken)) return;
     const applyRowVisibility = makeRowVisibilityFilter({
       container: body,
       searchInputId: "vn-history-search",
@@ -2645,12 +2652,14 @@
         const date = new Date(entry.timestamp);
         const typeLabel = HISTORY_TYPE_LABELS[entry.type] || entry.type || "-";
         const costLabel = entry.cost == null ? "-" : entry.currency === "coins" ? `${entry.cost.toLocaleString("de-DE")} Coins` : `${entry.cost.toLocaleString("de-DE")} Credits`;
-        const searchText = `${entry.label || ""} ${entry.station || ""}`.toLowerCase();
+        const personnelNames = (entry.personnelByStation || []).flatMap(s => s.names);
+        const searchText = `${entry.label || ""} ${entry.station || ""} ${personnelNames.join(" ")}`.toLowerCase();
         const statusBadge = STATUS_LABEL[entry.status] ? `<span class="label ${STATUS_BADGE_CLASS[entry.status] || "label-default"}">${STATUS_LABEL[entry.status]}</span>` : `<span class="label label-success">abgeschlossen</span>`;
+        const personnelHtml = personnelNames.length ? `\n              <details style="margin-top:2px;">\n                <summary class="text-muted" style="cursor:pointer;">${personnelNames.length} Person(en) anzeigen</summary>\n                <div class="text-muted" style="padding-left:8px;">\n                  ${entry.personnelByStation.map(s => s.names.map(n => `<a href="/buildings/${s.stationId}" target="_blank">${escapeHtml(n)}</a>`).join(", ")).join(" · ")}\n                </div>\n              </details>\n            ` : "";
         return `\n            <tr class="vn-history-row" data-type="${escapeHtml(entry.type || "")}" data-search="${escapeHtml(searchText)}">\n              <td>${escapeHtml(date.toLocaleDateString("de-DE"))}</td>\n              <td>${escapeHtml(date.toLocaleTimeString("de-DE", {
           hour: "2-digit",
           minute: "2-digit"
-        }))}</td>\n              <td>${statusBadge}</td>\n              <td>\n                ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}\n                <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>\n              </td>\n              <td>${escapeHtml(costLabel)}</td>\n            </tr>\n          `;
+        }))}</td>\n              <td>${statusBadge}</td>\n              <td>\n                ${escapeHtml(typeLabel)}: ${escapeHtml(entry.label || "-")}\n                <br><small class="text-muted">${escapeHtml(entry.station || "-")} · v${escapeHtml(entry.version || "?")}</small>\n                ${personnelHtml}\n              </td>\n              <td>${escapeHtml(costLabel)}</td>\n            </tr>\n          `;
       }).join("");
     }
     function historyHeaderHtml() {
@@ -2677,7 +2686,7 @@
       bindHistorySortHeaders();
       applyRowVisibility();
     }
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Zeigt Ausbauten, Lagerräume, Ausbaustufen sowie Umbenennen/Zurücksetzen von\n        Fahrzeugen, Wachen und Leitstellen, die über FuxTools durchgeführt wurden - nur\n        auf diesem Gerät gespeichert.\n      </p>\n      <div style="display:flex; gap:8px; margin-bottom:8px;">\n        <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">\n          <option value="">Alle Aktionen</option>\n          <option value="extension">Ausbau</option>\n          <option value="storage">Lagerraum</option>\n          <option value="level">Ausbaustufe</option>\n          <option value="vehicle_rename">Fahrzeuge umbenennen</option>\n          <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>\n          <option value="station_rename">Wachen umbenennen</option>\n          <option value="leitstelle_rename">Leitstellen umbenennen</option>\n          <option value="required_extensions_config">Geforderte Ausbauten</option>\n          <option value="personnel_requirements_config">Personal-Standard</option>\n          <option value="schooling_start">Schulung gestartet</option>\n          <option value="crew_assignment">Fahrzeug-Besatzung</option>\n          <option value="crew_unassign_all">Besatzung abgezogen</option>\n        </select>\n        <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">\n      </div>\n      <div style="max-height:55vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:12%;">\n            <col style="width:10%;">\n            <col style="width:14%;">\n            <col style="width:44%;">\n            <col style="width:20%;">\n          </colgroup>\n          <thead>\n            <tr id="vn-history-head">${historyHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-history-body">\n            ${renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}\n          </tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Zeigt Ausbauten, Lagerräume, Ausbaustufen sowie Umbenennen/Zurücksetzen von\n        Fahrzeugen, Wachen und Leitstellen, die über FuxTools durchgeführt wurden - nur\n        auf diesem Gerät gespeichert.\n      </p>\n      <div style="display:flex; gap:8px; margin-bottom:8px;">\n        <select id="vn-history-type-filter" class="form-control" style="max-width:220px;">\n          <option value="">Alle Aktionen</option>\n          <option value="extension">Ausbau</option>\n          <option value="storage">Lagerraum</option>\n          <option value="level">Ausbaustufe</option>\n          <option value="vehicle_rename">Fahrzeuge umbenennen</option>\n          <option value="vehicle_reset">Fahrzeuge zurücksetzen</option>\n          <option value="station_rename">Wachen umbenennen</option>\n          <option value="leitstelle_rename">Leitstellen umbenennen</option>\n          <option value="required_extensions_config">Geforderte Ausbauten</option>\n          <option value="personnel_requirements_config">Personal-Standard</option>\n          <option value="schooling_start">Lehrgang gestartet</option>\n          <option value="crew_assignment">Fahrzeug-Besatzung</option>\n          <option value="crew_unassign_all">Besatzung abgezogen</option>\n        </select>\n        <input type="text" id="vn-history-search" class="form-control" placeholder="Suchen ..." style="flex:1;">\n      </div>\n      <div style="max-height:55vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n          <colgroup>\n            <col style="width:12%;">\n            <col style="width:10%;">\n            <col style="width:14%;">\n            <col style="width:44%;">\n            <col style="width:20%;">\n          </colgroup>\n          <thead>\n            <tr id="vn-history-head">${historyHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-history-body">\n            ${renderHistoryRows() || '<tr><td colspan="5" class="text-muted">Noch keine Aktionen aufgezeichnet.</td></tr>'}\n          </tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
     document.getElementById("vn-history-search").addEventListener("input", applyRowVisibility);
     document.getElementById("vn-history-type-filter").addEventListener("change", applyRowVisibility);
@@ -2686,9 +2695,11 @@
   async function renderErrorLogScreen(goBack = renderSettingsScreen) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Fehlerprotokoll");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Fehlerprotokoll ...</p>`;
     const log = await getErrorLog();
+    if (!isCurrentRenderToken(renderToken)) return;
     const rows = log.map(entry => {
       const date = new Date(entry.timestamp);
       return `\n          <tr>\n            <td>${escapeHtml(date.toLocaleDateString("de-DE"))} ${escapeHtml(date.toLocaleTimeString("de-DE", {
@@ -3857,16 +3868,19 @@
   async function renderStationCheckScreen(preservedState) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachenausbau");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
     let stations;
     try {
       stations = await loadBuildingsForCheck();
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden der Wachen: ${escapeHtml(e.message)}</p>\n        <button id="vn-btn-back" type="button" class="btn btn-default"><span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück</button>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     const lastLoadedAt = Date.now();
     const withMissingExtensionsCount = stations.filter(s => s.missingExtensions.length > 0).length;
     let sortColumn = preservedState?.sortColumn || "category";
@@ -4426,21 +4440,24 @@
     }
     await storeData(scanData, PERSONNEL_SCAN_KEY);
   }
+  async function revertPendingSchoolingAssignment(plan, need) {
+    const scanData = await getPersonnelScanData();
+    for (const {stationId: stationId, people: people} of plan.selectedByStation) {
+      const scan = scanData[stationId];
+      if (!scan) continue;
+      if (scan.inTrainingCounts) {
+        scan.inTrainingCounts[need.slug] = Math.max(0, (scan.inTrainingCounts[need.slug] || 0) - people.length);
+      }
+      if (scan.inTrainingNames?.[need.slug]) {
+        scan.inTrainingNames[need.slug].splice(-people.length, people.length);
+      }
+      scan.available = (scan.available || 0) + people.length;
+      scan.inTraining = Math.max(0, (scan.inTraining || 0) - people.length);
+    }
+    await storeData(scanData, PERSONNEL_SCAN_KEY);
+  }
   function earliestSchoolingFinish(schoolingRuns, schoolId) {
     return earliestActiveFinish(schoolingRuns.filter(run => String(run.building_id) === String(schoolId)), "finish_time");
-  }
-  async function loadRunningSchoolingsOverview() {
-    const [schoolingRuns, schoolsByCategory] = await Promise.all([ fetchSchoolingRuns(), loadOwnedSchoolsByCategory() ]);
-    const schoolNameById = new Map;
-    for (const schools of Object.values(schoolsByCategory)) {
-      for (const school of schools) schoolNameById.set(school.id, school.name);
-    }
-    const now = Date.now();
-    return schoolingRuns.filter(run => new Date(run.finish_time).getTime() > now).map(run => ({
-      schoolName: schoolNameById.get(String(run.building_id)) || `Schule ${run.building_id}`,
-      title: run.education_title || "Lehrgang",
-      finishAt: new Date(run.finish_time).getTime()
-    })).sort((a, b) => a.finishAt - b.finishAt);
   }
   const VEHICLE_CATALOG_SLUG_ALIASES = {
     dekon_p: "decontamination_personnel"
@@ -4471,18 +4488,7 @@
       return !!entry && entry.statusText.includes("Verfügbar");
     });
   }
-  async function planTrainingRun(need, school, mode, isAlliance = false) {
-    const schoolId = school.id;
-    const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
-    const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(await fetchSchoolingRuns(), schoolId);
-    const occupied = rawOccupied + getPendingSchoolingRooms(schoolId, rawOccupied);
-    const freeRooms = Math.max(0, school.maxRooms - occupied);
-    if (freeRooms <= 0) {
-      throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
-    }
-    const {authenticityToken: authenticityToken, educationValue: educationValue, educationLabel: educationLabel} = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
-    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
-    const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
+  async function selectPersonnelForNeed(need, mode, capacity) {
     const deficitOf = station => mode === "max" ? station.maxDeficit : station.minDeficit;
     const stationsByDeficit = [ ...need.stations ].sort((a, b) => deficitOf(b) - deficitOf(a));
     const selectedByStation = [];
@@ -4499,7 +4505,24 @@
         people: people
       });
     }
-    const selected = selectedByStation.flatMap(s => s.people);
+    return {
+      selectedByStation: selectedByStation,
+      selected: selectedByStation.flatMap(s => s.people)
+    };
+  }
+  async function planTrainingRun(need, school, mode, isAlliance = false) {
+    const schoolId = school.id;
+    const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
+    const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(await fetchSchoolingRuns(), schoolId);
+    const occupied = rawOccupied + getPendingSchoolingRooms(schoolId, rawOccupied);
+    const freeRooms = Math.max(0, school.maxRooms - occupied);
+    if (freeRooms <= 0) {
+      throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
+    }
+    const {authenticityToken: authenticityToken, educationValue: educationValue, educationLabel: educationLabel} = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
+    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
+    const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
+    const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
       throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als "Verfügbar" markiert - evtl. schon in Ausbildung oder im Einsatz).');
     }
@@ -4520,8 +4543,58 @@
       rawOccupiedBeforeAction: rawOccupied
     };
   }
+  async function planFillOpenRuns(need, runs) {
+    const totalFreeSeats = runs.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
+    const capacity = Math.min(totalFreeSeats, need.totalMaxDeficit);
+    const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, "max", capacity);
+    if (!selected.length) {
+      throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als "Verfügbar" markiert - evtl. schon in Ausbildung oder im Einsatz).');
+    }
+    const sortedRuns = [ ...runs ].sort((a, b) => (b.open_spaces || 0) - (a.open_spaces || 0));
+    const remaining = [ ...selected ];
+    const assignments = [];
+    for (const run of sortedRuns) {
+      if (!remaining.length) break;
+      const slice = remaining.splice(0, run.open_spaces || 0);
+      if (slice.length) assignments.push({
+        run: run,
+        people: slice
+      });
+    }
+    return {
+      selectedByStation: selectedByStation,
+      selected: selected,
+      assignments: assignments,
+      isAlliance: true,
+      fillExisting: true
+    };
+  }
+  async function submitFillOpenRuns(plan) {
+    for (const {run: run, people: people} of plan.assignments) {
+      await joinOpenSchoolingRun(run.id, people.map(p => p.id));
+    }
+  }
+  function personnelByStationFromPlan(plan) {
+    return plan.selectedByStation.map(s => ({
+      stationId: s.stationId,
+      stationName: s.stationName,
+      names: s.people.map(p => p.name)
+    }));
+  }
   async function fetchAllianceSchoolings() {
     return await fetchJSON("/api/alliance_schoolings");
+  }
+  function normalizeEducationText(text) {
+    return text.replace(/\s*\(\d+\s*Tage?\)\s*$/i, "").trim().toLowerCase();
+  }
+  function matchesEducationTitle(label, title) {
+    if (!label || !title) return false;
+    const a = normalizeEducationText(label);
+    const b = normalizeEducationText(title);
+    return !!a && !!b && (a === b || a.includes(b) || b.includes(a));
+  }
+  function matchesPlanEducation(plan, run) {
+    return matchesEducationTitle(plan.educationLabel, run.education_title);
   }
   async function joinOpenSchoolingRun(runId, personalIds) {
     const csrfToken = getCsrfTokenOrThrow(runId);
@@ -4567,8 +4640,8 @@
     if (!plan.isAlliance) return;
     const maxAttempts = 5;
     const pollIntervalMs = 6e4;
-    let newRun = null;
-    for (let attempt = 1; attempt <= maxAttempts && !newRun; attempt++) {
+    let candidates = [];
+    for (let attempt = 1; attempt <= maxAttempts && candidates.length < plan.actualRooms; attempt++) {
       if (allianceTrainingCancelled) break;
       if (attempt > 1) {
         onProgress(`Lehrgang noch nicht in der Spiel-API sichtbar - nächste Prüfung in 60 Sekunden (Versuch ${attempt}/${maxAttempts}) ...`);
@@ -4576,21 +4649,40 @@
         if (allianceTrainingCancelled) break;
       }
       const afterRuns = await fetchAllianceSchoolings();
-      const candidates = afterRuns.filter(r => String(r.building_id) === String(plan.schoolId) && !beforeRunIds.has(String(r.id)));
-      if (candidates.length) {
-        newRun = candidates.reduce((a, b) => Number(b.id) > Number(a.id) ? b : a);
-      }
+      candidates = afterRuns.filter(r => String(r.building_id) === String(plan.schoolId) && !beforeRunIds.has(String(r.id)) && matchesPlanEducation(plan, r));
     }
-    if (allianceTrainingCancelled && !newRun) {
+    if (allianceTrainingCancelled && !candidates.length) {
       throw new Error("Abgebrochen, während auf die Bestätigung durch das Spiel gewartet wurde - der Lehrgang wurde an der Schule geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell nachtragen.");
     }
-    if (!newRun) {
+    if (!candidates.length) {
       throw new Error(`Lehrgang wurde an der Verbandschule geöffnet, aber auch nach ${maxAttempts} Versuchen nicht in der Lehrgangsliste (/api/alliance_schoolings) aufgetaucht - Personal wurde NICHT zugewiesen, bitte manuell nachtragen.`);
     }
-    await joinOpenSchoolingRun(newRun.id, plan.selected.map(p => p.id));
+    if (candidates.length > plan.actualRooms) {
+      throw new Error(`Es sind ${candidates.length} neue, zur gewaehlten Ausbildung passende Lehrgaenge an dieser Schule aufgetaucht, obwohl nur ${plan.actualRooms} angefordert wurden - vermutlich hat zeitgleich ein anderes Verbandsmitglied denselben Lehrgang geoeffnet. Personal wurde sicherheitshalber NICHT zugewiesen, bitte manuell im Spiel prüfen und zuweisen.`);
+    }
+    candidates.sort((a, b) => Number(a.id) - Number(b.id));
+    const remaining = [ ...plan.selected ];
+    for (const run of candidates) {
+      if (!remaining.length) break;
+      const capacity = typeof run.open_spaces === "number" ? run.open_spaces : SCHOOLING_SEATS_PER_ROOM;
+      const slice = remaining.splice(0, capacity);
+      if (slice.length) await joinOpenSchoolingRun(run.id, slice.map(p => p.id));
+    }
+    if (remaining.length) {
+      const err = new Error(`${remaining.length} von ${plan.selected.length} Person(en) konnten nicht mehr zugewiesen werden (nicht genug freie Plätze in den neu geöffneten Lehrgängen) - bitte manuell nachtragen: ${remaining.map(p => p.name).join(", ")}.`);
+      err.unassignedPeople = remaining;
+      throw err;
+    }
+  }
+  function selectedByStationSubset(plan, people) {
+    const ids = new Set(people.map(p => p.id));
+    return plan.selectedByStation.map(s => ({
+      ...s,
+      people: s.people.filter(p => ids.has(p.id))
+    })).filter(s => s.people.length);
   }
   function executeAllianceTrainingRun(need, school, qualificationName, plan, goBack) {
-    const title = `Verbandsschulung (${qualificationName})`;
+    const title = `Verbandslehrgang (${qualificationName})`;
     runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue), goBack);
   }
   async function runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue) {
@@ -4607,22 +4699,26 @@
         label: "Abbruch angefordert ..."
       });
     }, viaQueue, goBack);
+    await recordPendingSchoolingAssignment(plan, need);
     updateBackgroundTaskProgress(10, "Öffne Lehrgang an der Verbandschule ...");
     let error = null;
     try {
       await submitTrainingRun(plan, message => updateBackgroundTaskProgress(50, message));
       recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms, plan.rawOccupiedBeforeAction);
-      await recordPendingSchoolingAssignment(plan, need);
     } catch (e) {
       error = e;
+      const revertPlan = Array.isArray(e.unassignedPeople) ? {
+        selectedByStation: selectedByStationSubset(plan, e.unassignedPeople)
+      } : plan;
+      await revertPendingSchoolingAssignment(revertPlan, need);
     }
-    const personIds = plan.selected.map(p => p.id).join(", ");
     await updateHistoryEntry(historyId, {
-      label: error ? `${qualificationName} (Verbandschule) - Fehler: ${error.message}` : `${qualificationName} (Verbandschule, ${plan.selected.length} Person(en): ${personIds})`,
+      label: error ? `${qualificationName} (Verbandschule) - Fehler: ${error.message}` : `${qualificationName} (Verbandschule, ${plan.selected.length} Person(en))`,
+      personnelByStation: personnelByStationFromPlan(plan),
       status: error ? allianceTrainingCancelled ? "cancelled" : "error" : "done"
     });
     if (error && !allianceTrainingCancelled) {
-      reportError(`Verbandsschulung (${school.name})`, error);
+      reportError(`Verbandslehrgang (${school.name})`, error);
     }
     const renderResult = () => renderAllianceTrainingResultScreen({
       qualificationName: qualificationName,
@@ -4636,11 +4732,72 @@
   }
   function renderAllianceTrainingResultScreen({qualificationName: qualificationName, school: school, plan: plan, error: error, cancelled: cancelled, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle(`Verbandsschulung (${qualificationName})`);
+    setScreenTitle(`Verbandslehrgang (${qualificationName})`);
     const body = document.getElementById("vehicle-naming-modal-body");
     const statusHtml = cancelled ? `<span class="text-warning">Abgebrochen - Lehrgang wurde ggf. bereits geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell prüfen.</span>` : error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">Lehrgang gestartet und mit ${plan.selected.length} Person(en) besetzt.</span>`;
     body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
+  }
+  function executeAllianceFillRun(need, qualificationName, plan, goBack) {
+    const title = `Verbandslehrgang auffüllen (${qualificationName})`;
+    runOrQueueBackgroundTask(title, viaQueue => runAllianceFillRun(need, qualificationName, plan, goBack, title, viaQueue), goBack);
+  }
+  async function runAllianceFillRun(need, qualificationName, plan, goBack, title, viaQueue) {
+    const schoolNames = [ ...new Set(plan.assignments.map(a => a.run.education_title)) ].join(", ");
+    const historyId = await startHistoryEntry({
+      type: "schooling_start",
+      label: `${qualificationName} (offener Verbandslehrgang) - wird aufgefüllt ...`,
+      station: schoolNames
+    });
+    beginBackgroundTask(title, () => {
+      updateHistoryEntry(historyId, {
+        status: "cancelled",
+        label: "Abbruch angefordert ..."
+      });
+    }, viaQueue, goBack);
+    await recordPendingSchoolingAssignment(plan, need);
+    updateBackgroundTaskProgress(30, "Trage Personal in offene Lehrgänge ein ...");
+    let error = null;
+    try {
+      await submitFillOpenRuns(plan);
+    } catch (e) {
+      error = e;
+      await revertPendingSchoolingAssignment(plan, need);
+    }
+    await updateHistoryEntry(historyId, {
+      label: error ? `${qualificationName} (offener Verbandslehrgang) - Fehler: ${error.message}` : `${qualificationName} (offener Verbandslehrgang aufgefüllt, ${plan.selected.length} Person(en))`,
+      personnelByStation: personnelByStationFromPlan(plan),
+      status: error ? "error" : "done"
+    });
+    if (error) {
+      reportError(`Verbandslehrgang auffüllen (${qualificationName})`, error);
+    }
+    const renderResult = () => renderAllianceFillResultScreen({
+      qualificationName: qualificationName,
+      plan: plan,
+      error: error,
+      goBack: goBack
+    });
+    finishBackgroundTask(title, renderResult);
+  }
+  function renderAllianceFillResultScreen({qualificationName: qualificationName, plan: plan, error: error, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    setScreenTitle(`Verbandslehrgang auffüllen (${qualificationName})`);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const statusHtml = error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">${plan.selected.length} Person(en) in bereits offene Lehrgänge eingetragen.</span>`;
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+  }
+  function renderAllianceFillConfirmScreen({need: need, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
+    setModalWidth(MODAL_WIDTH_COMPACT);
+    const body = document.getElementById("vehicle-naming-modal-body");
+    const stationRows = plan.selectedByStation.map(s => `\n          <tr>\n            <td>${escapeHtml(s.stationName)}</td>\n            <td>${s.people.length}</td>\n          </tr>\n        `).join("");
+    const runRows = plan.assignments.map(a => `\n          <tr>\n            <td>${escapeHtml(a.run.education_title || "-")}</td>\n            <td>${a.people.length} von ${a.run.open_spaces} freien Plätzen</td>\n          </tr>\n        `).join("");
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> - bereits offene Verbandslehrgänge auffüllen</p>\n      <p class="text-muted" style="font-size:12px;">\n        Kein neuer Lehrgang wird geöffnet - es wird nur eigenes Personal in bereits offene,\n        passende Instanzen eingetragen (von einem anderen Mitglied geöffnet, oder selbst ohne\n        Öffnen-Recht im Verband).\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Lehrgang</th><th>Belegt</th></tr></thead>\n        <tbody>${runRows}</tbody>\n      </table>\n      <p>Insgesamt <b>${plan.selected.length}</b> Person(en).</p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-fill-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling-fill" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    document.getElementById("vn-btn-confirm-schooling-fill").addEventListener("click", () => {
+      executeAllianceFillRun(need, qualificationName, plan, goBack);
+    });
   }
   function renderSchoolingConfirmScreen({need: need, school: school, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -4673,14 +4830,15 @@
           await logHistoryEntry({
             type: "schooling_start",
             label: qualificationName,
-            station: `${school.name} (${plan.selected.length} Person(en): ${plan.selected.map(p => p.id).join(", ")})`
+            station: `${school.name} (${plan.selected.length} Person(en))`,
+            personnelByStation: personnelByStationFromPlan(plan)
           });
           statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
           setTimeout(goBack, 600);
         } catch (e) {
           statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
           const personIds = plan.selected.map(p => p.id).join(", ");
-          logErrorToStorage(`Schulung fehlgeschlagen: ${qualificationName} (${school.name}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
+          logErrorToStorage(`Lehrgang fehlgeschlagen: ${qualificationName} (${school.name}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
           confirmBtn.disabled = false;
           backBtn.disabled = false;
         }
@@ -4691,12 +4849,14 @@
     return blueprints.map(bp => bp.id).sort().join(",");
   }
   async function renderSchoolingBlueprintSelection(goBack = renderMainMenu, isAlliance = false) {
-    const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
+    const titlePrefix = isAlliance ? "Verbandslehrgänge" : "Lehrgänge";
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle(`${titlePrefix} › Baupläne wählen`);
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
     const blueprints = await getStationBlueprints();
+    if (!isCurrentRenderToken(renderToken)) return;
     const entries = Object.values(blueprints).sort((a, b) => a.name.localeCompare(b.name, "de"));
     if (!entries.length) {
       body.innerHTML = `\n        <p class="text-muted">Noch keine Baupläne vorhanden - lege zuerst einen im Wachen-Bauplaner an.</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button id="vn-schooling-goto-blueprints" type="button" class="btn btn-primary">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner öffnen\n          </button>\n        </div>\n      `;
@@ -4715,7 +4875,7 @@
       const rows = bps.map(bp => `\n            <div class="checkbox" style="margin: 2px 0;">\n              <label>\n                <input type="checkbox" class="vn-schooling-bp-check" data-pseudo-id="${escapeHtml(pseudoId)}" value="${escapeHtml(bp.id)}">\n                ${escapeHtml(bp.name)}\n              </label>\n            </div>`).join("");
       return `\n        <div class="panel panel-default" style="margin-bottom: 8px;">\n          <div class="panel-heading"><b>${escapeHtml(typeNameForPseudoId(pseudoId))}</b></div>\n          <div class="panel-body">${rows}</div>\n        </div>`;
     }).join("");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welche(n) Bauplan/Baupläne sollen ${isAlliance ? "Verbandsschulungen" : "Schulungen"} geprüft werden?\n        Je Gebäudetyp höchstens ein Bauplan, über mehrere Gebäudetypen hinweg beliebig kombinierbar\n        (z. B. Kleinwache + Normalwache zusammen, damit sich der Bedarf dieselben Klassenräume\n        teilt). Danach folgen noch die Wachen.\n      </p>\n      <div style="max-height:55vh; overflow:auto;">${groupBlocks}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-bp-go" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welche(n) Bauplan/Baupläne sollen ${isAlliance ? "Verbandslehrgänge" : "Lehrgänge"} geprüft werden?\n        Je Gebäudetyp höchstens ein Bauplan, über mehrere Gebäudetypen hinweg beliebig kombinierbar\n        (z. B. Kleinwache + Normalwache zusammen, damit sich der Bedarf dieselben Klassenräume\n        teilt). Danach folgen noch die Wachen.\n      </p>\n      <div style="max-height:55vh; overflow:auto;">${groupBlocks}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-bp-go" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     body.querySelectorAll(".vn-schooling-bp-check").forEach(cb => {
       cb.addEventListener("change", () => {
@@ -4738,7 +4898,8 @@
   async function renderSchoolingStationSelection(blueprints, goBack = renderMainMenu, isAlliance = false) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     const blueprintNames = blueprints.map(bp => bp.name).join(" + ");
-    setScreenTitle(`${isAlliance ? "Verbandsschulungen" : "Schulungen"} › ${blueprintNames} › Wachen wählen`);
+    setScreenTitle(`${isAlliance ? "Verbandslehrgänge" : "Lehrgänge"} › ${blueprintNames} › Wachen wählen`);
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen ...</p>`;
     const selectionKey = schoolingSelectionKeyFor(blueprints);
@@ -4746,10 +4907,12 @@
     try {
       [allStations, savedSelection] = await Promise.all([ loadBuildingsForCheck(), getSchoolingStationSelection(selectionKey) ]);
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     const pseudoIds = new Set(blueprints.map(bp => bp.pseudoId));
     const stations = allStations.filter(s => pseudoIds.has(s.pseudoId) && s.category !== "Krankenhäuser & Schulen" && s.category !== "Sonstiges");
     const preselected = new Set(savedSelection || []);
@@ -4772,7 +4935,7 @@
       }).join("");
       return `\n        <div class="panel panel-default vn-schooling-leitstelle-panel" data-leitstelle-id="${escapeHtml(id)}" style="margin-bottom: 8px;">\n          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">\n            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>\n            <b>${escapeHtml(info.name)}</b>\n            <span class="text-muted">\n              (${info.stations.length} Wachen,\n              <span class="vn-schooling-leitstelle-count" data-leitstelle-id="${escapeHtml(id)}">${initialSelectedCount}</span>\n              ausgewählt)\n            </span>\n            <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">\n              <input type="checkbox" class="vn-schooling-leitstelle-master" data-leitstelle-id="${escapeHtml(id)}">\n              alle auswählen\n            </label>\n          </div>\n          <div id="${collapseId}" class="panel-collapse collapse">\n            <div class="panel-body" style="column-count: 2; column-gap: 20px;">\n              ${stationRows}\n            </div>\n          </div>\n        </div>`;
     }).join("");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan/Baupläne: <b>${escapeHtml(blueprintNames)}</b>. Wähle die Wachen aus, die für\n        Schulungen geprüft werden sollen (Leitstelle anklicken zum Auf-/Zuklappen).\n      </p>\n      <input type="text" id="vn-schooling-station-search" class="form-control input-sm" style="max-width:280px; margin-bottom:8px;"\n             placeholder="Wache suchen ...">\n      <div style="max-height: 50vh; overflow-y: auto; padding: 4px;">\n        ${groupBlocks || '<p class="text-muted"><em>Keine passenden Wachen gefunden.</em></p>'}\n      </div>\n      <p id="vn-schooling-station-search-empty" class="text-muted" style="display:none;"><em>Keine Wache passt zur Suche.</em></p>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-go" type="button" class="btn btn-primary">\n          Los <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan/Baupläne: <b>${escapeHtml(blueprintNames)}</b>. Wähle die Wachen aus, die für\n        Lehrgänge geprüft werden sollen (Leitstelle anklicken zum Auf-/Zuklappen).\n      </p>\n      <input type="text" id="vn-schooling-station-search" class="form-control input-sm" style="max-width:280px; margin-bottom:8px;"\n             placeholder="Wache suchen ...">\n      <div style="max-height: 50vh; overflow-y: auto; padding: 4px;">\n        ${groupBlocks || '<p class="text-muted"><em>Keine passenden Wachen gefunden.</em></p>'}\n      </div>\n      <p id="vn-schooling-station-search-empty" class="text-muted" style="display:none;"><em>Keine Wache passt zur Suche.</em></p>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-go" type="button" class="btn btn-primary">\n          Los <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", () => renderSchoolingBlueprintSelection(goBack, isAlliance));
     body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
       icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
@@ -4824,24 +4987,29 @@
     });
   }
   async function renderSchoolingScreen(blueprints, stations, goBack = renderMainMenu, isAlliance = false) {
-    const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
+    const titlePrefix = isAlliance ? "Verbandslehrgänge" : "Lehrgänge";
     setModalWidth(MODAL_WIDTH_DEFAULT);
     const blueprintNames = blueprints.map(bp => bp.name).join(" + ");
     setScreenTitle(`${titlePrefix} › ${blueprintNames}`);
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Bedarf ...</p>`;
     let schoolsByCategory;
     try {
       schoolsByCategory = isAlliance ? await loadAllianceSchoolsByCategory() : await loadOwnedSchoolsByCategory();
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
     await ensureFreshPersonnelScan((done, of) => {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
+    if (!isCurrentRenderToken(renderToken)) return;
     const requirements = {};
     for (const blueprint of blueprints) {
       const blueprintRanges = computeBlueprintPersonnelRequirementRanges(blueprint);
@@ -4852,6 +5020,7 @@
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const qualifications = await getPersonnelQualifications();
+    if (!isCurrentRenderToken(renderToken)) return;
     let minStaff = await getPersonnelSchoolingMinStaff();
     const schoolByCategory = {};
     for (const category of Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY)) {
@@ -4863,6 +5032,16 @@
       schoolingRuns = await fetchSchoolingRuns();
     } catch (e) {
       console.warn("[FuxTools] /api/schoolings konnte nicht geladen werden:", e);
+    }
+    if (!isCurrentRenderToken(renderToken)) return;
+    let openAllianceRuns = [];
+    if (isAlliance) {
+      try {
+        openAllianceRuns = (await fetchAllianceSchoolings()).filter(r => (r.open_spaces || 0) > 0);
+      } catch (e) {
+        console.warn("[FuxTools] /api/alliance_schoolings (offene Lehrgaenge) konnte nicht geladen werden:", e);
+      }
+      if (!isCurrentRenderToken(renderToken)) return;
     }
     for (const schools of Object.values(schoolsByCategory)) {
       for (const school of schools) {
@@ -4883,6 +5062,7 @@
     function recomputeNeeds() {
       needs = computeTrainingNeeds(stations, requirements, scanData, minStaff);
     }
+    let fillableRunsByKey = {};
     recomputeNeeds();
     function categoryCapacityLabel(category) {
       const schools = schoolsByCategory[category] || [];
@@ -4918,6 +5098,7 @@
       return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
     }
     function renderGroups() {
+      fillableRunsByKey = {};
       if (!needs.length) {
         return `<p class="text-muted">Kein fehlendes Personal gefunden (oder noch nicht gescannt).</p>`;
       }
@@ -4937,9 +5118,13 @@
           const haveBreakdown = need.stations.map(s => `${escapeHtml(s.name)}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}` + (s.minDeficit > 0 || s.maxDeficit > 0 ? "" : " ✓ voll")).join("<br>");
           const needKey = `${need.category}::${need.slug}`;
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
-          const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch die laufende Schulung abgedeckt - keine weitere Aktion nötig, sobald diese fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Schulung läuft)\n                       </button>` : "";
+          const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch den laufenden Lehrgang abgedeckt - keine weitere Aktion nötig, sobald dieser fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Lehrgang läuft)\n                       </button>` : "";
           const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
-          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+          const fillableRuns = isAlliance ? openAllianceRuns.filter(r => matchesEducationTitle(qualificationName, r.education_title)) : [];
+          const fillableSeats = fillableRuns.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
+          fillableRunsByKey[needKey] = fillableRuns;
+          const fillBtn = fillableSeats > 0 && need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-info btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}"\n                             title="Trägt Personal in bereits offene Verbandslehrgänge ein, ohne selbst einen neuen zu öffnen - geht auch ohne eigenes Öffnen-Recht im Verband.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> ${fillableSeats} ${fillableSeats === 1 ? "freien Platz" : "freie Plätze"} in offenem Lehrgang nutzen\n                     </button>` : "";
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn} ${fillBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
         }).join("");
         return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
       }).join("");
@@ -4954,6 +5139,7 @@
         recomputeNeeds();
         document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
         wireStartButtons();
+        wireFillButtons();
       });
       document.getElementById("vn-schooling-scan-btn").addEventListener("click", async () => {
         const btn = document.getElementById("vn-schooling-scan-btn");
@@ -4969,6 +5155,7 @@
           recomputeNeeds();
           document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
           wireStartButtons();
+          wireFillButtons();
         } catch (e) {
           statusEl.textContent = `Fehler: ${e.message}`;
         } finally {
@@ -4976,6 +5163,7 @@
         }
       });
       wireStartButtons();
+      wireFillButtons();
     }
     function wireStartButtons() {
       body.querySelectorAll(".vn-schooling-start").forEach(btn => {
@@ -5006,27 +5194,61 @@
         });
       });
     }
+    function wireFillButtons() {
+      body.querySelectorAll(".vn-schooling-fill").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const need = needs.find(n => `${n.category}::${n.slug}` === btn.dataset.key);
+          if (!need) return;
+          const runs = fillableRunsByKey[btn.dataset.key] || [];
+          if (!runs.length) return;
+          const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"], .vn-schooling-fill[data-key="${btn.dataset.key}"]`);
+          const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
+          const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
+          siblingButtons.forEach(b => b.disabled = true);
+          statusEl.textContent = "Lade Vorschau ...";
+          try {
+            const plan = await planFillOpenRuns(need, runs);
+            renderAllianceFillConfirmScreen({
+              need: need,
+              qualificationName: qualificationName,
+              plan: plan,
+              goBack: () => renderSchoolingScreen(blueprints, stations, goBack, isAlliance)
+            });
+          } catch (e) {
+            statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+            siblingButtons.forEach(b => b.disabled = false);
+          }
+        });
+      });
+    }
+    if (!isCurrentRenderToken(renderToken)) return;
     render();
   }
   async function renderStationStatisticsScreen() {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Statistik");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
     let allStations, vehicles;
     try {
       [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles) ]);
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     body.innerHTML = `<p>Prüfe letzten Personal-Scan ...</p>`;
     await ensureFreshPersonnelScan((done, of) => {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
+    if (!isCurrentRenderToken(renderToken)) return;
     const scanData = await getPersonnelScanData();
     const scanMeta = await getPersonnelScanMeta();
+    if (!isCurrentRenderToken(renderToken)) return;
     const vehicleCountByStation = new Map;
     for (const v of vehicles) {
       const stationId = String(v.building_id ?? v.building);
@@ -5494,6 +5716,7 @@
   async function renderVehicleCrewScreen(goBack = renderMainMenu, allVehiclesFull = null, selectedLeitstelleIds = null) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Fahrzeug-Besatzung");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     let allVehicles = allVehiclesFull;
     if (!allVehicles) {
@@ -5501,10 +5724,12 @@
       try {
         allVehicles = await loadCrewCheckVehicles();
       } catch (e) {
+        if (!isCurrentRenderToken(renderToken)) return;
         body.innerHTML = `\n          <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n          <div class="vn-sticky-footer">\n            <button id="vn-btn-back" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n            </button>\n          </div>\n        `;
         document.getElementById("vn-btn-back").addEventListener("click", goBack);
         return;
       }
+      if (!isCurrentRenderToken(renderToken)) return;
     }
     const scopeVehicles = selectedLeitstelleIds ? allVehicles.filter(v => selectedLeitstelleIds.includes(v.leitstelleId)) : allVehicles;
     let staffingMode = await getVehicleCrewStaffingMode();
@@ -6014,6 +6239,7 @@
   async function renderStationBlueprintsListScreen(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen-Bauplaner");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
     const blueprints = await getStationBlueprints();
@@ -6021,6 +6247,7 @@
     try {
       allStations = await loadBuildingsForCheck();
     } catch {}
+    if (!isCurrentRenderToken(renderToken)) return;
     const stationCounts = new Map;
     for (const s of allStations) {
       const label = s.typeName || "Unbekannter Gebäudetyp";
@@ -6127,12 +6354,14 @@
   async function renderStationBlueprintEditScreen(blueprintId, goBack) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachen-Bauplaner › Bearbeiten");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
     const blueprints = await getStationBlueprints();
     const existing = blueprintId ? blueprints[blueprintId] : null;
     const id = existing?.id || generateBlueprintId();
     const qualifications = await getPersonnelQualifications();
+    if (!isCurrentRenderToken(renderToken)) return;
     const pseudoOptions = PSEUDO_BUILDING_TYPES.map(t => ({
       id: t.id,
       name: typeNameForPseudoId(t.id)
@@ -6284,9 +6513,11 @@
   async function renderStationCheckBlueprintSelection(goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle("Wachen-Check › Bauplan wählen");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
     const blueprints = await getStationBlueprints();
+    if (!isCurrentRenderToken(renderToken)) return;
     const entries = Object.values(blueprints).sort((a, b) => a.name.localeCompare(b.name, "de"));
     if (!entries.length) {
       body.innerHTML = `\n        <p class="text-muted">Noch keine Baupläne vorhanden - lege zuerst einen im Wachen-Bauplaner an.</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button id="vn-station-check-goto-blueprints" type="button" class="btn btn-primary">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner öffnen\n          </button>\n        </div>\n      `;
@@ -6308,16 +6539,19 @@
   async function renderStationCheckStationSelection(blueprint, goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
     setScreenTitle(`Wachen-Check › ${blueprint.name} › Wachen wählen`);
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen ...</p>`;
     let allStations, savedSelection;
     try {
       [allStations, savedSelection] = await Promise.all([ loadBuildingsForCheck(), getStationCheckSelection(blueprint.id) ]);
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     const stations = allStations.filter(s => s.pseudoId === blueprint.pseudoId);
     const preselected = new Set(savedSelection || []);
     const byLeitstelle = new Map;
@@ -6392,9 +6626,11 @@
   async function renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter) {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Wachen-Check");
+    const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade ...</p>`;
     const blueprints = await getStationBlueprints();
+    if (!isCurrentRenderToken(renderToken)) return;
     const blueprint = blueprints[blueprintId];
     if (!blueprint) {
       body.innerHTML = `\n        <p class="text-danger">Bauplan nicht gefunden.</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
@@ -6405,10 +6641,12 @@
     try {
       [allStations, vehicles, scanData, qualifications, scanMeta] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles), getPersonnelScanData(), getPersonnelQualifications(), getPersonnelScanMeta() ]);
     } catch (e) {
+      if (!isCurrentRenderToken(renderToken)) return;
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
+    if (!isCurrentRenderToken(renderToken)) return;
     const matchingStations = allStations.filter(s => s.pseudoId === blueprint.pseudoId && stationIdFilter.has(s.id));
     const vehiclesByStationAndType = new Map;
     for (const v of vehicles) {
@@ -6648,7 +6886,7 @@
       const breakdown = [ ...counts.entries() ].sort((a, b) => b[1] - a[1]).map(([label, count]) => `${count}x ${escapeHtml(label)}`).join(", ");
       return `\n              <p class="text-danger" style="font-size:12px;">\n                Keine Wache mit Gebäudetyp "${escapeHtml(typeNameForPseudoId(blueprint.pseudoId))}" gefunden.\n                Deine Wachen laut FuxTools: ${breakdown || "keine gefunden"}.\n              </p>`;
     })() : "";
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)\n        angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,\n        Personal über Schulungen/Fahrzeug-Besatzung nachrüsten.\n      </p>\n      ${noMatchHint}\n      <div style="max-height:60vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead id="vn-bp-apply-thead">${theadHtml()}</thead>\n          <tbody id="vn-bp-apply-tbody" data-blueprint-id="${escapeHtml(blueprintId)}">${sortedRowsHtml()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-bp-apply-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n        </button>\n        <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan "<b>${escapeHtml(blueprint.name)}</b>" auf ${matchingStations.length} Wache(n)\n        angewendet. Fehlende Ausbauten/Fahrzeuge direkt kaufen, überzählige (rot) verkaufen,\n        Personal über Lehrgänge/Fahrzeug-Besatzung nachrüsten.\n      </p>\n      ${noMatchHint}\n      <div style="max-height:60vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead id="vn-bp-apply-thead">${theadHtml()}</thead>\n          <tbody id="vn-bp-apply-tbody" data-blueprint-id="${escapeHtml(blueprintId)}">${sortedRowsHtml()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-bp-apply-refresh" type="button" class="btn btn-default btn-xs" title="Neu laden">\n          <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n        </button>\n        <span class="label label-default" style="font-size:12px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     bindSortHeaders();
     bindRowActions();

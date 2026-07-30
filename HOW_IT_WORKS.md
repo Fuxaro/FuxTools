@@ -4,7 +4,7 @@
 
 - **Wachen-Bauplaner**: festlegen, wie eine Wache aussehen soll.
 - **Wachen-Check**: Bauplan auf echte Wachen anwenden, fehlendes kaufen.
-- **Schulungen**: benötigtes Personal ausbilden lassen.
+- **Lehrgänge**: benötigtes Personal ausbilden lassen.
 - **Fahrzeug-Besatzung**: Personal auf die Fahrzeuge verteilen.
 
 Wachenausbau und Schnellumbenennung funktionieren unabhängig davon.
@@ -13,7 +13,7 @@ Wachenausbau und Schnellumbenennung funktionieren unabhängig davon.
 
 Ausbauten und Fahrzeuge je Gebäudetyp festlegen - Personal wird automatisch daraus berechnet.
 Beliebig viele Baupläne je Typ möglich, z. B. für unterschiedlich ausgebaute Wachen-Gruppen. Kein
-"aktiver" Bauplan mehr - welcher gilt, wählst du in Wachen-Check/Schulungen jedes Mal neu.
+"aktiver" Bauplan mehr - welcher gilt, wählst du in Wachen-Check/Lehrgänge jedes Mal neu.
 
 ## Wachen-Check
 
@@ -21,7 +21,7 @@ Bauplan wählen, dann Wachen (nach Leitstelle gruppiert, mit Suche - Auswahl wir
 Soll/Ist für Ausbauten, Fahrzeuge und Personal je Wache. Fehlendes direkt kaufen, Überzähliges mit
 einem Klick verkaufen.
 
-## Schulungen
+## Lehrgänge
 
 Ähnlicher Ablauf wie Wachen-Check, aber mit mehreren gleichzeitig wählbaren Bauplänen (je
 Gebäudetyp höchstens einer, z. B. Kleinwache + Normalwache zusammen) - so teilt sich deren
