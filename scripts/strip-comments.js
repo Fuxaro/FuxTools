@@ -1,21 +1,7 @@
 #!/usr/bin/env node
-// Entfernt interne Erklaer-Kommentare aus fuxtools.user.js fuer einen main/Stable-Release -
-// der Pflicht-UserScript-Header (@version/@match/...) und der Lizenztext direkt danach
-// bleiben unangetastet, alles danach (unser eigener Code-Kommentar-Wald) wird gestrippt.
-//
-// Ansatz: die Datei wird an einer festen Textmarke (Start der grossen IIFE) in zwei Teile
-// gesplittet. Teil 1 (Header + Lizenztext) bleibt UNVERAENDERT als reiner Text erhalten. Teil
-// 2 (der komplette Script-Code) ist fuer sich allein schon ein gueltiges, eigenstaendiges
-// JavaScript-Statement (die IIFE) und wird als Ganzes durch Terser gejagt (compress:false,
-// mangle:false, beautify:true) - Terser parst echtes JavaScript und entfernt dabei
-// ausschliesslich echte Kommentar-Token, laesst String-/Template-Literal-Inhalte (z.B. URLs
-// wie "https://...", die zufaellig auch "//" enthalten) unangetastet. Ein eigener Regex-Ansatz
-// waere hier gefaehrlich gewesen, siehe Testlauf in der Commit-Historie.
-//
 // Nutzung: node scripts/strip-comments.js [Ausgabedatei]
-// Ohne Argument wird nach fuxtools.user.js.stripped geschrieben (ueberschreibt NIE die
-// eigentliche Quelldatei) - beim tatsaechlichen main-Release wird das Ergebnis manuell
-// geprueft und dann gezielt nach main committet.
+// Ohne Argument wird nach fuxtools.user.js.stripped geschrieben (überschreibt NIE die
+// Quelldatei selbst).
 
 const fs = require("fs");
 const path = require("path");
@@ -26,8 +12,6 @@ const BOUNDARY_MARKER = "(async function () {";
 
 async function main() {
   const outPath = process.argv[2] || `${SRC}.stripped`;
-  // Schutz gegen versehentliches Ueberschreiben der kommentierten Beta-Quelldatei - die
-  // ist unsere einzige "Master"-Version, ein Ausgabepfad muss deshalb explizit abweichen.
   if (path.resolve(outPath) === path.resolve(SRC)) {
     throw new Error("Ausgabepfad darf nicht fuxtools.user.js selbst sein - andere Datei angeben.");
   }
@@ -36,7 +20,7 @@ async function main() {
   const boundaryIndex = source.indexOf(BOUNDARY_MARKER);
   if (boundaryIndex === -1) {
     throw new Error(
-      `Marker "${BOUNDARY_MARKER}" nicht gefunden - Aufbau von fuxtools.user.js geaendert? ` +
+      `Marker "${BOUNDARY_MARKER}" nicht gefunden - Aufbau von fuxtools.user.js geändert? ` +
         "Marker in diesem Skript anpassen."
     );
   }
@@ -56,7 +40,7 @@ async function main() {
 
   const removedComments = (body.match(/\/\/|\/\*/g) || []).length;
   console.log(`Geschrieben nach ${outPath}`);
-  console.log(`Unveraendert erhalten: die ersten ${boundaryIndex} Zeichen (Header + Lizenztext).`);
+  console.log(`Unverändert erhalten: die ersten ${boundaryIndex} Zeichen (Header + Lizenztext).`);
   console.log(`Im Code-Teil entfernt: ${removedComments} Kommentar-Marker (// oder /*).`);
 }
 
