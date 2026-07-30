@@ -1,9 +1,4 @@
 #!/usr/bin/env node
-// Stellt aus einem beta-Stand eine main/Stable-Version her: schaltet nur noch das kosmetische
-// CHANNEL-Label auf "stable" um. @updateURL/@downloadURL zeigen inzwischen in BEIDEN Repos
-// bereits auf main (es gibt keinen oeffentlichen beta-Branch als eigenen Verteil-Kanal mehr) -
-// hier also nichts mehr umzuschreiben.
-//
 // Nutzung: node scripts/set-stable-channel.js <Eingabedatei> <Ausgabedatei>
 
 const fs = require("fs");
