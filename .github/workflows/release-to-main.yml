@@ -37,10 +37,13 @@ jobs:
           echo "BRANCH=release/v$VERSION" >> "$GITHUB_ENV"
           git checkout -b "release/v$VERSION"
           cp -r .github/workflows /tmp/main-workflows
+          cp -r scripts /tmp/main-scripts
           git rm -rf . > /dev/null
           git checkout betarepo/main -- .
           rm -rf .github/workflows
           cp -r /tmp/main-workflows .github/workflows
+          rm -rf scripts
+          cp -r /tmp/main-scripts scripts
           rm -f CHANGELOG.md CLAUDE.md
 
       - name: Abhängigkeiten installieren
