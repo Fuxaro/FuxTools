@@ -23,8 +23,11 @@ einem Klick verkaufen.
 
 ## Schulungen
 
-Gleicher Ablauf wie Wachen-Check. Zeigt fehlendes Ausbildungspersonal, startet Lehrgänge direkt
-(Minimum oder Maximum) - immer mit Vorschau, wer betroffen ist, bevor etwas passiert.
+Ähnlicher Ablauf wie Wachen-Check, aber mit mehreren gleichzeitig wählbaren Bauplänen (je
+Gebäudetyp höchstens einer, z. B. Kleinwache + Normalwache zusammen) - so teilt sich deren
+Personalbedarf dieselben Klassenräume, statt getrennt teilweise nicht vollständig gefüllte
+Lehrgänge zu benötigen. Zeigt fehlendes Ausbildungspersonal, startet Lehrgänge direkt (Minimum
+oder Maximum) - immer mit Vorschau, wer betroffen ist, bevor etwas passiert.
 
 ## Fahrzeug-Besatzung
 
