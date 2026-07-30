@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.6
+// @version     1.3.7
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -4543,10 +4543,11 @@
       rawOccupiedBeforeAction: rawOccupied
     };
   }
-  async function planFillOpenRuns(need, runs) {
+  async function planFillOpenRuns(need, runs, mode) {
     const totalFreeSeats = runs.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
-    const capacity = Math.min(totalFreeSeats, need.totalMaxDeficit);
-    const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, "max", capacity);
+    const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
+    const capacity = Math.min(totalFreeSeats, totalDeficit);
+    const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
       throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als "Verfügbar" markiert - evtl. schon in Ausbildung oder im Einsatz).');
     }
@@ -5121,12 +5122,15 @@
           const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch den laufenden Lehrgang abgedeckt - keine weitere Aktion nötig, sobald dieser fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Lehrgang läuft)\n                       </button>` : "";
           const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
           const fillableRuns = isAlliance ? openAllianceRuns.filter(r => matchesEducationTitle(qualificationName, r.education_title)) : [];
-          const fillableSeats = fillableRuns.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
+          const fillableSeatsTotal = fillableRuns.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
           fillableRunsByKey[needKey] = fillableRuns;
-          const fillBtn = fillableSeats > 0 && need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-info btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}"\n                             title="Trägt Personal in bereits offene Verbandslehrgänge ein, ohne selbst einen neuen zu öffnen - geht auch ohne eigenes Öffnen-Recht im Verband.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> ${fillableSeats} ${fillableSeats === 1 ? "freien Platz" : "freie Plätze"} in offenem Lehrgang nutzen\n                     </button>` : "";
-          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn} ${fillBtn}\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="margin-top:4px; font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+          const fillMinSeats = Math.min(fillableSeatsTotal, need.totalMinDeficit);
+          const fillMaxSeats = Math.min(fillableSeatsTotal, need.totalMaxDeficit);
+          const fillMinBtn = fillMinSeats > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="min"\n                             title="${fillMinSeats} passende(r) freie(r) Platz/Plätze in bereits offenen Verbandslehrgängen - kein eigenes Öffnen-Recht nötig.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Minimum\n                     </button>` : "";
+          const fillMaxBtn = fillMaxSeats > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="max"\n                             title="${fillMaxSeats} passende(r) freie(r) Platz/Plätze in bereits offenen Verbandslehrgängen - kein eigenes Öffnen-Recht nötig.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Maximum\n                     </button>` : "";
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                  </td>\n                  ${isAlliance ? `<td style="vertical-align:middle;">\n                           ${fillMinBtn} ${fillMaxBtn}\n                         </td>` : ""}\n                  <td style="vertical-align:middle;">\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
         }).join("");
-        return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr><th>Ausbildung</th><th>Fehlend</th><th>Aktion</th></tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
+        return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr>\n                    <th>Ausbildung</th>\n                    <th>Fehlend</th>\n                    <th>Neuen Lehrgang öffnen</th>\n                    ${isAlliance ? "<th>Bestehenden Lehrgang nutzen</th>" : ""}\n                    <th>Status</th>\n                  </tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
       }).join("");
     }
     function render() {
@@ -5201,13 +5205,14 @@
           if (!need) return;
           const runs = fillableRunsByKey[btn.dataset.key] || [];
           if (!runs.length) return;
+          const mode = btn.dataset.mode === "max" ? "max" : "min";
           const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"], .vn-schooling-fill[data-key="${btn.dataset.key}"]`);
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
           const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
           siblingButtons.forEach(b => b.disabled = true);
           statusEl.textContent = "Lade Vorschau ...";
           try {
-            const plan = await planFillOpenRuns(need, runs);
+            const plan = await planFillOpenRuns(need, runs, mode);
             renderAllianceFillConfirmScreen({
               need: need,
               qualificationName: qualificationName,
