@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.1
+// @version     1.3.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -1387,7 +1387,7 @@
       cost: 5e4,
       coins: 15
     }, ...Array.from({
-      length: 12
+      length: 13
     }, (_, i) => ({
       id: i + 2,
       cost: 1e5,
@@ -3287,27 +3287,27 @@
     if (!csrfToken) throw new Error(`CSRF-Token nicht gefunden (Gebäude ${buildingId}).`);
     return csrfToken;
   }
-  function createPendingAmountTracker(maxLifetimeMs) {
+  function createPendingAmountTracker(maxLifetimeMs, combine = (existingAmount, amount) => existingAmount + amount) {
     const entries = new Map;
     function record(key, amount, baseline) {
       const existing = entries.get(key);
       const stillPending = existing && Date.now() - existing.since < maxLifetimeMs;
       entries.set(key, {
-        amount: (stillPending ? existing.amount : 0) + amount,
+        amount: stillPending ? combine(existing.amount, amount) : amount,
         since: Date.now(),
         baseline: stillPending ? existing.baseline : baseline
       });
     }
     function get(key, realValue) {
       const entry = entries.get(key);
-      if (!entry) return 0;
+      if (!entry) return null;
       if (entry.baseline != null && realValue !== entry.baseline) {
         entries.delete(key);
-        return 0;
+        return null;
       }
       if (Date.now() - entry.since >= maxLifetimeMs) {
         entries.delete(key);
-        return 0;
+        return null;
       }
       return entry.amount;
     }
@@ -3418,6 +3418,22 @@
     }
     return null;
   }
+  const PENDING_LEVEL_MAX_LIFETIME_MS = 10 * 60 * 1e3;
+  const pendingBuildingLevels = createPendingAmountTracker(PENDING_LEVEL_MAX_LIFETIME_MS, (existingLevel, level) => level);
+  function recordPendingBuildingLevel(buildingId, level, baselineLevel) {
+    pendingBuildingLevels.record(String(buildingId), level, baselineLevel);
+  }
+  function getPendingBuildingLevel(buildingId, realLevel) {
+    return pendingBuildingLevels.get(String(buildingId), realLevel);
+  }
+  async function buildLevelAndRecordPending(buildingId, currency, level) {
+    await buildLevel(buildingId, currency, level);
+    const reachedLevel = await verifyLevelBuildResult(buildingId, level);
+    if (reachedLevel !== null && reachedLevel >= level) {
+      recordPendingBuildingLevel(buildingId, reachedLevel, level - 1);
+      invalidateGameDataCache();
+    }
+  }
   function executeBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack) {
     const title = `Wache ausbauen (${stationName})`;
     runOrQueueBackgroundTask(title, viaQueue => runBuildLevelsToMax(buildingId, levelsToBuild, currency, stationName, goBack, title, viaQueue), goBack);
@@ -3461,6 +3477,11 @@
       const actualLevel = await verifyLevelBuildResult(buildingId, plannedLevel);
       verifyFailed = actualLevel === null || actualLevel < plannedLevel;
       if (actualLevel !== null) reachedLevel = actualLevel;
+    }
+    const baselineLevel = levelsToBuild.length ? levelsToBuild[0].id - 1 : null;
+    if (reachedLevel !== null && baselineLevel !== null && reachedLevel > baselineLevel) {
+      recordPendingBuildingLevel(buildingId, reachedLevel, baselineLevel);
+      invalidateGameDataCache();
     }
     await updateHistoryEntry(historyId, {
       label: verifyFailed ? `Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht - vermutlich nicht genug ${currency === "coins" ? "Coins" : "Credits"}` : `${builtCount}/${levelsToBuild.length} Stufen gebaut (jetzt Stufe ${reachedLevel})` + (error ? ` - abgebrochen: ${error.message}` : ""),
@@ -3521,7 +3542,9 @@
       const missingExtensions = recommendedExtensions.filter(id => !extensions.some(e => e.type_id === id));
       const leitstelle = b.leitstelle_building_id ? buildingsById.get(String(b.leitstelle_building_id)) : null;
       const levelCatalog = LEVEL_CATALOG[buildingKey] || null;
-      const currentLevel = typeof b.level === "number" && b.level >= 0 ? b.level : -1;
+      const realLevel = typeof b.level === "number" && b.level >= 0 ? b.level : -1;
+      const pendingLevel = getPendingBuildingLevel(b.id, realLevel);
+      const currentLevel = pendingLevel != null && pendingLevel > realLevel ? pendingLevel : realLevel;
       const storageCatalog = STORAGE_CATALOG[buildingKey] || null;
       const ownedStorageIds = new Set((b.storage_upgrades || []).map(u => u.type_id));
       return {
@@ -3955,7 +3978,7 @@
             title: `Ausbaustufe ${level}`,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
-            onConfirm: currency => buildLevel(buildingId, currency, level),
+            onConfirm: currency => buildLevelAndRecordPending(buildingId, currency, level),
             goBack: () => renderStationCheckScreen(savedState),
             historyType: "level",
             historyLabel: `Ausbaustufe ${level}`,
@@ -4841,45 +4864,57 @@
     } catch (e) {
       console.warn("[FuxTools] /api/schoolings konnte nicht geladen werden:", e);
     }
-    for (const school of Object.values(schoolByCategory)) {
-      if (!school) continue;
-      const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(schoolingRuns, school.id);
-      const pending = getPendingSchoolingRooms(school.id, rawOccupied);
-      const occupied = rawOccupied + pending;
-      const freeRooms = Math.max(0, school.maxRooms - occupied);
-      const nextFreeAt = isAlliance ? earliestEmbeddedSchoolingFinish(school.schoolings) : earliestSchoolingFinish(schoolingRuns, school.id);
-      capacityBySchoolId[school.id] = {
-        maxRooms: school.maxRooms,
-        freeRooms: freeRooms,
-        nextFreeAt: nextFreeAt,
-        pending: pending
-      };
+    for (const schools of Object.values(schoolsByCategory)) {
+      for (const school of schools) {
+        const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(schoolingRuns, school.id);
+        const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+        const occupied = rawOccupied + pending;
+        const freeRooms = Math.max(0, school.maxRooms - occupied);
+        const nextFreeAt = isAlliance ? earliestEmbeddedSchoolingFinish(school.schoolings) : earliestSchoolingFinish(schoolingRuns, school.id);
+        capacityBySchoolId[school.id] = {
+          maxRooms: school.maxRooms,
+          freeRooms: freeRooms,
+          nextFreeAt: nextFreeAt,
+          pending: pending
+        };
+      }
     }
     let needs = [];
     function recomputeNeeds() {
       needs = computeTrainingNeeds(stations, requirements, scanData, minStaff);
     }
     recomputeNeeds();
-    function capacityLabel(school) {
-      if (!school) {
+    function categoryCapacityLabel(category) {
+      const schools = schoolsByCategory[category] || [];
+      if (!schools.length) {
         return isAlliance ? `<span class="text-muted">Keine Verbandschule mit Lehrgangs-Recht gefunden</span>` : `<span class="text-muted">Keine eigene Schule</span>`;
       }
-      const info = capacityBySchoolId[school.id];
-      if (!info) return "";
-      if (info.error) {
-        return `${escapeHtml(school.name)} · <span class="text-danger">Kapazität unbekannt (${escapeHtml(info.error)})</span>`;
+      let totalMax = 0;
+      let totalFree = 0;
+      let totalPending = 0;
+      let earliestFreeAt = null;
+      for (const school of schools) {
+        const info = capacityBySchoolId[school.id];
+        if (!info) continue;
+        totalMax += info.maxRooms;
+        totalFree += info.freeRooms;
+        totalPending += info.pending || 0;
+        if (info.freeRooms <= 0 && info.nextFreeAt && (earliestFreeAt === null || info.nextFreeAt < earliestFreeAt)) {
+          earliestFreeAt = info.nextFreeAt;
+        }
       }
-      const freeSeats = info.freeRooms * SCHOOLING_SEATS_PER_ROOM;
-      const untilLabel = info.nextFreeAt ? ` (bis ${new Date(info.nextFreeAt).toLocaleString("de-DE")})` : "";
-      const pendingHint = info.pending ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="${info.pending} Klassenraum/-räume gerade erst gestartet - vorläufig mitgezählt, bis das Spiel es selbst anzeigt"></span>` : "";
-      const statusBadge = info.freeRooms > 0 ? `<span class="label label-success">${info.freeRooms}/${info.maxRooms} Klassenräume frei (${freeSeats} Plätze)${pendingHint}</span>` : `<span class="label label-warning">alle ${info.maxRooms} Klassenräume belegt${escapeHtml(untilLabel)}${pendingHint}</span>`;
-      return `${escapeHtml(school.name)} · ${statusBadge}`;
+      const schoolCountLabel = `${schools.length} Schule${schools.length === 1 ? "" : "n"}`;
+      const freeSeats = totalFree * SCHOOLING_SEATS_PER_ROOM;
+      const untilLabel = earliestFreeAt ? ` (nächster ab ${new Date(earliestFreeAt).toLocaleString("de-DE")})` : "";
+      const pendingHint = totalPending ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="${totalPending} Klassenraum/-räume gerade erst gestartet - vorläufig mitgezählt, bis das Spiel es selbst anzeigt"></span>` : "";
+      const statusBadge = totalFree > 0 ? `<span class="label label-success">${totalFree}/${totalMax} Klassenräume frei (${freeSeats} Plätze)${pendingHint}</span>` : `<span class="label label-warning">alle ${totalMax} Klassenräume belegt${escapeHtml(untilLabel)}${pendingHint}</span>`;
+      return `${schoolCountLabel} · ${statusBadge}`;
     }
     function renderSchoolOverview() {
       const categoriesWithNeeds = new Set(needs.map(n => n.category));
-      const relevantCategories = CATEGORY_ORDER.filter(cat => schoolByCategory[cat] || categoriesWithNeeds.has(cat));
+      const relevantCategories = CATEGORY_ORDER.filter(cat => (schoolsByCategory[cat] || []).length || categoriesWithNeeds.has(cat));
       if (!relevantCategories.length) return "";
-      const cards = relevantCategories.map(category => `\n            <div class="vn-settings-card" style="flex:1; min-width:220px;">\n              <b>${escapeHtml(category)}</b><br>\n              <small>${capacityLabel(schoolByCategory[category])}</small>\n            </div>\n          `).join("");
+      const cards = relevantCategories.map(category => `\n            <div class="vn-settings-card" style="flex:1; min-width:220px;">\n              <b>${escapeHtml(category)}</b><br>\n              <small>${categoryCapacityLabel(category)}</small>\n            </div>\n          `).join("");
       return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
     }
     function renderGroups() {
@@ -6576,7 +6611,7 @@
             title: `Ausbaustufe ${level}`,
             costCredits: Number(btn.dataset.cost),
             costCoins: Number(btn.dataset.coins),
-            onConfirm: currency => buildLevel(buildingId, currency, level),
+            onConfirm: currency => buildLevelAndRecordPending(buildingId, currency, level),
             goBack: () => renderStationBlueprintApplyScreen(blueprintId, goBack, stationIdFilter),
             historyType: "level",
             historyLabel: `Ausbaustufe ${level}`,
