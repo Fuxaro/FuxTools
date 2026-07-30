@@ -11,7 +11,8 @@ name: Main-Release vorbereiten
 # Einspielen des Beta-Stands explizit wieder entfernt (siehe unten). Das Ergebnis landet als Pull
 # Request gegen main, damit der
 # Diff vor dem Live-Gehen bei den Stable-Nutzern noch gegengeprüft werden kann - kein direkter
-# Push.
+# Push. CLAUDE.md (interne Arbeitsanweisungen fuer die KI, kein Nutzer-Dokument) landet aus
+# demselben Grund wie CHANGELOG.md nie auf main.
 #
 # Beta-Entwicklung läuft im privaten Repo Fuxaro/FuxTools-Beta, damit interne Entwickler-
 # Kommentare/Zwischenstände nicht öffentlich einsehbar sind. Dieser Workflow braucht deshalb
@@ -90,8 +91,9 @@ jobs:
           # CHANGELOG.md ist ein rein internes Beta-Repo-Dokument (Notizen fuer uns, keine
           # Nutzer-Doku) - kommt zwangslaeufig mit dem "git checkout betarepo/main -- ."
           # oben mit rein, gehoert aber NIE auf main. Wird deshalb hier wieder entfernt (git
-          # add -A im Commit-Schritt weiter unten erfasst das als Loeschung).
-          rm -f CHANGELOG.md
+          # add -A im Commit-Schritt weiter unten erfasst das als Loeschung). Gleiches gilt fuer
+          # CLAUDE.md (interne Arbeitsanweisungen fuer die KI).
+          rm -f CHANGELOG.md CLAUDE.md
 
       - name: Abhängigkeiten installieren
         run: npm ci
