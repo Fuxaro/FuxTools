@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.2.1
+// @version     1.3.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -4671,10 +4671,13 @@
       })();
     });
   }
+  function schoolingSelectionKeyFor(blueprints) {
+    return blueprints.map(bp => bp.id).sort().join(",");
+  }
   async function renderSchoolingBlueprintSelection(goBack = renderMainMenu, isAlliance = false) {
     const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle(`${titlePrefix} › Bauplan wählen`);
+    setScreenTitle(`${titlePrefix} › Baupläne wählen`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Baupläne ...</p>`;
     const blueprints = await getStationBlueprints();
@@ -4687,29 +4690,52 @@
       });
       return;
     }
-    const rows = entries.map(bp => `\n        <button type="button" class="list-group-item vn-menu-item vn-schooling-bp-pick" data-id="${escapeHtml(bp.id)}">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n          <span><b>${escapeHtml(bp.name)}</b> <span class="text-muted">- ${escapeHtml(typeNameForPseudoId(bp.pseudoId))}</span></span>\n        </button>\n      `).join("");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welchen Bauplan sollen ${isAlliance ? "Verbandsschulungen" : "Schulungen"} geprüft werden? Danach folgen noch die Wachen.\n      </p>\n      <div class="list-group" style="max-height:55vh; overflow:auto;">${rows}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    const byPseudoId = new Map;
+    for (const bp of entries) {
+      if (!byPseudoId.has(bp.pseudoId)) byPseudoId.set(bp.pseudoId, []);
+      byPseudoId.get(bp.pseudoId).push(bp);
+    }
+    const groupBlocks = [ ...byPseudoId.entries() ].sort((a, b) => typeNameForPseudoId(a[0]).localeCompare(typeNameForPseudoId(b[0]), "de")).map(([pseudoId, bps]) => {
+      const rows = bps.map(bp => `\n            <div class="checkbox" style="margin: 2px 0;">\n              <label>\n                <input type="checkbox" class="vn-schooling-bp-check" data-pseudo-id="${escapeHtml(pseudoId)}" value="${escapeHtml(bp.id)}">\n                ${escapeHtml(bp.name)}\n              </label>\n            </div>`).join("");
+      return `\n        <div class="panel panel-default" style="margin-bottom: 8px;">\n          <div class="panel-heading"><b>${escapeHtml(typeNameForPseudoId(pseudoId))}</b></div>\n          <div class="panel-body">${rows}</div>\n        </div>`;
+    }).join("");
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Für welche(n) Bauplan/Baupläne sollen ${isAlliance ? "Verbandsschulungen" : "Schulungen"} geprüft werden?\n        Je Gebäudetyp höchstens ein Bauplan, über mehrere Gebäudetypen hinweg beliebig kombinierbar\n        (z. B. Kleinwache + Normalwache zusammen, damit sich der Bedarf dieselben Klassenräume\n        teilt). Danach folgen noch die Wachen.\n      </p>\n      <div style="max-height:55vh; overflow:auto;">${groupBlocks}</div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-bp-go" type="button" class="btn btn-primary">\n          Weiter <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    body.querySelectorAll(".vn-schooling-bp-pick").forEach(btn => {
-      btn.addEventListener("click", () => {
-        renderSchoolingStationSelection(blueprints[btn.dataset.id], goBack, isAlliance);
+    body.querySelectorAll(".vn-schooling-bp-check").forEach(cb => {
+      cb.addEventListener("change", () => {
+        if (!cb.checked) return;
+        body.querySelectorAll(`.vn-schooling-bp-check[data-pseudo-id="${cb.dataset.pseudoId}"]`).forEach(other => {
+          if (other !== cb) other.checked = false;
+        });
       });
     });
+    document.getElementById("vn-btn-schooling-bp-go").addEventListener("click", () => {
+      const selectedIds = [ ...body.querySelectorAll(".vn-schooling-bp-check:checked") ].map(el => el.value);
+      if (!selectedIds.length) {
+        alert("Bitte mindestens einen Bauplan auswählen.");
+        return;
+      }
+      const selectedBlueprints = selectedIds.map(id => blueprints[id]);
+      renderSchoolingStationSelection(selectedBlueprints, goBack, isAlliance);
+    });
   }
-  async function renderSchoolingStationSelection(blueprint, goBack = renderMainMenu, isAlliance = false) {
+  async function renderSchoolingStationSelection(blueprints, goBack = renderMainMenu, isAlliance = false) {
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle(`${isAlliance ? "Verbandsschulungen" : "Schulungen"} › ${blueprint.name} › Wachen wählen`);
+    const blueprintNames = blueprints.map(bp => bp.name).join(" + ");
+    setScreenTitle(`${isAlliance ? "Verbandsschulungen" : "Schulungen"} › ${blueprintNames} › Wachen wählen`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Wachen ...</p>`;
+    const selectionKey = schoolingSelectionKeyFor(blueprints);
     let allStations, savedSelection;
     try {
-      [allStations, savedSelection] = await Promise.all([ loadBuildingsForCheck(), getSchoolingStationSelection(blueprint.id) ]);
+      [allStations, savedSelection] = await Promise.all([ loadBuildingsForCheck(), getSchoolingStationSelection(selectionKey) ]);
     } catch (e) {
       body.innerHTML = `\n        <p class="text-danger">Fehler beim Laden: ${escapeHtml(e.message)}</p>\n        <div class="vn-sticky-footer">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       return;
     }
-    const stations = allStations.filter(s => s.pseudoId === blueprint.pseudoId && s.category !== "Krankenhäuser & Schulen" && s.category !== "Sonstiges");
+    const pseudoIds = new Set(blueprints.map(bp => bp.pseudoId));
+    const stations = allStations.filter(s => pseudoIds.has(s.pseudoId) && s.category !== "Krankenhäuser & Schulen" && s.category !== "Sonstiges");
     const preselected = new Set(savedSelection || []);
     const byLeitstelle = new Map;
     for (const s of stations) {
@@ -4730,7 +4756,7 @@
       }).join("");
       return `\n        <div class="panel panel-default vn-schooling-leitstelle-panel" data-leitstelle-id="${escapeHtml(id)}" style="margin-bottom: 8px;">\n          <div class="panel-heading vn-category-heading" data-toggle="collapse" data-target="#${collapseId}">\n            <span class="glyphicon glyphicon-triangle-right" aria-hidden="true"></span>\n            <b>${escapeHtml(info.name)}</b>\n            <span class="text-muted">\n              (${info.stations.length} Wachen,\n              <span class="vn-schooling-leitstelle-count" data-leitstelle-id="${escapeHtml(id)}">${initialSelectedCount}</span>\n              ausgewählt)\n            </span>\n            <label style="font-size:11px; float:right; font-weight:normal; margin:0; cursor:pointer;">\n              <input type="checkbox" class="vn-schooling-leitstelle-master" data-leitstelle-id="${escapeHtml(id)}">\n              alle auswählen\n            </label>\n          </div>\n          <div id="${collapseId}" class="panel-collapse collapse">\n            <div class="panel-body" style="column-count: 2; column-gap: 20px;">\n              ${stationRows}\n            </div>\n          </div>\n        </div>`;
     }).join("");
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan: <b>${escapeHtml(blueprint.name)}</b>. Wähle die Wachen aus, die für Schulungen\n        geprüft werden sollen (Leitstelle anklicken zum Auf-/Zuklappen).\n      </p>\n      <input type="text" id="vn-schooling-station-search" class="form-control input-sm" style="max-width:280px; margin-bottom:8px;"\n             placeholder="Wache suchen ...">\n      <div style="max-height: 50vh; overflow-y: auto; padding: 4px;">\n        ${groupBlocks || '<p class="text-muted"><em>Keine passenden Wachen gefunden.</em></p>'}\n      </div>\n      <p id="vn-schooling-station-search-empty" class="text-muted" style="display:none;"><em>Keine Wache passt zur Suche.</em></p>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-go" type="button" class="btn btn-primary">\n          Los <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Bauplan/Baupläne: <b>${escapeHtml(blueprintNames)}</b>. Wähle die Wachen aus, die für\n        Schulungen geprüft werden sollen (Leitstelle anklicken zum Auf-/Zuklappen).\n      </p>\n      <input type="text" id="vn-schooling-station-search" class="form-control input-sm" style="max-width:280px; margin-bottom:8px;"\n             placeholder="Wache suchen ...">\n      <div style="max-height: 50vh; overflow-y: auto; padding: 4px;">\n        ${groupBlocks || '<p class="text-muted"><em>Keine passenden Wachen gefunden.</em></p>'}\n      </div>\n      <p id="vn-schooling-station-search-empty" class="text-muted" style="display:none;"><em>Keine Wache passt zur Suche.</em></p>\n      <div class="vn-sticky-footer">\n        <button type="button" id="vn-btn-back" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-schooling-go" type="button" class="btn btn-primary">\n          Los <span class="glyphicon glyphicon-arrow-right" aria-hidden="true"></span>\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", () => renderSchoolingBlueprintSelection(goBack, isAlliance));
     body.querySelectorAll(".vn-category-heading .glyphicon-triangle-right").forEach(icon => {
       icon.closest(".vn-category-heading").addEventListener("click", () => icon.classList.toggle("vn-rotated"));
@@ -4777,14 +4803,15 @@
         return;
       }
       const selectedStations = stations.filter(s => selectedIds.includes(s.id));
-      await saveSchoolingStationSelection(blueprint.id, selectedIds);
-      renderSchoolingScreen(blueprint, selectedStations, () => renderSchoolingStationSelection(blueprint, goBack, isAlliance), isAlliance);
+      await saveSchoolingStationSelection(selectionKey, selectedIds);
+      renderSchoolingScreen(blueprints, selectedStations, () => renderSchoolingStationSelection(blueprints, goBack, isAlliance), isAlliance);
     });
   }
-  async function renderSchoolingScreen(blueprint, stations, goBack = renderMainMenu, isAlliance = false) {
+  async function renderSchoolingScreen(blueprints, stations, goBack = renderMainMenu, isAlliance = false) {
     const titlePrefix = isAlliance ? "Verbandsschulungen" : "Schulungen";
     setModalWidth(MODAL_WIDTH_DEFAULT);
-    setScreenTitle(`${titlePrefix} › ${blueprint.name}`);
+    const blueprintNames = blueprints.map(bp => bp.name).join(" + ");
+    setScreenTitle(`${titlePrefix} › ${blueprintNames}`);
     const body = document.getElementById("vehicle-naming-modal-body");
     body.innerHTML = `<p>Lade Bedarf ...</p>`;
     let schoolsByCategory;
@@ -4799,12 +4826,13 @@
     await ensureFreshPersonnelScan((done, of) => {
       body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
     });
-    const blueprintRanges = computeBlueprintPersonnelRequirementRanges(blueprint);
-    const rangesObj = {};
-    for (const [slug, range] of blueprintRanges) rangesObj[slug] = range;
-    const requirements = {
-      [blueprint.pseudoId]: rangesObj
-    };
+    const requirements = {};
+    for (const blueprint of blueprints) {
+      const blueprintRanges = computeBlueprintPersonnelRequirementRanges(blueprint);
+      const rangesObj = {};
+      for (const [slug, range] of blueprintRanges) rangesObj[slug] = range;
+      requirements[blueprint.pseudoId] = rangesObj;
+    }
     let scanData = await getPersonnelScanData();
     let scanMeta = await getPersonnelScanMeta();
     const qualifications = await getPersonnelQualifications();
@@ -4941,7 +4969,7 @@
               school: school,
               qualificationName: qualificationName,
               plan: plan,
-              goBack: () => renderSchoolingScreen(blueprint, stations, goBack, isAlliance)
+              goBack: () => renderSchoolingScreen(blueprints, stations, goBack, isAlliance)
             });
           } catch (e) {
             statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
