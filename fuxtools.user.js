@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.8
+// @version     1.3.9
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -1642,6 +1642,10 @@
   async function getVehicleCrewUntrainedOnly() {
     return getBooleanSetting(VEHICLE_CREW_UNTRAINED_ONLY_KEY, false);
   }
+  const VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY = "vehicleCrewSoftRequirementFull";
+  async function getVehicleCrewSoftRequirementFull() {
+    return getBooleanSetting(VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY, false);
+  }
   const VEHICLE_CREW_TRIM_KEY = "vehicleCrewTrimEnabled";
   async function getVehicleCrewTrimEnabled() {
     return getBooleanSetting(VEHICLE_CREW_TRIM_KEY, true);
@@ -1721,7 +1725,7 @@
       if (await retrieveData(key) !== undefined) await GM.deleteValue(key);
     }
   }
-  const ALL_SETTINGS_KEYS = [ "names", HISTORY_STORAGE_KEY, CUSTOM_REQUIRED_EXTENSIONS_KEY, PERSONNEL_SCAN_KEY, PERSONNEL_SCAN_META_KEY, PERSONNEL_QUALIFICATIONS_KEY, PERSONNEL_SCHOOLING_MIN_STAFF_KEY, STATION_BLUEPRINTS_KEY, ...ORPHANED_STORAGE_KEYS, SCHOOLING_STATION_SELECTION_KEY, STATION_CHECK_SELECTION_KEY, VEHICLE_CREW_STAFFING_MODE_KEY, VEHICLE_CREW_PROBLEMS_KEY, VEHICLE_CREW_INCLUDE_NORMAL_KEY, VEHICLE_CREW_UNTRAINED_ONLY_KEY, VEHICLE_CREW_TRIM_KEY, VEHICLE_CREW_AUTO_FMS_KEY ];
+  const ALL_SETTINGS_KEYS = [ "names", HISTORY_STORAGE_KEY, CUSTOM_REQUIRED_EXTENSIONS_KEY, PERSONNEL_SCAN_KEY, PERSONNEL_SCAN_META_KEY, PERSONNEL_QUALIFICATIONS_KEY, PERSONNEL_SCHOOLING_MIN_STAFF_KEY, STATION_BLUEPRINTS_KEY, ...ORPHANED_STORAGE_KEYS, SCHOOLING_STATION_SELECTION_KEY, STATION_CHECK_SELECTION_KEY, VEHICLE_CREW_STAFFING_MODE_KEY, VEHICLE_CREW_PROBLEMS_KEY, VEHICLE_CREW_INCLUDE_NORMAL_KEY, VEHICLE_CREW_UNTRAINED_ONLY_KEY, VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY, VEHICLE_CREW_TRIM_KEY, VEHICLE_CREW_AUTO_FMS_KEY ];
   async function clearAllStoredData() {
     await GM.deleteValue(cacheKeyVehicleTypes);
     await GM.deleteValue(ERROR_LOG_KEY);
@@ -5313,12 +5317,11 @@
   }
   function getVehicleTypeRequirement(vehicleTypeId) {
     const staff = vehicleTypeCatalog[vehicleTypeId]?.staff;
-    if (!staff?.training || staff.trainingAtScene || !staff.max) return null;
+    if (!staff?.training || !staff.max) return null;
     const requirements = [];
     for (const categoryTrainings of Object.values(staff.training)) {
       for (const [slug, spec] of Object.entries(categoryTrainings)) {
         const min = spec.all ? null : Number(spec.min) || 0;
-        if (min === 0) continue;
         const existing = requirements.find(r => r.slug === slug);
         if (!existing) requirements.push({
           slug: slug,
@@ -5530,6 +5533,9 @@
     if (assignedPeople.length < (Number(vehicle.staffMin) || 0)) return false;
     return vehicle.requirements.every(req => {
       if (req.min === null) return assignedPeople.length > 0 && assignedPeople.every(p => p.slugs.includes(req.slug));
+      if (req.min === 0) {
+        return assignedPeople.filter(p => p.slugs.includes(req.slug)).length >= vehicle.staffMax;
+      }
       return assignedPeople.filter(p => p.slugs.includes(req.slug)).length >= req.min;
     });
   }
@@ -5574,7 +5580,7 @@
     }
     return removed;
   }
-  async function assignRequiredAndUntrainedSeats(vehicle, staffingMode) {
+  async function assignRequiredAndUntrainedSeats(vehicle, staffingMode, softRequirementFull) {
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
     if (!VEHICLE_FMS_AT_STATION.has(fmsBefore)) {
@@ -5584,12 +5590,25 @@
     const targetByRequirement = new Map;
     const hasFullRequirement = vehicle.requirements.some(req => req.min === null);
     if (vehicle.requirements.length) {
+      const partialMinSum = vehicle.requirements.filter(r => r.min !== null).reduce((sum, r) => sum + r.min, 0);
       for (const req of vehicle.requirements) {
-        const target = staffingMode === "full" ? vehicle.staffMax : req.min === null ? vehicle.staffMin : req.min;
+        let target;
+        if (req.min === null) {
+          target = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
+        } else if (req.min === 0) {
+          const reservedForSiblings = partialMinSum - req.min;
+          target = softRequirementFull ? Math.max(req.min, vehicle.staffMax - reservedForSiblings) : req.min;
+        } else if (staffingMode === "full") {
+          const reservedForSiblings = partialMinSum - req.min;
+          target = Math.max(req.min, vehicle.staffMax - reservedForSiblings);
+        } else {
+          target = req.min;
+        }
         targetByRequirement.set(req.slug, target);
         assignedNow += await assignQualifiedPersonnelToVehicleForSlug(vehicle.id, req.slug, target, vehicle.staffMax);
       }
-      if (!hasFullRequirement) {
+      const hasSoftRequirement = vehicle.requirements.some(req => req.min === 0);
+      if (!hasFullRequirement && !hasSoftRequirement) {
         const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
         assignedNow += await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax, true);
       }
@@ -5606,6 +5625,7 @@
   async function assignLeftoverSpecialistSeats(vehicle, staffingMode, untrainedOnly, hasFullRequirement) {
     if (hasFullRequirement) return 0;
     if (untrainedOnly && !vehicle.requirements.length) return 0;
+    if (vehicle.requirements.some(req => req.min === 0)) return 0;
     const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
     return await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax, false);
   }
@@ -5749,6 +5769,7 @@
     let staffingMode = await getVehicleCrewStaffingMode();
     let includeNormal = await getVehicleCrewIncludeNormal();
     let untrainedOnly = await getVehicleCrewUntrainedOnly();
+    let softRequirementFull = await getVehicleCrewSoftRequirementFull();
     let trimEnabled = await getVehicleCrewTrimEnabled();
     let autoFmsEnabled = await getVehicleCrewAutoFms();
     let vehicles;
@@ -5875,28 +5896,13 @@
         return `\n            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">\n              <span style="display:inline-block; min-width:140px;">\n                <b>${escapeHtml(category)}</b>\n                <span class="text-muted" style="font-size:11px;">(${byCategory.get(category).length})</span>\n              </span>\n              <button type="button" class="btn ${btnClass} btn-sm vn-crew-check-category" style="min-width:220px;" data-category="${escapeHtml(category)}">\n                ${btnLabel}\n              </button>\n              <div class="vn-crew-category-progress-wrap" data-category="${escapeHtml(category)}"\n                   style="flex:1; min-width:160px; display:${running ? "block" : "none"};">\n                <div class="progress" style="margin:0; height:16px;">\n                  <div class="progress-bar vn-crew-category-progress-bar" data-category="${escapeHtml(category)}"\n                       style="width:${percent}%;"></div>\n                </div>\n              </div>\n              <small class="text-muted vn-crew-category-status" data-category="${escapeHtml(category)}">${escapeHtml(running?.statusText || "")}</small>\n            </div>\n          `;
       }).join("");
     }
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale\n        Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt), sofern unten nicht\n        deaktiviert.\n      </p>\n      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bei Teil-Anforderungen (z.B. GRTW/NAW):</span>\n          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"\n                  title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">\n            Nur Minimum\n          </button>\n          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full"\n                  title="Belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.">\n            Volle Besatzung\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"\n                  title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">\n            Normale Fahrzeuge einbeziehen\n          </button>\n          <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"\n                  title="Bei Fahrzeugen ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten (Notarzt usw.) nie verbraucht - lieber ein Platz leer. Echte Ausbildungspflichten (z.B. Notarzt auf NAW) bleiben davon unberührt.">\n            Nur ungeschultes Personal zuweisen\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bereits Zugewiesenes:</span>\n          <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"\n                  title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">\n            Nur ergänzen\n          </button>\n          <button type="button" class="btn btn-sm ${trimEnabled ? "btn-danger" : "btn-default"} vn-crew-trim" data-trim="on"\n                  title="Gleicht die Besatzung komplett an die aktuellen Einstellungen an - entfernt auch überzähliges Personal (z.B. beim Wechsel von Voll- auf Minimum-Besatzung) oder gibt einen Spezialisten frei, der auf einem Fahrzeug ohne eigene Anforderung sitzt.">\n            Vollständig anwenden\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Automatisch FMS setzen:</span>\n          <button type="button" class="btn btn-sm ${autoFmsEnabled ? "btn-primary" : "btn-default"} vn-crew-auto-fms" data-auto-fms="on"\n                  title="Setzt nach dem Zuweisen automatisch FMS 2 (passend besetzt) bzw. FMS 6 (nicht besetzt) - bisheriges Verhalten.">\n            Ja\n          </button>\n          <button type="button" class="btn btn-sm ${!autoFmsEnabled ? "btn-danger" : "btn-default"} vn-crew-auto-fms" data-auto-fms="off"\n                  title="Fasst den FMS-Status gar nicht an, weder 2 noch 6 - für alle, die den Status selbst/anders verwalten oder die automatische Nachbesetzung durch FMS 6 im Spiel grundsätzlich vermeiden wollen.">\n            Nein\n          </button>\n        </div>\n      </div>\n      <div id="vn-crew-groups">${renderGroups()}</div>\n      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">\n        <b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b>\n        <button type="button" id="vn-btn-clear-problems" class="btn btn-default btn-xs">\n          <span class="glyphicon glyphicon-trash" aria-hidden="true"></span> Liste leeren\n        </button>\n      </div>\n      <div style="max-height:35vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead>\n            <tr id="vn-crew-problems-head">${problemsHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; justify-content:space-between;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-unassign-all" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Alle Zuweisungen rückgängig machen\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Weist passend ausgebildetes Personal zu (z.B. Notarzt), optional auch normale\n        Fahrzeuge. Setzt danach FMS 2 (besetzt) oder FMS 6 (nicht besetzt), sofern unten nicht\n        deaktiviert.\n      </p>\n      <div class="form-inline" style="margin-bottom:12px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bei Teil-Anforderungen (z.B. GRTW/NAW):</span>\n          <button type="button" class="btn btn-sm ${staffingMode === "min" ? "btn-primary" : "btn-default"} vn-crew-mode" data-mode="min"\n                  title="Spart Personal für andere Fahrzeuge - belegt bei Teil-Anforderungen nur so viele Plätze wie wirklich nötig.">\n            Nur Minimum\n          </button>\n          <button type="button" class="btn btn-sm ${staffingMode === "full" ? "btn-danger" : "btn-default"} vn-crew-mode" data-mode="full"\n                  title="Belegt bei Teil-Anforderungen gleich alle Plätze mit passender Ausbildung. Kann dazu führen, dass Personal knapp wird und andere Fahrzeuge leer bleiben.">\n            Volle Besatzung\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Weiche Anforderungen (z.B. Dekon-P, Pferdetransporter groß):</span>\n          <button type="button" class="btn btn-sm ${!softRequirementFull ? "btn-primary" : "btn-default"} vn-crew-soft-req" data-soft-req="off"\n                  title="Keine Anforderung an die eigene Besatzung dieser Fahrzeuge - unabhängig vom Minimum/Volle-Besatzung-Schalter oben, der nur echte Teil-Anforderungen (z.B. Notarzt auf NAW) betrifft.">\n            Nicht auffüllen\n          </button>\n          <button type="button" class="btn btn-sm ${softRequirementFull ? "btn-danger" : "btn-default"} vn-crew-soft-req" data-soft-req="on"\n                  title="Füllt diese Fahrzeuge möglichst komplett mit passendem Fachpersonal - unabhängig davon, ob der Rest der Flotte oben auf Minimum oder Volle Besatzung steht (z.B. Dekon-P immer voll, NAW/ITW trotzdem nur Minimum).">\n            Möglichst voll mit Fachpersonal\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <button type="button" class="btn btn-sm ${includeNormal ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-include-normal"\n                  title="Weist auch normalen Fahrzeugen ohne Ausbildungsanforderung Personal zu (sonst nur Spezialfahrzeuge).">\n            Normale Fahrzeuge einbeziehen\n          </button>\n          <button type="button" class="btn btn-sm ${untrainedOnly ? "btn-primary" : "btn-default"} vn-crew-toggle" id="vn-crew-untrained-only"\n                  title="Bei Fahrzeugen ohne eigene Ausbildungsanforderung (z.B. GruKw bei BePol/THW/SEG) werden Spezialisten (Notarzt usw.) nie verbraucht - lieber ein Platz leer. Echte Ausbildungspflichten (z.B. Notarzt auf NAW) bleiben davon unberührt.">\n            Nur ungeschultes Personal zuweisen\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Bereits Zugewiesenes:</span>\n          <button type="button" class="btn btn-sm ${!trimEnabled ? "btn-primary" : "btn-default"} vn-crew-trim" data-trim="off"\n                  title="Ein Lauf fügt nur fehlendes Personal hinzu - bereits zugewiesenes Personal wird nie entfernt, egal mit welchen Einstellungen es früher zugewiesen wurde.">\n            Nur ergänzen\n          </button>\n          <button type="button" class="btn btn-sm ${trimEnabled ? "btn-danger" : "btn-default"} vn-crew-trim" data-trim="on"\n                  title="Gleicht die Besatzung komplett an die aktuellen Einstellungen an - entfernt auch überzähliges Personal (z.B. beim Wechsel von Voll- auf Minimum-Besatzung) oder gibt einen Spezialisten frei, der auf einem Fahrzeug ohne eigene Anforderung sitzt.">\n            Vollständig anwenden\n          </button>\n        </div>\n        <div class="vn-btn-group-box">\n          <span class="vn-btn-group-label">Automatisch FMS setzen:</span>\n          <button type="button" class="btn btn-sm ${autoFmsEnabled ? "btn-primary" : "btn-default"} vn-crew-auto-fms" data-auto-fms="on"\n                  title="Setzt nach dem Zuweisen automatisch FMS 2 (passend besetzt) bzw. FMS 6 (nicht besetzt) - bisheriges Verhalten.">\n            Ja\n          </button>\n          <button type="button" class="btn btn-sm ${!autoFmsEnabled ? "btn-danger" : "btn-default"} vn-crew-auto-fms" data-auto-fms="off"\n                  title="Fasst den FMS-Status gar nicht an, weder 2 noch 6 - für alle, die den Status selbst/anders verwalten oder die automatische Nachbesetzung durch FMS 6 im Spiel grundsätzlich vermeiden wollen.">\n            Nein\n          </button>\n        </div>\n      </div>\n      <div id="vn-crew-groups">${renderGroups()}</div>\n      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:14px; margin-bottom:4px;">\n        <b>Nicht vollständig besetzte Fahrzeuge (FMS 6) / Fehler</b>\n        <small class="text-muted">wird bei jedem neuen Lauf automatisch geleert</small>\n      </div>\n      <div style="max-height:35vh; overflow:auto;">\n        <table class="table table-condensed table-striped" style="font-size:12px;">\n          <thead>\n            <tr id="vn-crew-problems-head">${problemsHeaderHtml()}</tr>\n          </thead>\n          <tbody id="vn-crew-problems-body">${renderProblemsRows()}</tbody>\n        </table>\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; justify-content:space-between;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-unassign-all" type="button" class="btn btn-danger">\n          <span class="glyphicon glyphicon-remove-circle" aria-hidden="true"></span> Alle Zuweisungen rückgängig machen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-unassign-all").addEventListener("click", () => {
       renderVehicleCrewUnassignAllConfirmScreen(scopeVehicles, () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds));
     });
     bindProblemsRowButtons();
     bindProblemsSortHeaders();
-    document.getElementById("vn-btn-clear-problems").addEventListener("click", () => {
-      if (!problemsById.size) return;
-      renderSimpleConfirmScreen({
-        title: "Fahrzeug-Besatzung › Liste leeren",
-        message: `${problemsById.size} Einträge aus der Liste entfernen? Macht keine Zuweisung im Spiel rückgängig, nur unsere Anzeige.`,
-        confirmLabel: "Leeren",
-        confirmIcon: "glyphicon-trash",
-        goBack: () => renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds),
-        onConfirm: async () => {
-          problemsById.clear();
-          await persistProblems();
-          renderVehicleCrewScreen(goBack, allVehicles, selectedLeitstelleIds);
-        }
-      });
-    });
     function bindCrewToggleGroup(selectorClass, storageKey, parseValue, applyValue, colorFor) {
       body.querySelectorAll(selectorClass).forEach(btn => {
         btn.addEventListener("click", async () => {
@@ -5914,6 +5920,7 @@
       });
     }
     bindCrewToggleGroup(".vn-crew-mode", VEHICLE_CREW_STAFFING_MODE_KEY, btn => btn.dataset.mode, value => staffingMode = value, value => value === "min" ? "primary" : "danger");
+    bindCrewToggleGroup(".vn-crew-soft-req", VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY, btn => btn.dataset.softReq === "on", value => softRequirementFull = value, value => value ? "danger" : "primary");
     bindCrewToggleGroup(".vn-crew-trim", VEHICLE_CREW_TRIM_KEY, btn => btn.dataset.trim === "on", value => trimEnabled = value, value => value ? "danger" : "primary");
     bindCrewToggleGroup(".vn-crew-auto-fms", VEHICLE_CREW_AUTO_FMS_KEY, btn => btn.dataset.autoFms === "on", value => autoFmsEnabled = value, value => value ? "primary" : "danger");
     function setCategoryRunningUI(category, running) {
@@ -5965,6 +5972,12 @@
             return;
           }
           const categoryVehicles = byCategory.get(category) || [];
+          if (problemsById.size) {
+            problemsById.clear();
+            await persistProblems();
+            const problemsBody = document.getElementById("vn-crew-problems-body");
+            if (problemsBody) problemsBody.innerHTML = renderProblemsRows();
+          }
           const historyId = await startHistoryEntry({
             type: "crew_assignment",
             label: `${category}: 0/${categoryVehicles.length} gestartet ...`
@@ -5992,7 +6005,7 @@
               for (const vehicle of stationVehicles) {
                 if (state.cancelled) return;
                 try {
-                  phase1ByVehicleId.set(vehicle.id, await assignRequiredAndUntrainedSeats(vehicle, staffingMode));
+                  phase1ByVehicleId.set(vehicle.id, await assignRequiredAndUntrainedSeats(vehicle, staffingMode, softRequirementFull));
                 } catch (e) {
                   phase1ByVehicleId.set(vehicle.id, {
                     error: e
