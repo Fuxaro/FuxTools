@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.7
+// @version     1.3.8
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -4467,7 +4467,8 @@
   }
   const KNOWN_QUALIFICATION_NAMES = {
     dekon_p: "Dekon-P",
-    decontamination_personnel: "Dekon-P"
+    decontamination_personnel: "Dekon-P",
+    railway_fire: "Bahnrettung"
   };
   function qualificationNameFor(qualifications, slug) {
     return qualifications[slug] || KNOWN_QUALIFICATION_NAMES[slug] || slug;
@@ -4485,7 +4486,7 @@
       name: cb.closest("tr")?.children[1]?.textContent.trim() || cb.value
     })).filter(p => {
       const entry = statusById.get(p.id);
-      return !!entry && entry.statusText.includes("Verfügbar");
+      return !!entry && entry.statusText.includes("Verfügbar") && entry.slugs.length === 0;
     });
   }
   async function selectPersonnelForNeed(need, mode, capacity) {
@@ -4524,7 +4525,7 @@
     const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
     const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
-      throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als "Verfügbar" markiert - evtl. schon in Ausbildung oder im Einsatz).');
+      throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung UND ohne jede andere Qualifikation ist als "Verfügbar" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig qualifiziert).');
     }
     const actualRooms = Math.min(freeRooms, Math.max(1, Math.ceil(selected.length / SCHOOLING_SEATS_PER_ROOM)));
     const durationDays = parseEducationDurationDays(educationLabel);
@@ -4549,7 +4550,7 @@
     const capacity = Math.min(totalFreeSeats, totalDeficit);
     const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
-      throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung ist als "Verfügbar" markiert - evtl. schon in Ausbildung oder im Einsatz).');
+      throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung UND ohne jede andere Qualifikation ist als "Verfügbar" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig qualifiziert).');
     }
     const sortedRuns = [ ...runs ].sort((a, b) => (b.open_spaces || 0) - (a.open_spaces || 0));
     const remaining = [ ...selected ];
@@ -4583,7 +4584,19 @@
     }));
   }
   async function fetchAllianceSchoolings() {
-    return await fetchJSON("/api/alliance_schoolings");
+    let items = [];
+    let nextPage = "/api/alliance_schoolings";
+    while (nextPage) {
+      const res = await fetchWithTimeout(nextPage, {
+        credentials: "same-origin"
+      });
+      if (!res.ok) throw new Error(`Fehler beim Laden von ${nextPage}: ${res.status}`);
+      const data = await res.json();
+      const pageItems = Array.isArray(data) ? data : Array.isArray(data.result) ? data.result : Object.values(data);
+      items = items.concat(pageItems);
+      nextPage = data.paging?.next_page || null;
+    }
+    return items;
   }
   function normalizeEducationText(text) {
     return text.replace(/\s*\(\d+\s*Tage?\)\s*$/i, "").trim().toLowerCase();
@@ -4639,13 +4652,13 @@
       throw new Error(`Ausbildung wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
     }
     if (!plan.isAlliance) return;
-    const maxAttempts = 5;
-    const pollIntervalMs = 6e4;
+    const maxAttempts = 10;
+    const pollIntervalMs = 2e4;
     let candidates = [];
     for (let attempt = 1; attempt <= maxAttempts && candidates.length < plan.actualRooms; attempt++) {
       if (allianceTrainingCancelled) break;
       if (attempt > 1) {
-        onProgress(`Lehrgang noch nicht in der Spiel-API sichtbar - nächste Prüfung in 60 Sekunden (Versuch ${attempt}/${maxAttempts}) ...`);
+        onProgress(`Lehrgang noch nicht in der Spiel-API sichtbar - nächste Prüfung in 20 Sekunden (Versuch ${attempt}/${maxAttempts}) ...`);
         await sleep(pollIntervalMs);
         if (allianceTrainingCancelled) break;
       }
@@ -4794,7 +4807,7 @@
     const body = document.getElementById("vehicle-naming-modal-body");
     const stationRows = plan.selectedByStation.map(s => `\n          <tr>\n            <td>${escapeHtml(s.stationName)}</td>\n            <td>${s.people.length}</td>\n          </tr>\n        `).join("");
     const runRows = plan.assignments.map(a => `\n          <tr>\n            <td>${escapeHtml(a.run.education_title || "-")}</td>\n            <td>${a.people.length} von ${a.run.open_spaces} freien Plätzen</td>\n          </tr>\n        `).join("");
-    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> - bereits offene Verbandslehrgänge auffüllen</p>\n      <p class="text-muted" style="font-size:12px;">\n        Kein neuer Lehrgang wird geöffnet - es wird nur eigenes Personal in bereits offene,\n        passende Instanzen eingetragen (von einem anderen Mitglied geöffnet, oder selbst ohne\n        Öffnen-Recht im Verband).\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Lehrgang</th><th>Belegt</th></tr></thead>\n        <tbody>${runRows}</tbody>\n      </table>\n      <p>Insgesamt <b>${plan.selected.length}</b> Person(en).</p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-fill-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling-fill" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> - bereits offene Verbandslehrgänge auffüllen</p>\n      <p class="text-muted" style="font-size:12px;">\n        Kein neuer Lehrgang wird geöffnet - es wird nur eigenes Personal in bereits offene,\n        passende Instanzen eingetragen (von einem anderen Mitglied geöffnet, oder selbst ohne\n        Öffnen-Recht im Verband).\n      </p>\n      <p class="text-warning" style="font-size:12px;">\n        <span class="glyphicon glyphicon-warning-sign" aria-hidden="true"></span>\n        Ob dieser Lehrgang vom Ersteller mit Kosten (Credits pro Tag/Teilnehmer) geteilt wurde,\n        lässt sich über die Spiel-API nicht abfragen - bitte vor dem Bestätigen kurz im Spiel\n        unter "Offene Lehrgänge" selbst prüfen.\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Lehrgang</th><th>Belegt</th></tr></thead>\n        <tbody>${runRows}</tbody>\n      </table>\n      <p>Insgesamt <b>${plan.selected.length}</b> Person(en).</p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-fill-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling-fill" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-confirm-schooling-fill").addEventListener("click", () => {
       executeAllianceFillRun(need, qualificationName, plan, goBack);
@@ -5038,7 +5051,7 @@
     let openAllianceRuns = [];
     if (isAlliance) {
       try {
-        openAllianceRuns = (await fetchAllianceSchoolings()).filter(r => (r.open_spaces || 0) > 0);
+        openAllianceRuns = (await fetchAllianceSchoolings()).filter(r => (r.open_spaces || 0) > 0 && !r.running);
       } catch (e) {
         console.warn("[FuxTools] /api/alliance_schoolings (offene Lehrgaenge) konnte nicht geladen werden:", e);
       }
@@ -5116,6 +5129,9 @@
           const stationTitleFor = deficitField => need.stations.filter(s => s[deficitField] > 0).map(s => `${s.name} (${s[deficitField]} fehlen)`).join(", ");
           const inTrainingTitle = need.stations.filter(s => s.inTraining > 0).map(s => `${s.name}: ${s.inTrainingNames.join(", ") || s.inTraining}`).join(" · ");
           const stationsWithDeficit = need.stations.filter(s => s.minDeficit > 0 || s.maxDeficit > 0);
+          const distinctRangeMins = new Set(need.stations.map(s => s.rangeMin));
+          const distinctRangeMaxs = new Set(need.stations.map(s => s.rangeMax));
+          const sollProWache = distinctRangeMins.size === 1 && distinctRangeMaxs.size === 1 ? `${need.stations[0].rangeMin}–${need.stations[0].rangeMax}` : `${Math.min(...need.stations.map(s => s.rangeMin))}–${Math.max(...need.stations.map(s => s.rangeMax))} (variiert je Wachentyp)`;
           const haveBreakdown = need.stations.map(s => `${escapeHtml(s.name)}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}` + (s.minDeficit > 0 || s.maxDeficit > 0 ? "" : " ✓ voll")).join("<br>");
           const needKey = `${need.category}::${need.slug}`;
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
@@ -5126,15 +5142,15 @@
           fillableRunsByKey[needKey] = fillableRuns;
           const fillMinSeats = Math.min(fillableSeatsTotal, need.totalMinDeficit);
           const fillMaxSeats = Math.min(fillableSeatsTotal, need.totalMaxDeficit);
-          const fillMinBtn = fillMinSeats > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="min"\n                             title="${fillMinSeats} passende(r) freie(r) Platz/Plätze in bereits offenen Verbandslehrgängen - kein eigenes Öffnen-Recht nötig.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Minimum\n                     </button>` : "";
-          const fillMaxBtn = fillMaxSeats > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="max"\n                             title="${fillMaxSeats} passende(r) freie(r) Platz/Plätze in bereits offenen Verbandslehrgängen - kein eigenes Öffnen-Recht nötig.">\n                       <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Maximum\n                     </button>` : "";
-          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                  </td>\n                  <td style="vertical-align:middle;">\n                    ${minBtn} ${maxBtn}\n                  </td>\n                  ${isAlliance ? `<td style="vertical-align:middle;">\n                           ${fillMinBtn} ${fillMaxBtn}\n                         </td>` : ""}\n                  <td style="vertical-align:middle;">\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="font-size:11px;"></div>\n                  </td>\n                </tr>\n              `;
+          const fillMinBtn = need.totalMinDeficit <= 0 ? "" : fillMinSeats > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="min"\n                               title="Trägt Personal in bereits offene Verbandslehrgänge ein, ohne selbst einen neuen zu öffnen - kein eigenes Öffnen-Recht nötig.">\n                         <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Minimum (${fillMinSeats})\n                       </button>` : `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Kein passender offener Verbandslehrgang mit freien Plätzen gefunden.">\n                         <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Minimum\n                       </button>`;
+          const fillMaxBtn = need.totalMaxDeficit <= 0 ? "" : fillMaxSeats > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-fill" data-key="${escapeHtml(needKey)}" data-mode="max"\n                               title="Trägt Personal in bereits offene Verbandslehrgänge ein, ohne selbst einen neuen zu öffnen - kein eigenes Öffnen-Recht nötig.">\n                         <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Maximum (${fillMaxSeats})\n                       </button>` : `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Kein passender offener Verbandslehrgang mit freien Plätzen gefunden.">\n                         <span class="glyphicon glyphicon-import" aria-hidden="true"></span> Auffüllen Maximum\n                       </button>`;
+          return `\n                <tr>\n                  <td style="vertical-align:middle;">${escapeHtml(qualificationName)}</td>\n                  <td style="vertical-align:middle;">\n                    ${need.totalMinDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("minDeficit"))}">${need.totalMinDeficit} fehlen (Minimum)</span><br>` : ""}\n                    ${need.totalMaxDeficit > 0 ? `<span title="${escapeHtml(stationTitleFor("maxDeficit"))}">${need.totalMaxDeficit} fehlen (Maximum)</span><br>` : ""}\n                    <small class="text-muted">Soll je Wache: ${escapeHtml(sollProWache)}</small><br>\n                    ${need.totalInTraining > 0 ? `<span class="text-muted" title="${escapeHtml(inTrainingTitle)}"><span class="glyphicon glyphicon-education" aria-hidden="true"></span> ${need.totalInTraining} schon im Lehrgang</span><br>` : ""}\n                    <details style="font-size:11px;">\n                      <summary class="text-muted" style="cursor:pointer;">${need.totalHave} vorhanden / Ziel ${need.totalRangeMin}–${need.totalRangeMax}</summary>\n                      <div class="text-muted" style="padding-left:8px;">${haveBreakdown}</div>\n                    </details>\n                    <small class="text-muted">${stationsWithDeficit.length} von ${need.stations.length} Wache(n) betroffen</small>\n                    <div class="vn-schooling-status" data-key="${escapeHtml(needKey)}" style="font-size:11px; margin-top:2px;"></div>\n                  </td>\n                  <td style="vertical-align:middle; border-left:1px solid #555;">\n                    <div style="display:flex; flex-direction:column; gap:4px;">${minBtn}${maxBtn}</div>\n                  </td>\n                  ${isAlliance ? `<td style="vertical-align:middle; border-left:1px solid #555;">\n                           <div style="display:flex; flex-direction:column; gap:4px;">${fillMinBtn}${fillMaxBtn}</div>\n                         </td>` : ""}\n                </tr>\n              `;
         }).join("");
-        return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px;">\n                <thead>\n                  <tr>\n                    <th>Ausbildung</th>\n                    <th>Fehlend</th>\n                    <th>Neuen Lehrgang öffnen</th>\n                    ${isAlliance ? "<th>Bestehenden Lehrgang nutzen</th>" : ""}\n                    <th>Status</th>\n                  </tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
+        return `\n            <div style="margin-bottom:16px;">\n              <p style="margin-bottom:4px;"><b>${escapeHtml(category)}</b></p>\n              <table class="table table-condensed table-striped" style="font-size:12px; table-layout:fixed; width:100%;">\n                <colgroup>\n                  <col style="width:18%;">\n                  <col style="width:${isAlliance ? "32" : "47"}%;">\n                  <col style="width:${isAlliance ? "25" : "35"}%;">\n                  ${isAlliance ? '<col style="width:25%;">' : ""}\n                </colgroup>\n                <thead>\n                  <tr>\n                    <th>Ausbildung</th>\n                    <th>Fehlend</th>\n                    <th>Neuen Lehrgang öffnen</th>\n                    ${isAlliance ? "<th>Bestehenden Lehrgang nutzen</th>" : ""}\n                  </tr>\n                </thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          `;
       }).join("");
     }
     function render() {
-      body.innerHTML = `\n        <p class="text-muted" style="font-size:12px;">\n          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven\n          Wachenbauplan) und startet echte Lehrgänge${isAlliance ? " an Verbandschulen, für 1 Stunde im Verband freigegeben (0 Credits) - reicht nicht die ganze Zeit, können andere Mitglieder die restlichen Plätze mitnutzen" : ""} - Personal steht währenddessen nicht für\n          Einsätze zur Verfügung, Anzahl vorher prüfen.\n        </p>\n        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>\n        <div class="form-inline" style="margin-bottom:10px;">\n          <label for="vn-schooling-min-staff" style="font-size:12px;">\n            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?\n          </label>\n          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"\n                 value="${minStaff}" style="width:70px; margin-left:8px;">\n        </div>\n        <div id="vn-schooling-groups" style="max-height:55vh; overflow:auto;">${renderGroups()}</div>\n        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n          </button>\n          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n          </button>\n          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">\n            ${scanMeta.lastScanAt ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}` : "Noch nie gescannt"}\n          </span>\n        </div>\n      `;
+      body.innerHTML = `\n        <p class="text-muted" style="font-size:12px;">\n          Zeigt fehlendes Ausbildungspersonal je Schultyp (Bedarf aus dem aktiven\n          Wachenbauplan) und startet echte Lehrgänge${isAlliance ? " an Verbandschulen, für 1 Stunde im Verband freigegeben (0 Credits) - reicht nicht die ganze Zeit, können andere Mitglieder die restlichen Plätze mitnutzen" : ""} - Personal steht währenddessen nicht für\n          Einsätze zur Verfügung, Anzahl vorher prüfen.\n        </p>\n        <div id="vn-schooling-overview">${renderSchoolOverview()}</div>\n        <div class="form-inline" style="margin-bottom:10px;">\n          <label for="vn-schooling-min-staff" style="font-size:12px;">\n            Erst ab wie viel Personal pro Wache schulen (schützt neue/kleine Wachen)?\n          </label>\n          <input type="number" min="0" id="vn-schooling-min-staff" class="form-control input-sm"\n                 value="${minStaff}" style="width:70px; margin-left:8px;">\n        </div>\n        <div id="vn-schooling-groups">${renderGroups()}</div>\n        <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n          <button id="vn-btn-back" type="button" class="btn btn-default">\n            <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n          </button>\n          <button type="button" id="vn-schooling-goto-blueprints" class="btn btn-default">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Wachen-Bauplaner verwalten\n          </button>\n          <button type="button" id="vn-schooling-scan-btn" class="btn btn-default btn-xs" title="Neu scannen">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n          </button>\n          <span class="label label-default" id="vn-schooling-scan-status" style="font-size:12px;">\n            ${scanMeta.lastScanAt ? `Letzter Scan: ${escapeHtml(new Date(scanMeta.lastScanAt).toLocaleString("de-DE"))}` : "Noch nie gescannt"}\n          </span>\n        </div>\n      `;
       document.getElementById("vn-btn-back").addEventListener("click", goBack);
       document.getElementById("vn-schooling-goto-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen(() => renderSchoolingBlueprintSelection(renderMainMenu, isAlliance)));
       document.getElementById("vn-schooling-min-staff").addEventListener("change", async e => {
@@ -5153,16 +5169,9 @@
           await scanAllPersonnel((done, of) => {
             statusEl.textContent = `Scanne ${done}/${of} Wachen ...`;
           });
-          scanData = await getPersonnelScanData();
-          scanMeta = await getPersonnelScanMeta();
-          statusEl.textContent = `Letzter Scan: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}`;
-          recomputeNeeds();
-          document.getElementById("vn-schooling-groups").innerHTML = renderGroups();
-          wireStartButtons();
-          wireFillButtons();
+          renderSchoolingScreen(blueprints, stations, goBack, isAlliance);
         } catch (e) {
           statusEl.textContent = `Fehler: ${e.message}`;
-        } finally {
           btn.disabled = false;
         }
       });
