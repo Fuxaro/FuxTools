@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.4.1
+// @version     1.4
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -118,12 +118,11 @@
     refreshTaskPanel();
     if (!viaQueue) renderBackgroundTaskLaunchedScreen(title, false, goBack);
   }
-  function finishBackgroundTask(title, renderResult, summary = "", status = "done") {
+  function finishBackgroundTask(title, summary = "", status = "done") {
     activeBackgroundTask = null;
     finishedBackgroundTasks.push({
       id: nextFinishedBackgroundTaskId++,
       title: title,
-      renderResult: renderResult,
       summary: summary,
       status: status
     });
@@ -136,9 +135,8 @@
     setScreenTitle(title);
     const body = document.getElementById("vehicle-naming-modal-body");
     const message = isQueued ? `<b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Ein anderer Task")}</b> läuft noch - <b>${escapeHtml(title)}</b>\n         startet automatisch danach (Warteschlange, um nicht zu viele Anfragen gleichzeitig zu stellen).` : `<b>${escapeHtml(title)}</b> wurde gestartet und läuft im Hintergrund weiter, auch wenn du dieses\n         Fenster schließt oder woanders hin wechselst.`;
-    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-launched-task-center" type="button" class="btn btn-primary">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> Task-Center öffnen\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-launched-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-launched-task-center").addEventListener("click", openTaskPanel);
   }
   const TASK_PANEL_WIDTH = 380;
   const TASK_PANEL_POSITION_KEY = "taskPanelPosition";
@@ -271,10 +269,10 @@
     };
     const finishedBlocks = [];
     for (const task of finishedBackgroundTasks) {
-      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon ${FINISHED_TASK_ICON[task.status] || FINISHED_TASK_ICON.done}" aria-hidden="true"></span>\n          <b>${escapeHtml(task.title)}</b> ${FINISHED_TASK_VERB[task.status] || FINISHED_TASK_VERB.done}${task.summary ? ` - ${escapeHtml(task.summary)}` : ""}\n          <button type="button" class="btn btn-primary btn-xs vn-task-center-view-result" data-id="${task.id}" style="margin-left:8px;">\n            Ergebnis ansehen\n          </button>\n        </div>\n      `);
+      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon ${FINISHED_TASK_ICON[task.status] || FINISHED_TASK_ICON.done}" aria-hidden="true"></span>\n          <b>${escapeHtml(task.title)}</b> ${FINISHED_TASK_VERB[task.status] || FINISHED_TASK_VERB.done}${task.summary ? ` - ${escapeHtml(task.summary)}` : ""}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-confirm" data-id="${task.id}" style="margin-left:8px;">\n            Bestätigen\n          </button>\n        </div>\n      `);
     }
     for (const [category, info] of finishedCrewCategoryRuns) {
-      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">\n            Gesehen\n          </button>\n        </div>\n      `);
+      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">\n            Bestätigen\n          </button>\n        </div>\n      `);
     }
     const emptyState = !items.length && !finishedBlocks.length ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
     container.innerHTML = `\n      <p class="text-muted" style="font-size:12px; margin-top:0;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.15);">\n        <button type="button" id="vn-task-panel-history" class="btn btn-default btn-xs">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
@@ -289,14 +287,12 @@
         refreshTaskPanel();
       });
     });
-    container.querySelectorAll(".vn-task-center-view-result").forEach(btn => {
+    container.querySelectorAll(".vn-task-center-confirm").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = Number(btn.dataset.id);
         const index = finishedBackgroundTasks.findIndex(t => t.id === id);
         if (index === -1) return;
-        const [task] = finishedBackgroundTasks.splice(index, 1);
-        ensureMainModalOpen();
-        task.renderResult();
+        finishedBackgroundTasks.splice(index, 1);
         updateBackgroundTaskBadge();
         refreshTaskPanel();
       });
@@ -2174,7 +2170,6 @@
     let done = 0;
     let finished = 0;
     const failedItems = [];
-    const errors = [];
     let cancelled = false;
     let nextIndex = 0;
     async function worker() {
@@ -2191,7 +2186,6 @@
         } catch (e) {
           console.error("[FuxTools] Fehler bei", itemNoun, item.id, e);
           failedItems.push(item);
-          if (errors.length < 5) errors.push(`${itemNoun} ${item.id} (${item.newName}): ${e.message}`);
         }
         finished++;
         updateBackgroundTaskProgress(Math.round(finished / plan.length * 100), `${finished}/${plan.length}: ${item.oldName || "(leer)"} -> ${item.newName}`);
@@ -2205,40 +2199,7 @@
       label: `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`,
       status: cancelled ? "cancelled" : "done"
     });
-    const renderResult = () => renderCompletionScreen({
-      verb: verb,
-      done: done,
-      failed: failedItems.length,
-      plan: plan,
-      errors: errors,
-      failedItems: failedItems,
-      goBack: goBack,
-      cancelled: cancelled,
-      itemNoun: itemNoun,
-      renameFn: renameFn
-    });
-    finishBackgroundTask(title, renderResult, `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`, cancelled ? "cancelled" : "done");
-  }
-  function renderCompletionScreen({verb: verb, done: done, failed: failed, plan: plan, errors: errors, failedItems: failedItems, goBack: goBack, cancelled: cancelled, itemNoun: itemNoun = "Fahrzeug(e)", renameFn: renameFn = renameVehicle}) {
-    const body = document.getElementById("vehicle-naming-modal-body");
-    const perStation = new Map;
-    for (const item of plan) {
-      perStation.set(item.station, (perStation.get(item.station) || 0) + 1);
-    }
-    const stationRows = [ ...perStation.entries() ].sort((a, b) => a[0].localeCompare(b[0])).map(([name, count]) => `<li>${escapeHtml(name)}: ${count} ${itemNoun}</li>`).join("");
-    let errorBlock = "";
-    if (errors.length) {
-      errorBlock = `\n        <p class="text-danger" style="margin-top:10px;"><b>Fehler (erste ${errors.length}):</b></p>\n        <pre style="white-space:pre-wrap; font-size:11px;">${escapeHtml(errors.join("\n"))}</pre>\n      `;
-    }
-    const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${done + failed} von ${plan.length} geplanten ${itemNoun}.</p>` : "";
-    const retryButton = failedItems && failedItems.length ? `<button id="vn-btn-retry" type="button" class="btn btn-warning">\n             <span class="glyphicon glyphicon-repeat" aria-hidden="true"></span>\n             Fehlgeschlagene erneut versuchen (${failedItems.length})\n           </button>` : "";
-    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${done} ${itemNoun} ${verb}</b>${failed ? `, <span class="text-danger">${failed} fehlgeschlagen</span>` : ""}\n        (von ${plan.length} geplant).\n      </p>\n      <ul style="max-height: 200px; overflow-y: auto;">${stationRows}</ul>\n      ${errorBlock}\n      <p class="text-muted" style="font-size: 12px;">Lade die Seite neu, um die neuen Namen im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        ${retryButton}\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
-    if (failedItems && failedItems.length) {
-      document.getElementById("vn-btn-retry").addEventListener("click", () => {
-        executeRenamePlan(failedItems, verb, goBack, renameFn, itemNoun);
-      });
-    }
+    finishBackgroundTask(title, `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`, cancelled ? "cancelled" : "done");
   }
   function escapeHtml(str) {
     return String(str ?? "").replace(/[&<>"']/g, c => ({
@@ -3651,28 +3612,7 @@
     if (verifyFailed) {
       reportError(`Wachenausbau (${stationName})`, new Error(`Geplant war Stufe ${plannedLevel}, tatsächlich nur Stufe ${reachedLevel} erreicht.`));
     }
-    const renderResult = () => renderBuildLevelsResultScreen({
-      builtCount: builtCount,
-      total: levelsToBuild.length,
-      reachedLevel: reachedLevel,
-      plannedLevel: plannedLevel,
-      spent: spent,
-      currency: currency,
-      error: error,
-      cancelled: cancelled,
-      verifyFailed: verifyFailed,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, resultSummary, resultStatus);
-  }
-  function renderBuildLevelsResultScreen({builtCount: builtCount, total: total, reachedLevel: reachedLevel, plannedLevel: plannedLevel, spent: spent, currency: currency, error: error, cancelled: cancelled, verifyFailed: verifyFailed, goBack: goBack}) {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    const currencyLabel = currency === "coins" ? "Coins" : "Credits";
-    const statusNote = cancelled ? `<p class="text-warning"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen.</p>` : error ? `<p class="text-danger"><b>Abgebrochen</b> nach ${builtCount} von ${total} geplanten Stufen - Fehler: ${escapeHtml(error.message)}</p>` : verifyFailed ? `<p class="text-danger"><b>Nachprüfung fehlgeschlagen:</b> geplant war Stufe ${plannedLevel}, tatsächlich nur Stufe ${reachedLevel} erreicht - vermutlich nicht genug ${currencyLabel}.</p>` : "";
-    const resultLine = verifyFailed ? `<b>Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht.</b>` : `<b>${builtCount} von ${total} Stufen gebaut</b>${reachedLevel !== null ? ` (jetzt Stufe ${reachedLevel})` : ""}.`;
-    body.innerHTML = `\n      ${statusNote}\n      <p>\n        <span class="glyphicon ${verifyFailed ? "glyphicon-remove-sign text-danger" : "glyphicon-ok-sign text-success"}" aria-hidden="true"></span>\n        ${resultLine}\n      </p>\n      <p>Ausgegeben: <b>${spent.toLocaleString("de-DE")} ${currencyLabel}</b></p>\n      <p class="text-muted" style="font-size:12px;">Lade die Seite neu, um den neuen Ausbau-Stand im Spiel zu sehen.</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    finishBackgroundTask(title, resultSummary, resultStatus);
   }
   function renderBuildLevelsToMaxConfirmScreen({stationName: stationName, buildingId: buildingId, levelsToBuild: levelsToBuild, totalCost: totalCost, totalCoins: totalCoins, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3888,18 +3828,7 @@
       label: `${ok}x ${vehicleName}${failed ? ` (${failed} fehlgeschlagen)` : ""}`,
       status: cancelled ? "cancelled" : failed ? "error" : "done"
     });
-    const renderResult = () => renderBulkActionResultScreen({
-      summary: summary,
-      failed: failed > 0,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : failed ? "error" : "done");
-  }
-  function renderBulkActionResultScreen({summary: summary, failed: failed, goBack: goBack}) {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `\n      <p class="${failed ? "text-danger" : "text-success"}">${escapeHtml(summary)}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    finishBackgroundTask(title, summary, cancelled ? "cancelled" : failed ? "error" : "done");
   }
   function renderVehicleBulkBuyConfirmScreen({stationId: stationId, vehicleTypeId: vehicleTypeId, name: name, missing: missing, costCredits: costCredits, costCoins: costCoins, stationName: stationName, goBack: goBack, onDone: onDone}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3977,12 +3906,7 @@
       cost: Math.round(unitCost * ok),
       currency: currency
     });
-    const renderResult = () => renderBulkActionResultScreen({
-      summary: summary,
-      failed: !!error,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : error ? "error" : "done");
+    finishBackgroundTask(title, summary, cancelled ? "cancelled" : error ? "error" : "done");
   }
   const CLEAR_STORAGE_CONFIRM_WORD = "löschen";
   function renderClearStorageConfirmScreen(goBack) {
@@ -4955,22 +4879,7 @@
     if (error && !allianceTrainingCancelled) {
       reportError(`Verbandslehrgang (${schoolPlansLabel(plan.schoolPlans)})`, error);
     }
-    const renderResult = () => renderAllianceTrainingResultScreen({
-      qualificationName: qualificationName,
-      plan: plan,
-      error: error,
-      cancelled: allianceTrainingCancelled,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, resultSummary, resultStatus);
-  }
-  function renderAllianceTrainingResultScreen({qualificationName: qualificationName, plan: plan, error: error, cancelled: cancelled, goBack: goBack}) {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle(`Verbandslehrgang (${qualificationName})`);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    const statusHtml = cancelled ? `<span class="text-warning">Abgebrochen - Lehrgang wurde ggf. bereits geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell prüfen.</span>` : error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">Lehrgang gestartet und mit ${plan.selected.length} Person(en) besetzt.</span>`;
-    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(schoolPlansLabel(plan.schoolPlans))}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    finishBackgroundTask(title, resultSummary, resultStatus);
   }
   async function executeAllianceFillRun(need, qualificationName, plan, goBack) {
     const title = `Verbandslehrgang auffüllen (${qualificationName})`;
@@ -5007,21 +4916,7 @@
     if (error) {
       reportError(`Verbandslehrgang auffüllen (${qualificationName})`, error);
     }
-    const renderResult = () => renderAllianceFillResultScreen({
-      qualificationName: qualificationName,
-      plan: plan,
-      error: error,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, resultSummary, error ? "error" : "done");
-  }
-  function renderAllianceFillResultScreen({qualificationName: qualificationName, plan: plan, error: error, goBack: goBack}) {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle(`Verbandslehrgang auffüllen (${qualificationName})`);
-    const body = document.getElementById("vehicle-naming-modal-body");
-    const statusHtml = error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">${plan.selected.length} Person(en) in bereits offene Lehrgänge eingetragen.</span>`;
-    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    finishBackgroundTask(title, resultSummary, error ? "error" : "done");
   }
   function renderAllianceFillConfirmScreen({need: need, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -5878,26 +5773,48 @@
         entry.hasScan = true;
       }
     }
+    function renderTypeTable(byType) {
+      const rows = [ ...byType.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([typeName, entry]) => `\n            <tr>\n              <td>${escapeHtml(typeName)}</td>\n              <td>${entry.stations}</td>\n              <td>${entry.vehicles}</td>\n              <td>${entry.hasScan ? entry.personnel : "-"}</td>\n            </tr>\n          `).join("");
+      return `\n        <table class="table table-condensed table-striped" style="font-size:12px; margin-bottom:0;">\n          <thead><tr><th>Gebäudetyp</th><th>Wachen</th><th>Fahrzeuge</th><th>Personal</th></tr></thead>\n          <tbody>${rows}</tbody>\n        </table>\n      `;
+    }
+    const grandByType = new Map;
     let grandStations = 0;
     let grandVehicles = 0;
     let grandPersonnel = 0;
-    const sections = [ ...byLeitstelle.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([leitstelleName, byType]) => {
+    for (const byType of byLeitstelle.values()) {
+      for (const [typeName, entry] of byType) {
+        if (!grandByType.has(typeName)) {
+          grandByType.set(typeName, {
+            stations: 0,
+            vehicles: 0,
+            personnel: 0,
+            hasScan: false
+          });
+        }
+        const g = grandByType.get(typeName);
+        g.stations += entry.stations;
+        g.vehicles += entry.vehicles;
+        g.personnel += entry.personnel;
+        g.hasScan = g.hasScan || entry.hasScan;
+        grandStations += entry.stations;
+        grandVehicles += entry.vehicles;
+        grandPersonnel += entry.personnel;
+      }
+    }
+    const gesamtSection = `\n      <details open style="margin-bottom:12px;">\n        <summary class="vn-category-heading">\n          <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>\n          <b>Gesamt</b>\n          <span class="text-muted">(${grandStations} Wachen, ${grandVehicles} Fahrzeuge, ${grandPersonnel} Personal)</span>\n        </summary>\n        <div style="padding:4px 0 0;">${renderTypeTable(grandByType)}</div>\n      </details>\n    `;
+    const leitstelleSections = [ ...byLeitstelle.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([leitstelleName, byType]) => {
       let sectionStations = 0;
       let sectionVehicles = 0;
       let sectionPersonnel = 0;
-      const rows = [ ...byType.entries() ].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([typeName, entry]) => {
+      for (const entry of byType.values()) {
         sectionStations += entry.stations;
         sectionVehicles += entry.vehicles;
         sectionPersonnel += entry.personnel;
-        return `\n              <tr>\n                <td>${escapeHtml(typeName)}</td>\n                <td>${entry.stations}</td>\n                <td>${entry.vehicles}</td>\n                <td>${entry.hasScan ? entry.personnel : "-"}</td>\n              </tr>\n            `;
-      }).join("");
-      grandStations += sectionStations;
-      grandVehicles += sectionVehicles;
-      grandPersonnel += sectionPersonnel;
-      return `\n          <div class="panel panel-default" style="margin-bottom:8px;">\n            <div class="panel-heading" style="padding:8px 12px;">\n              <b>${escapeHtml(leitstelleName)}</b>\n              <span class="text-muted">(${sectionStations} Wachen, ${sectionVehicles} Fahrzeuge, ${sectionPersonnel} Personal)</span>\n            </div>\n            <div class="panel-body" style="padding:0;">\n              <table class="table table-condensed table-striped" style="font-size:12px; margin-bottom:0;">\n                <thead><tr><th>Gebäudetyp</th><th>Wachen</th><th>Fahrzeuge</th><th>Personal</th></tr></thead>\n                <tbody>${rows}</tbody>\n              </table>\n            </div>\n          </div>\n        `;
+      }
+      return `\n          <details style="margin-bottom:8px;">\n            <summary class="vn-category-heading">\n              <span class="glyphicon glyphicon-chevron-right" aria-hidden="true"></span>\n              <b>${escapeHtml(leitstelleName)}</b>\n              <span class="text-muted">(${sectionStations} Wachen, ${sectionVehicles} Fahrzeuge, ${sectionPersonnel} Personal)</span>\n            </summary>\n            <div style="padding:4px 0 0;">${renderTypeTable(byType)}</div>\n          </details>\n        `;
     }).join("");
     const lastScanLabel = scanMeta.lastScanAt ? `Personal-Stand: ${new Date(scanMeta.lastScanAt).toLocaleString("de-DE")}` : "Personal noch nie gescannt";
-    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Wachen je Gebäudetyp, gruppiert nach Leitstelle. Personal nur für Gebäudetypen mit\n        Ausbildungs-Personal (Feuerwehr, Rettungsdienst, Polizei, THW &amp; Co.) - "-" bedeutet\n        kein Personal-Scan möglich/vorhanden.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        <b>Gesamt:</b> ${grandStations} Wachen, ${grandVehicles} Fahrzeuge, ${grandPersonnel} Personal\n      </p>\n      <div style="max-height:55vh; overflow:auto;">\n        ${sections || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <span class="text-muted" style="font-size:11px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
+    body.innerHTML = `\n      <p class="text-muted" style="font-size:12px;">\n        Wachen je Gebäudetyp, gruppiert nach Leitstelle. Personal nur für Gebäudetypen mit\n        Ausbildungs-Personal (Feuerwehr, Rettungsdienst, Polizei, THW &amp; Co.) - "-" bedeutet\n        kein Personal-Scan möglich/vorhanden.\n      </p>\n      <div style="max-height:55vh; overflow:auto;">\n        ${grandStations ? gesamtSection : ""}\n        ${leitstelleSections || '<p class="text-muted"><em>Keine Wachen gefunden.</em></p>'}\n      </div>\n      <div class="vn-sticky-footer" style="display:flex; align-items:center; gap:10px;">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <span class="text-muted" style="font-size:11px;">${escapeHtml(lastScanLabel)}</span>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", renderMainMenu);
   }
   function getVehicleTypeRequirement(vehicleTypeId) {
@@ -6743,20 +6660,7 @@
       label: summary,
       status: cancelled ? "cancelled" : "done"
     });
-    const renderResult = () => renderUnassignAllResultScreen({
-      summary: summary,
-      cancelled: cancelled,
-      goBack: goBack
-    });
-    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : failed ? "error" : "done");
-  }
-  function renderUnassignAllResultScreen({summary: summary, cancelled: cancelled, goBack: goBack}) {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle("Fahrzeug-Besatzung › Alle Zuweisungen rückgängig machen");
-    const body = document.getElementById("vehicle-naming-modal-body");
-    const cancelledNote = cancelled ? `<p class="text-warning"><b>Abgebrochen.</b></p>` : "";
-    body.innerHTML = `\n      ${cancelledNote}\n      <p>\n        <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n        <b>${escapeHtml(summary)}</b>\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", goBack);
+    finishBackgroundTask(title, summary, cancelled ? "cancelled" : failed ? "error" : "done");
   }
   function generateBlueprintId() {
     const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
