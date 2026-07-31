@@ -65,7 +65,12 @@ jobs:
           rm -rf scripts
           cp -r /tmp/main-scripts scripts
           rm -f CHANGELOG.md CLAUDE.md
-          sed -i -E "s/@version(\s+)[0-9]+\.[0-9]+\.[0-9]+/@version\1$VERSION/" fuxtools.user.js
+          sed -i -E "s/@version(\s+)\S+/@version\1$VERSION/" fuxtools.user.js
+          grep -qE "^// @version\s+$VERSION$" fuxtools.user.js || {
+            echo "::error::@version-Zeile nach dem Ersetzen nicht wie erwartet (sollte $VERSION sein)."
+            grep -m1 '@version' fuxtools.user.js
+            exit 1
+          }
 
       - name: Abhängigkeiten installieren
         run: npm ci
