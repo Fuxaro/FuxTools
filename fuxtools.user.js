@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.4.0
+// @version     1.4.1
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -4844,20 +4844,11 @@
     let candidates = [];
     try {
       const directIdMatch = res.url?.match(/\/schoolings\/(\d+)/);
-      if (directIdMatch) {
-        if (!beforeRunIds.has(directIdMatch[1])) {
-          candidates = [ {
-            id: directIdMatch[1],
-            openSpaces: SCHOOLING_SEATS_PER_ROOM
-          } ];
-        }
-      } else {
-        const html = await res.text();
-        const doc = (new DOMParser).parseFromString(html, "text/html");
-        candidates = [ ...doc.querySelectorAll("a[href^='/schoolings/']") ].map(a => a.getAttribute("href").split("/").pop()).filter(id => id && !beforeRunIds.has(id)).map(id => ({
-          id: id,
+      if (directIdMatch && schoolPlan.actualRooms === 1 && !beforeRunIds.has(directIdMatch[1])) {
+        candidates = [ {
+          id: directIdMatch[1],
           openSpaces: SCHOOLING_SEATS_PER_ROOM
-        }));
+        } ];
       }
     } catch (e) {
       console.warn("[FuxTools] Direkter Lehrgangs-Erkennungsweg fehlgeschlagen, falle auf kurze Nachprüfung zurück:", e);
