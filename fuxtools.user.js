@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.3.9
+// @version     1.4.0
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -41,6 +41,9 @@
   const CHANNEL = "stable";
   const UPDATE_CHECK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/fuxtools.user.js";
   const LOGO_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/logo-small.png";
+  function loadingIndicatorHtml(text) {
+    return `\n      <p style="display:flex; align-items:center; gap:8px;">\n        <img src="${LOGO_URL}" alt="" class="vn-task-spin" style="width:20px; height:20px; border-radius:4px;">\n        ${escapeHtml(text)}\n      </p>\n    `;
+  }
   const VEHICLE_TYPES_FALLBACK_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/data/vehicle-types-fallback.json";
   const HOW_IT_WORKS_URL = "https://raw.githubusercontent.com/Fuxaro/FuxTools/main/HOW_IT_WORKS.md";
   let modalFooterEl = null;
@@ -51,30 +54,30 @@
   let renameCancelled = false;
   let levelBuildCancelled = false;
   let allianceTrainingCancelled = false;
-  let backgroundTaskBadgeEl = null;
-  let taskCenterEntryEl = null;
+  let navEntrySpinnerEl = null;
+  let headerTaskButtonEl = null;
   const backgroundTaskQueue = [];
   let activeBackgroundTask = null;
-  let finishedBackgroundTask = null;
+  const finishedBackgroundTasks = [];
+  let nextFinishedBackgroundTaskId = 1;
   let activeCrewCategoryRunCount = 0;
+  let taskPanelOpen = false;
   const runningCategoryRuns = new Map;
   const finishedCrewCategoryRuns = new Map;
   function isBackgroundTaskSlotBusy() {
     return !!activeBackgroundTask || activeCrewCategoryRunCount > 0;
   }
   function updateBackgroundTaskBadge() {
-    if (!backgroundTaskBadgeEl || !taskCenterEntryEl) return;
-    taskCenterEntryEl.style.display = "";
-    if (isBackgroundTaskSlotBusy()) {
-      const total = (activeBackgroundTask ? 1 : 0) + runningCategoryRuns.size + backgroundTaskQueue.length;
-      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh vn-task-spin" aria-hidden="true"></span>`;
-      taskCenterEntryEl.title = total > 1 ? `FuxTools - ${total} Aufgaben laufen im Hintergrund` : "FuxTools - Aufgabe läuft im Hintergrund";
-    } else if (finishedBackgroundTask || finishedCrewCategoryRuns.size > 0) {
-      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
-      taskCenterEntryEl.title = "FuxTools - Aufgabe fertig, klicken zum Ansehen";
-    } else {
-      backgroundTaskBadgeEl.innerHTML = `<span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
-      taskCenterEntryEl.title = "FuxTools - Aufgaben-Übersicht (nichts aktiv)";
+    const busy = isBackgroundTaskSlotBusy();
+    const hasFinished = finishedBackgroundTasks.length > 0 || finishedCrewCategoryRuns.size > 0;
+    if (navEntrySpinnerEl) {
+      navEntrySpinnerEl.style.display = busy ? "inline-block" : "none";
+    }
+    if (headerTaskButtonEl) {
+      headerTaskButtonEl.innerHTML = `FuxTools-Aufgaben <span class="glyphicon glyphicon-refresh${busy ? " vn-task-spin" : ""}" aria-hidden="true"></span>`;
+      headerTaskButtonEl.title = busy ? "Task-Center öffnen (Aufgabe läuft im Hintergrund)" : hasFinished ? "Task-Center öffnen (Aufgabe fertig)" : "Task-Center öffnen";
+      headerTaskButtonEl.classList.toggle("btn-primary", busy || hasFinished);
+      headerTaskButtonEl.classList.toggle("btn-default", !(busy || hasFinished));
     }
   }
   function updateBackgroundTaskProgress(percent, text) {
@@ -87,6 +90,7 @@
     if (tcTxt) tcTxt.textContent = text;
   }
   function runOrQueueBackgroundTask(title, start, goBack) {
+    if (!taskPanelOpen) openTaskPanel();
     if (isBackgroundTaskSlotBusy()) {
       backgroundTaskQueue.push({
         title: title,
@@ -110,20 +114,22 @@
       progressText: "",
       cancel: cancel
     };
-    finishedBackgroundTask = null;
     updateBackgroundTaskBadge();
-    refreshTaskCenterIfVisible();
+    refreshTaskPanel();
     if (!viaQueue) renderBackgroundTaskLaunchedScreen(title, false, goBack);
   }
-  function finishBackgroundTask(title, renderResult) {
+  function finishBackgroundTask(title, renderResult, summary = "", status = "done") {
     activeBackgroundTask = null;
-    finishedBackgroundTask = {
+    finishedBackgroundTasks.push({
+      id: nextFinishedBackgroundTaskId++,
       title: title,
-      renderResult: renderResult
-    };
+      renderResult: renderResult,
+      summary: summary,
+      status: status
+    });
     updateBackgroundTaskBadge();
     tryStartNextQueuedBackgroundTask();
-    refreshTaskCenterIfVisible();
+    refreshTaskPanel();
   }
   function renderBackgroundTaskLaunchedScreen(title, isQueued = false, goBack = renderMainMenu) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -132,12 +138,116 @@
     const message = isQueued ? `<b>${escapeHtml(activeBackgroundTask ? activeBackgroundTask.title : "Ein anderer Task")}</b> läuft noch - <b>${escapeHtml(title)}</b>\n         startet automatisch danach (Warteschlange, um nicht zu viele Anfragen gleichzeitig zu stellen).` : `<b>${escapeHtml(title)}</b> wurde gestartet und läuft im Hintergrund weiter, auch wenn du dieses\n         Fenster schließt oder woanders hin wechselst.`;
     body.innerHTML = `\n      <p>\n        <span class="glyphicon glyphicon-${isQueued ? "time" : "ok-circle text-success"}" aria-hidden="true"></span>\n        ${message}\n      </p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-launched-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n        <button id="vn-btn-launched-task-center" type="button" class="btn btn-primary">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> Task-Center öffnen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-launched-back").addEventListener("click", goBack);
-    document.getElementById("vn-btn-launched-task-center").addEventListener("click", renderTaskCenterScreen);
+    document.getElementById("vn-btn-launched-task-center").addEventListener("click", openTaskPanel);
   }
-  function renderTaskCenterScreen() {
-    setModalWidth(MODAL_WIDTH_COMPACT);
-    setScreenTitle("FuxTools-Aufgaben");
-    const body = document.getElementById("vehicle-naming-modal-body");
+  const TASK_PANEL_WIDTH = 380;
+  const TASK_PANEL_POSITION_KEY = "taskPanelPosition";
+  let taskPanelPosition = null;
+  async function createTaskPanel() {
+    if (document.getElementById("vn-task-panel")) return;
+    taskPanelPosition = await retrieveData(TASK_PANEL_POSITION_KEY) || null;
+    const panel = document.createElement("div");
+    panel.id = "vn-task-panel";
+    panel.className = "modal-content";
+    panel.style.cssText = "display:none; position:fixed; z-index:5001; flex-direction:column; box-shadow:0 2px 20px rgba(0,0,0,0.5); border-radius:4px;";
+    panel.innerHTML = `\n      <div id="vn-task-panel-header" style="display:flex; align-items:center; gap:8px; padding:12px 16px; cursor:move; user-select:none; flex-shrink:0;" title="Zum Verschieben hier ziehen">\n        <h4 class="modal-title" style="margin:0; font-size:16px; flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">\n          <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span> FuxTools-Aufgaben\n        </h4>\n        <button type="button" id="vn-task-panel-close" title="Task-Center schließen"\n                style="flex-shrink:0; background:none; border:none; color:inherit; opacity:0.6; font-size:22px; line-height:1; padding:0 2px; cursor:pointer;">\n          &times;\n        </button>\n      </div>\n      <div id="vn-task-panel-body" style="padding:12px 16px; overflow-y:auto; flex:1 1 auto; min-height:0;"></div>\n      <div style="padding:6px 16px; font-size:11px; color:#888; border-top:1px solid rgba(255,255,255,0.15); flex-shrink:0;">\n        FuxTools v${escapeHtml(SCRIPT_VERSION)}${CHANNEL === "beta" ? " (Beta)" : ""} · © Fuxaro · CC BY-NC-SA 4.0\n      </div>\n    `;
+    document.body.appendChild(panel);
+    const closeBtn = document.getElementById("vn-task-panel-close");
+    closeBtn.addEventListener("click", closeTaskPanel);
+    closeBtn.addEventListener("mouseenter", () => closeBtn.style.opacity = "1");
+    closeBtn.addEventListener("mouseleave", () => closeBtn.style.opacity = "0.6");
+    makeTaskPanelDraggable(panel, document.getElementById("vn-task-panel-header"));
+    window.addEventListener("resize", () => {
+      if (taskPanelOpen) positionTaskPanel();
+    });
+  }
+  function makeTaskPanelDraggable(panel, header) {
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startTop = 0;
+    let startLeft = 0;
+    header.addEventListener("mousedown", e => {
+      if (e.target.closest("#vn-task-panel-close")) return;
+      dragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = panel.getBoundingClientRect();
+      startTop = rect.top;
+      startLeft = rect.left;
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      const top = Math.max(4, Math.min(window.innerHeight - 40, startTop + (e.clientY - startY)));
+      const left = Math.max(4, Math.min(window.innerWidth - 60, startLeft + (e.clientX - startX)));
+      panel.style.top = `${top}px`;
+      panel.style.left = `${left}px`;
+      panel.style.maxHeight = `${Math.max(200, window.innerHeight - top - 16)}px`;
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      const rect = panel.getBoundingClientRect();
+      taskPanelPosition = {
+        top: rect.top,
+        left: rect.left
+      };
+      storeData(taskPanelPosition, TASK_PANEL_POSITION_KEY).catch(() => {});
+    });
+  }
+  function openTaskPanel() {
+    const panel = document.getElementById("vn-task-panel");
+    if (!panel) return;
+    taskPanelOpen = true;
+    panel.style.display = "flex";
+    positionTaskPanel();
+    refreshTaskPanel();
+  }
+  function closeTaskPanel() {
+    const panel = document.getElementById("vn-task-panel");
+    if (!panel) return;
+    taskPanelOpen = false;
+    panel.style.display = "none";
+  }
+  function positionTaskPanel() {
+    if (!taskPanelOpen) return;
+    const panel = document.getElementById("vn-task-panel");
+    if (!panel) return;
+    let top;
+    let left;
+    if (taskPanelPosition) {
+      top = Math.max(4, Math.min(window.innerHeight - 40, taskPanelPosition.top));
+      left = Math.max(4, Math.min(window.innerWidth - 60, taskPanelPosition.left));
+    } else {
+      const gap = 12;
+      const dialog = document.getElementById("vehicle-naming-modal-dialog");
+      const rect = dialog?.getBoundingClientRect();
+      top = 30;
+      left = Math.max(8, window.innerWidth - TASK_PANEL_WIDTH - 20);
+      if (rect && rect.width > 0) {
+        top = Math.max(8, rect.top);
+        left = rect.right + gap;
+        if (left + TASK_PANEL_WIDTH > window.innerWidth - 8) {
+          left = Math.max(8, window.innerWidth - TASK_PANEL_WIDTH - 8);
+        }
+      }
+    }
+    panel.style.top = `${top}px`;
+    panel.style.left = `${left}px`;
+    panel.style.width = `${TASK_PANEL_WIDTH}px`;
+    panel.style.maxHeight = `${Math.max(200, window.innerHeight - top - 16)}px`;
+  }
+  function ensureMainModalOpen() {
+    const modal = document.getElementById(modalId);
+    if (!modal || modal.classList.contains("in")) return;
+    const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
+    pageJQuery(modal).modal("show");
+  }
+  function refreshTaskPanel() {
+    if (!taskPanelOpen) return;
+    const container = document.getElementById("vn-task-panel-body");
+    if (!container) return;
     const items = [];
     if (activeBackgroundTask) {
       items.push(`\n        <div class="vn-task-center-item">\n          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">\n            <b>${escapeHtml(activeBackgroundTask.title)}</b>\n            <button type="button" class="btn btn-danger btn-xs vn-task-center-cancel" data-kind="rename">\n              <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n            </button>\n          </div>\n          <div class="progress" style="margin:6px 0 2px; height:16px;">\n            <div id="vn-tc-rename-bar" class="progress-bar" style="width:${activeBackgroundTask.percent || 0}%;"></div>\n          </div>\n          <div id="vn-tc-rename-text" class="text-muted" style="font-size:11px;">${escapeHtml(activeBackgroundTask.progressText || "")}</div>\n        </div>\n      `);
@@ -149,29 +259,49 @@
     for (const queued of backgroundTaskQueue) {
       items.push(`\n        <div class="vn-task-center-item text-muted">\n          <span class="glyphicon glyphicon-time" aria-hidden="true"></span> ${escapeHtml(queued.title)} - wartet, bis Platz frei ist ...\n        </div>\n      `);
     }
+    const FINISHED_TASK_ICON = {
+      done: "glyphicon-ok-sign text-success",
+      error: "glyphicon-remove-sign text-danger",
+      cancelled: "glyphicon-ban-circle text-muted"
+    };
+    const FINISHED_TASK_VERB = {
+      done: "ist fertig",
+      error: "ist fehlgeschlagen",
+      cancelled: "wurde abgebrochen"
+    };
     const finishedBlocks = [];
-    if (finishedBackgroundTask) {
-      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>${escapeHtml(finishedBackgroundTask.title)}</b> ist fertig.\n          <button type="button" id="vn-task-center-view-result" class="btn btn-primary btn-xs" style="margin-left:8px;">\n            Ergebnis ansehen\n          </button>\n        </div>\n      `);
+    for (const task of finishedBackgroundTasks) {
+      finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon ${FINISHED_TASK_ICON[task.status] || FINISHED_TASK_ICON.done}" aria-hidden="true"></span>\n          <b>${escapeHtml(task.title)}</b> ${FINISHED_TASK_VERB[task.status] || FINISHED_TASK_VERB.done}${task.summary ? ` - ${escapeHtml(task.summary)}` : ""}\n          <button type="button" class="btn btn-primary btn-xs vn-task-center-view-result" data-id="${task.id}" style="margin-left:8px;">\n            Ergebnis ansehen\n          </button>\n        </div>\n      `);
     }
     for (const [category, info] of finishedCrewCategoryRuns) {
       finishedBlocks.push(`\n        <div class="vn-task-center-item">\n          <span class="glyphicon glyphicon-ok-sign text-success" aria-hidden="true"></span>\n          <b>Fahrzeug-Besatzung: ${escapeHtml(category)}</b> ist fertig - ${escapeHtml(info.summary)}\n          <button type="button" class="btn btn-default btn-xs vn-task-center-dismiss-crew" data-category="${escapeHtml(category)}" style="margin-left:8px;">\n            Gesehen\n          </button>\n        </div>\n      `);
     }
     const emptyState = !items.length && !finishedBlocks.length ? `<p class="text-muted">Nichts in der Warteschlange - keine Hintergrund-Aufgaben gerade am Laufen.</p>` : "";
-    body.innerHTML = `\n      <div id="vn-task-center-marker" style="display:none;"></div>\n      <p class="text-muted" style="font-size:12px;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
-    document.getElementById("vn-btn-back").addEventListener("click", renderHistoryScreen);
-    body.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
+    container.innerHTML = `\n      <p class="text-muted" style="font-size:12px; margin-top:0;">Laufende und wartende Aufgaben im Hintergrund.</p>\n      ${finishedBlocks.join("")}\n      ${items.join("")}\n      ${emptyState}\n      <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.15);">\n        <button type="button" id="vn-task-panel-history" class="btn btn-default btn-xs">\n          <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span> Verlauf\n        </button>\n      </div>\n    `;
+    document.getElementById("vn-task-panel-history").addEventListener("click", () => {
+      ensureMainModalOpen();
+      renderHistoryScreen();
+    });
+    container.querySelectorAll(".vn-task-center-dismiss-crew").forEach(btn => {
       btn.addEventListener("click", () => {
         finishedCrewCategoryRuns.delete(btn.dataset.category);
         updateBackgroundTaskBadge();
-        renderTaskCenterScreen();
+        refreshTaskPanel();
       });
     });
-    document.getElementById("vn-task-center-view-result")?.addEventListener("click", () => {
-      finishedBackgroundTask.renderResult();
-      finishedBackgroundTask = null;
-      updateBackgroundTaskBadge();
+    container.querySelectorAll(".vn-task-center-view-result").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.dataset.id);
+        const index = finishedBackgroundTasks.findIndex(t => t.id === id);
+        if (index === -1) return;
+        const [task] = finishedBackgroundTasks.splice(index, 1);
+        ensureMainModalOpen();
+        task.renderResult();
+        updateBackgroundTaskBadge();
+        refreshTaskPanel();
+      });
     });
-    body.querySelectorAll(".vn-task-center-cancel").forEach(btn => {
+    container.querySelectorAll(".vn-task-center-cancel").forEach(btn => {
       btn.addEventListener("click", () => {
         if (btn.dataset.kind === "rename") {
           activeBackgroundTask?.cancel();
@@ -184,9 +314,6 @@
       });
     });
   }
-  function refreshTaskCenterIfVisible() {
-    if (document.getElementById("vn-task-center-marker")) renderTaskCenterScreen();
-  }
   const MODAL_WIDTH_COMPACT = 520;
   const MODAL_WIDTH_DEFAULT = 900;
   const MODAL_WIDTH_WIDE = 1400;
@@ -195,6 +322,7 @@
     if (!dialog) return;
     dialog.style.minWidth = `min(${px}px, 95%)`;
     dialog.style.maxWidth = `min(${px}px, 95%)`;
+    positionTaskPanel();
   }
   let screenRenderGeneration = 0;
   function currentRenderToken() {
@@ -1686,6 +1814,33 @@
   async function getPersonnelSchoolingMinStaff() {
     return await retrieveData(PERSONNEL_SCHOOLING_MIN_STAFF_KEY) || 0;
   }
+  const ALLIANCE_SCHOOLING_OPENER_LOG_KEY = "allianceSchoolingOpenerLog";
+  const ALLIANCE_SCHOOLING_OPENER_LOG_MAX = 20;
+  async function getAllianceSchoolingOpenerLog() {
+    return await retrieveData(ALLIANCE_SCHOOLING_OPENER_LOG_KEY) || [];
+  }
+  async function recordAllianceSchoolingOpenerLogEntry(entry) {
+    const log = await getAllianceSchoolingOpenerLog();
+    log.unshift({
+      timestamp: Date.now(),
+      ...entry
+    });
+    if (log.length > ALLIANCE_SCHOOLING_OPENER_LOG_MAX) log.length = ALLIANCE_SCHOOLING_OPENER_LOG_MAX;
+    await storeData(log, ALLIANCE_SCHOOLING_OPENER_LOG_KEY);
+    return log;
+  }
+  const ALLIANCE_SCHOOLING_OPENER_SETTINGS_KEY = "allianceSchoolingOpenerSettings";
+  async function getAllianceSchoolingOpenerSettings() {
+    return await retrieveData(ALLIANCE_SCHOOLING_OPENER_SETTINGS_KEY) || {};
+  }
+  async function saveAllianceSchoolingOpenerSettings(patch) {
+    const settings = {
+      ...await getAllianceSchoolingOpenerSettings(),
+      ...patch
+    };
+    await storeData(settings, ALLIANCE_SCHOOLING_OPENER_SETTINGS_KEY);
+    return settings;
+  }
   const STATION_BLUEPRINTS_KEY = "stationBlueprints";
   async function getStationBlueprints() {
     return await retrieveData(STATION_BLUEPRINTS_KEY) || {};
@@ -1725,7 +1880,7 @@
       if (await retrieveData(key) !== undefined) await GM.deleteValue(key);
     }
   }
-  const ALL_SETTINGS_KEYS = [ "names", HISTORY_STORAGE_KEY, CUSTOM_REQUIRED_EXTENSIONS_KEY, PERSONNEL_SCAN_KEY, PERSONNEL_SCAN_META_KEY, PERSONNEL_QUALIFICATIONS_KEY, PERSONNEL_SCHOOLING_MIN_STAFF_KEY, STATION_BLUEPRINTS_KEY, ...ORPHANED_STORAGE_KEYS, SCHOOLING_STATION_SELECTION_KEY, STATION_CHECK_SELECTION_KEY, VEHICLE_CREW_STAFFING_MODE_KEY, VEHICLE_CREW_PROBLEMS_KEY, VEHICLE_CREW_INCLUDE_NORMAL_KEY, VEHICLE_CREW_UNTRAINED_ONLY_KEY, VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY, VEHICLE_CREW_TRIM_KEY, VEHICLE_CREW_AUTO_FMS_KEY ];
+  const ALL_SETTINGS_KEYS = [ "names", HISTORY_STORAGE_KEY, CUSTOM_REQUIRED_EXTENSIONS_KEY, PERSONNEL_SCAN_KEY, PERSONNEL_SCAN_META_KEY, PERSONNEL_QUALIFICATIONS_KEY, PERSONNEL_SCHOOLING_MIN_STAFF_KEY, ALLIANCE_SCHOOLING_OPENER_LOG_KEY, TASK_PANEL_POSITION_KEY, STATION_BLUEPRINTS_KEY, ...ORPHANED_STORAGE_KEYS, SCHOOLING_STATION_SELECTION_KEY, STATION_CHECK_SELECTION_KEY, VEHICLE_CREW_STAFFING_MODE_KEY, VEHICLE_CREW_PROBLEMS_KEY, VEHICLE_CREW_INCLUDE_NORMAL_KEY, VEHICLE_CREW_UNTRAINED_ONLY_KEY, VEHICLE_CREW_SOFT_REQUIREMENT_FULL_KEY, VEHICLE_CREW_TRIM_KEY, VEHICLE_CREW_AUTO_FMS_KEY ];
   async function clearAllStoredData() {
     await GM.deleteValue(cacheKeyVehicleTypes);
     await GM.deleteValue(ERROR_LOG_KEY);
@@ -2062,7 +2217,7 @@
       itemNoun: itemNoun,
       renameFn: renameFn
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, `${done} ${itemNoun}${failedItems.length ? ` (${failedItems.length} fehlgeschlagen)` : ""}`, cancelled ? "cancelled" : "done");
   }
   function renderCompletionScreen({verb: verb, done: done, failed: failed, plan: plan, errors: errors, failedItems: failedItems, goBack: goBack, cancelled: cancelled, itemNoun: itemNoun = "Fahrzeug(e)", renameFn: renameFn = renameVehicle}) {
     const body = document.getElementById("vehicle-naming-modal-body");
@@ -2203,7 +2358,7 @@
     if (document.getElementById("fuxtools-custom-styles")) return;
     const style = document.createElement("style");
     style.id = "fuxtools-custom-styles";
-    style.textContent = `\n      #vehicle-naming-modal-body .vn-menu-item {\n        display: flex;\n        align-items: center;\n        gap: 8px;\n        padding: 8px 14px;\n        background-color: rgba(255, 255, 255, 0.06);\n        color: inherit;\n        border-color: rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-body .vn-menu-item:hover,\n      #vehicle-naming-modal-body .vn-menu-item:focus {\n        background-color: rgba(255, 255, 255, 0.14);\n        color: inherit;\n      }\n      #vehicle-naming-modal-body .vn-menu-item .glyphicon {\n        font-size: 16px;\n        width: 18px;\n        text-align: center;\n      }\n      #vehicle-naming-modal-body .vn-settings-card {\n        padding: 12px 14px;\n        background-color: rgba(255, 255, 255, 0.04);\n        border: 1px solid rgba(255, 255, 255, 0.12);\n        border-radius: 4px;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level {\n        background-color: #7a2020;\n        border-color: #6b1c1c;\n        color: #fff;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level:hover,\n      #vehicle-naming-modal-body .vn-btn-max-level:focus {\n        background-color: #8f2626;\n        border-color: #7a2020;\n        color: #fff;\n      }\n      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme\n         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,\n         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script. */\n      #vehicle-naming-modal-body .text-danger {\n        color: #ff6b6b;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h3 {\n        margin-top: 0;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h4 {\n        margin: 18px 0 8px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h5 {\n        margin: 14px 0 6px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works ul {\n        padding-left: 20px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works li {\n        margin-bottom: 6px;\n      }\n      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-\n         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter\n         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange\n         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */\n      .vn-sticky-footer {\n        margin-top: 10px;\n        padding: 10px 0 2px;\n        background: var(--vn-modal-bg, #333);\n        border-top: 1px solid rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-actions {\n        flex-shrink: 0;\n        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf\n           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier\n           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit\n           Abstand zum Rand. */\n        padding: 0 15px;\n      }\n      #vehicle-naming-modal-actions:empty {\n        display: none;\n      }\n      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei\n         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-\n         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher\n         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am\n         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe\n         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf\n         JEDEM Screen gleich.\n       */\n      #vehicle-naming-modal-dialog .modal-content {\n        display: flex;\n        flex-direction: column;\n        max-height: 90vh;\n      }\n      #vehicle-naming-modal-dialog .modal-header,\n      #vehicle-naming-modal-dialog .modal-footer {\n        flex-shrink: 0;\n      }\n      #vehicle-naming-modal-body {\n        flex: 1 1 auto;\n        overflow-y: auto;\n        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein\n           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die\n           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height\n           hinaus wachsen lassen). */\n        min-height: 0;\n      }\n      .vn-task-spin {\n        display:inline-block;\n        animation: vn-task-spin 1s linear infinite;\n      }\n      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-\n         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -\n         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */\n      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei\n         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge\n         gewinnen kann. */\n      .vn-category-heading {\n        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;\n        border-left:3px solid #337ab7 !important; border-radius:3px !important;\n        padding:6px 10px !important; margin-bottom:2px !important;\n      }\n      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }\n      .vn-category-heading .glyphicon-chevron-right,\n      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }\n      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }\n      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */\n      summary.vn-category-heading { list-style:none; }\n      summary.vn-category-heading::-webkit-details-marker { display:none; }\n      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }\n      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle\n         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche\n         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */\n      .vn-btn-group-box {\n        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;\n        border:1px solid rgba(128,128,128,0.4); border-radius:4px;\n        padding:5px 8px; background:rgba(128,128,128,0.08);\n      }\n      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }\n      /* Task-Center-Bildschirm (siehe renderTaskCenterScreen): ein Kasten je laufender/\n         wartender Aufgabe. */\n      .vn-task-center-item {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:8px 10px; margin-bottom:8px;\n      }\n      /* Bauplan-Editor: grauer Kasten um Fahrzeugname+Anzahl-Feld (siehe vehicleGridHtml) -\n         ohne sichtbare Trennung zwischen den Zeilen/Spalten des Grids war auf einen Blick\n         schwer erkennbar, welches Eingabefeld zu welchem Fahrzeugnamen gehoert. */\n      .vn-vehicle-qty-box {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:5px 8px;\n      }\n    `;
+    style.textContent = `\n      #vehicle-naming-modal-body .vn-menu-item {\n        display: flex;\n        align-items: center;\n        gap: 8px;\n        padding: 8px 14px;\n        background-color: rgba(255, 255, 255, 0.06);\n        color: inherit;\n        border-color: rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-body .vn-menu-item:hover,\n      #vehicle-naming-modal-body .vn-menu-item:focus {\n        background-color: rgba(255, 255, 255, 0.14);\n        color: inherit;\n      }\n      #vehicle-naming-modal-body .vn-menu-item .glyphicon {\n        font-size: 16px;\n        width: 18px;\n        text-align: center;\n      }\n      #vehicle-naming-modal-body .vn-settings-card {\n        padding: 12px 14px;\n        background-color: rgba(255, 255, 255, 0.04);\n        border: 1px solid rgba(255, 255, 255, 0.12);\n        border-radius: 4px;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level {\n        background-color: #7a2020;\n        border-color: #6b1c1c;\n        color: #fff;\n      }\n      #vehicle-naming-modal-body .vn-btn-max-level:hover,\n      #vehicle-naming-modal-body .vn-btn-max-level:focus {\n        background-color: #8f2626;\n        border-color: #7a2020;\n        color: #fff;\n      }\n      /* Bootstraps Standard-Rot fuer .text-danger (#a94442) ist auf dem dunklen Seiten-Theme\n         kaum lesbar (fuer helle Hintergruende gedacht) - hier durchgaengig auf ein helleres,\n         kontrastreicheres Rot angehoben. Betrifft alle Fehlermeldungen/Status-Texte im Script,\n         inklusive des freistehenden Task-Panels (siehe createTaskPanel), das ausserhalb von\n         #vehicle-naming-modal-body liegt. */\n      #vehicle-naming-modal-body .text-danger,\n      #vn-task-panel .text-danger {\n        color: #ff6b6b;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h3 {\n        margin-top: 0;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h4 {\n        margin: 18px 0 8px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works h5 {\n        margin: 14px 0 6px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works ul {\n        padding-left: 20px;\n      }\n      #vehicle-naming-modal-body .vn-how-it-works li {\n        margin-bottom: 6px;\n      }\n      /* Aktions-/Zurueck-Buttons: wird von modalBody automatisch in #vehicle-naming-modal-\n         actions verschoben (siehe Object.defineProperty auf modalBody.innerHTML weiter\n         unten) - eine eigene, nicht scrollende Zeile, damit beim Scrollen durch lange\n         Listen (z.B. viele Fahrzeugtypen) nichts mehr sichtbar dahinter durchrutscht. */\n      .vn-sticky-footer {\n        margin-top: 10px;\n        padding: 10px 0 2px;\n        background: var(--vn-modal-bg, #333);\n        border-top: 1px solid rgba(255, 255, 255, 0.15);\n      }\n      #vehicle-naming-modal-actions {\n        flex-shrink: 0;\n        /* Liegt als Sibling AUSSERHALB von .modal-body (siehe Object.defineProperty auf\n           modalBody.innerHTML) und erbt dessen Bootstrap-Padding deshalb nicht - ohne das hier\n           saessen "Zurueck" & Co. buendig an der Fensterkante statt wie ueberall sonst mit\n           Abstand zum Rand. */\n        padding: 0 15px;\n      }\n      #vehicle-naming-modal-actions:empty {\n        display: none;\n      }\n      /* Feste Gesamthoehe fuer die Modal-Box statt variabler Hoehe: verhindert, dass bei\n         langen Screens ZWEI verschachtelte Scrollbereiche entstehen (das ganze Bootstrap-\n         Modal UND unser eigener Body-Bereich) - dadurch stand der .vn-sticky-footer bisher\n         manchmal nicht am echten unteren Rand des sichtbaren Fensters, sondern nur am\n         unteren Rand des inneren (mitgescrollten) Bereichs. Mit einer festen Modal-Hoehe\n         (Header/Footer fix, nur der Body dazwischen scrollt) bleibt das Verhalten auf\n         JEDEM Screen gleich.\n       */\n      #vehicle-naming-modal-dialog .modal-content {\n        display: flex;\n        flex-direction: column;\n        max-height: 90vh;\n      }\n      #vehicle-naming-modal-dialog .modal-header,\n      #vehicle-naming-modal-dialog .modal-footer {\n        flex-shrink: 0;\n      }\n      #vehicle-naming-modal-body {\n        flex: 1 1 auto;\n        overflow-y: auto;\n        /* min-height:0 ist noetig, damit ein Flex-Kind ueberhaupt kleiner als sein\n           Inhalt werden und selbst scrollen darf (sonst wuerde es sich einfach auf die\n           volle Inhaltshoehe aufblaehen und .modal-content wieder ueber max-height\n           hinaus wachsen lassen). */\n        min-height: 0;\n      }\n      .vn-task-spin {\n        display:inline-block;\n        animation: vn-task-spin 1s linear infinite;\n      }\n      @keyframes vn-task-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }\n      /* Einheitliches Design fuer alle auf-/zuklappbaren Kategorie-Ueberschriften (Feuerwehr-\n         Kategorien im Bauplan-Editor, Kategorie-Panels bei Fahrzeuge/Wachen umbenennen, ...) -\n         blauer Rand + dezenter Hintergrund macht auf den ersten Blick klar: hier klappt was auf. */\n      /* !important noetig, weil Bootstraps eigenes ".panel-default > .panel-heading" (bei\n         Fahrzeuge/Wachen umbenennen) dieselbe Spezifitaet hat und sonst je nach Ladereihenfolge\n         gewinnen kann. */\n      .vn-category-heading {\n        cursor:pointer !important; background:rgba(51,122,183,0.18) !important;\n        border-left:3px solid #337ab7 !important; border-radius:3px !important;\n        padding:6px 10px !important; margin-bottom:2px !important;\n      }\n      .vn-category-heading:hover { background:rgba(51,122,183,0.32) !important; }\n      .vn-category-heading .glyphicon-chevron-right,\n      .vn-category-heading .glyphicon-triangle-right { font-size:10px; transition:transform 0.15s; }\n      .vn-category-heading .glyphicon-triangle-right.vn-rotated { transform:rotate(90deg); }\n      /* <details>/<summary> (Feuerwehr-Kategorien): kein natives Dreieck, Pfeil rotiert per CSS */\n      summary.vn-category-heading { list-style:none; }\n      summary.vn-category-heading::-webkit-details-marker { display:none; }\n      details[open] > summary.vn-category-heading .glyphicon-chevron-right { transform:rotate(90deg); }\n      /* Grauer Kasten um zusammengehoerige Schalter (z.B. Fahrzeug-Besatzung: Minimum/Volle\n         Besatzung, Nur ergaenzen/Vollstaendig anwenden) - macht auf einen Blick klar, welche\n         Buttons ein Paar/eine Einheit bilden statt lose nebeneinander zu stehen. */\n      .vn-btn-group-box {\n        display:flex; align-items:center; gap:6px; flex-wrap:nowrap;\n        border:1px solid rgba(128,128,128,0.4); border-radius:4px;\n        padding:5px 8px; background:rgba(128,128,128,0.08);\n      }\n      .vn-btn-group-label { font-size:11px; opacity:0.8; white-space:nowrap; margin-right:2px; }\n      /* Task-Panel (siehe refreshTaskPanel): ein Kasten je laufender/wartender Aufgabe. */\n      .vn-task-center-item {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:8px 10px; margin-bottom:8px;\n      }\n      /* Bauplan-Editor: grauer Kasten um Fahrzeugname+Anzahl-Feld (siehe vehicleGridHtml) -\n         ohne sichtbare Trennung zwischen den Zeilen/Spalten des Grids war auf einen Blick\n         schwer erkennbar, welches Eingabefeld zu welchem Fahrzeugnamen gehoert. */\n      .vn-vehicle-qty-box {\n        border:1px solid rgba(128,128,128,0.3); border-radius:4px;\n        padding:5px 8px;\n      }\n    `;
     document.head.appendChild(style);
   }
   async function initModal() {
@@ -2226,6 +2381,15 @@
     breadcrumb.className = "text-muted";
     breadcrumb.style.cssText = "margin-left:8px; font-size:13px; font-weight:normal;";
     modalTitle.appendChild(breadcrumb);
+    const headerTaskBtn = document.createElement("button");
+    headerTaskBtn.type = "button";
+    headerTaskBtn.id = "vn-header-task-btn";
+    headerTaskBtn.className = "btn btn-default btn-xs";
+    headerTaskBtn.style.cssText = "margin-left:auto; flex-shrink:0;";
+    headerTaskBtn.innerHTML = `FuxTools-Aufgaben <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>`;
+    headerTaskBtn.addEventListener("click", () => taskPanelOpen ? closeTaskPanel() : openTaskPanel());
+    modalTitle.appendChild(headerTaskBtn);
+    headerTaskButtonEl = headerTaskBtn;
     const modalHeader = document.createElement("div");
     modalHeader.className = "modal-header";
     modalHeader.appendChild(modalTitle);
@@ -2275,19 +2439,16 @@
     modal.appendChild(modalDialog);
     modal.style.zIndex = "5000";
     document.body.appendChild(modal);
+    await createTaskPanel();
     modal.addEventListener("click", e => {
       const btn = e.target.closest("button");
       if (btn) setTimeout(() => btn.blur(), 0);
     });
     modalContent.style.setProperty("--vn-modal-bg", getComputedStyle(modalContent).backgroundColor);
     const pageJQuery = unsafeWindow.jQuery || unsafeWindow.$;
-    pageJQuery(modal).on("show.bs.modal", e => {
+    pageJQuery(modal).on("show.bs.modal", () => {
       if (pendingReloadAfterUpdate) {
         renderUpdateRequiredScreen();
-        return;
-      }
-      if (e.relatedTarget?.closest?.("#vn-task-center-entry")) {
-        renderTaskCenterScreen();
         return;
       }
       renderMainMenu();
@@ -2318,7 +2479,7 @@
     const username = getCurrentUsername();
     const greeting = username ? `Hey ${escapeHtml(username)}, was möchtest du tun?` : "Was möchtest du tun?";
     const sectionLabelStyle = "font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 4px; font-weight:bold;";
-    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Lehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Verbandslehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
+    body.innerHTML = `\n      <div style="max-width:420px; margin:0 auto;">\n        <p>${greeting}</p>\n\n        <p class="text-muted" style="${sectionLabelStyle} margin-top:0;">Wachenplanung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-blueprints">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Wachen-Bauplaner\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-apply-check">\n            <span class="glyphicon glyphicon-ok-circle" aria-hidden="true"></span>\n            Wachen-Check\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Lehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Verbandslehrgänge\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-statistics">\n            <span class="glyphicon glyphicon-stats" aria-hidden="true"></span>\n            Statistik\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Helfer</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicle-crew">\n            <span class="glyphicon glyphicon-wrench" aria-hidden="true"></span>\n            Fahrzeug-Besatzung\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-station-check">\n            <span class="glyphicon glyphicon-tasks" aria-hidden="true"></span>\n            Wachenausbau\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-alliance-schooling-opener">\n            <span class="glyphicon glyphicon-education" aria-hidden="true"></span>\n            Lehrgänge öffnen (Helfer)\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Schnellumbenennung</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-vehicles">\n            <span class="glyphicon glyphicon-road" aria-hidden="true"></span>\n            Fahrzeuge umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-reset">\n            <span class="glyphicon glyphicon-refresh" aria-hidden="true"></span>\n            Fahrzeugnamen zurücksetzen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-stations">\n            <span class="glyphicon glyphicon-home" aria-hidden="true"></span>\n            Wachen umbenennen\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-leitstellen">\n            <span class="glyphicon glyphicon-map-marker" aria-hidden="true"></span>\n            Leitstellen umbenennen\n          </button>\n        </div>\n\n        <p class="text-muted" style="${sectionLabelStyle}">Sonstiges</p>\n        <div class="list-group">\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-how-it-works">\n            <span class="glyphicon glyphicon-question-sign" aria-hidden="true"></span>\n            So funktioniert's\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-history">\n            <span class="glyphicon glyphicon-list-alt" aria-hidden="true"></span>\n            Verlauf\n          </button>\n          <button type="button" class="list-group-item vn-menu-item" id="vn-menu-settings">\n            <span class="glyphicon glyphicon-cog" aria-hidden="true"></span>\n            Einstellungen\n          </button>\n        </div>\n      </div>\n    `;
     document.getElementById("vn-menu-vehicles").addEventListener("click", () => {
       currentMode = "rename";
       renderLeitstelleSelection();
@@ -2335,6 +2496,7 @@
     document.getElementById("vn-menu-alliance-schooling").addEventListener("click", () => renderSchoolingBlueprintSelection(renderMainMenu, true));
     document.getElementById("vn-menu-statistics").addEventListener("click", () => renderStationStatisticsScreen());
     document.getElementById("vn-menu-vehicle-crew").addEventListener("click", () => renderVehicleCrewLeitstelleSelection());
+    document.getElementById("vn-menu-alliance-schooling-opener").addEventListener("click", () => renderAllianceSchoolingOpenerScreen());
     document.getElementById("vn-menu-station-blueprints").addEventListener("click", () => renderStationBlueprintsListScreen());
     document.getElementById("vn-menu-history").addEventListener("click", renderHistoryScreen);
     document.getElementById("vn-menu-settings").addEventListener("click", renderSettingsScreen);
@@ -2535,7 +2697,7 @@
     setScreenTitle("Einstellungen › Geforderte Ausbauten");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade ...");
     const overrides = await getRequiredExtensionsOverrides();
     if (!isCurrentRenderToken(renderToken)) return;
     const types = requiredExtensionsConfigurableTypes();
@@ -2599,7 +2761,7 @@
     setScreenTitle("Verlauf");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Verlauf ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Verlauf ...");
     const history = await getHistory();
     if (!isCurrentRenderToken(renderToken)) return;
     const applyRowVisibility = makeRowVisibilityFilter({
@@ -2701,7 +2863,7 @@
     setScreenTitle("Fehlerprotokoll");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Fehlerprotokoll ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Fehlerprotokoll ...");
     const log = await getErrorLog();
     if (!isCurrentRenderToken(renderToken)) return;
     const rows = log.map(entry => {
@@ -2731,6 +2893,11 @@
     a.style.cssText = "display:flex; align-items:center; height:100%; padding:15px;";
     a.appendChild(logoImg);
     a.appendChild(document.createTextNode(CHANNEL === "beta" ? "FuxTools Beta" : "FuxTools"));
+    navEntrySpinnerEl = document.createElement("span");
+    navEntrySpinnerEl.className = "glyphicon glyphicon-refresh vn-task-spin";
+    navEntrySpinnerEl.setAttribute("aria-hidden", "true");
+    navEntrySpinnerEl.style.cssText = "display:none; margin-left:6px; font-size:13px;";
+    a.appendChild(navEntrySpinnerEl);
     const li = document.createElement("li");
     li.role = "presentation";
     li.setAttribute("data-toggle", "modal");
@@ -2743,31 +2910,6 @@
     }
     li.className = profileLi.className;
     profileLi.parentNode.insertBefore(li, profileLi);
-    const taskCenterIconWrap = document.createElement("span");
-    taskCenterIconWrap.style.cssText = "position:relative; display:inline-block; width:22px; height:22px;";
-    const taskCenterLogo = document.createElement("img");
-    taskCenterLogo.src = LOGO_URL;
-    taskCenterLogo.alt = "";
-    taskCenterLogo.style.cssText = "width:22px; height:22px; border-radius:3px;";
-    taskCenterLogo.addEventListener("error", () => taskCenterLogo.remove());
-    taskCenterIconWrap.appendChild(taskCenterLogo);
-    backgroundTaskBadgeEl = document.createElement("span");
-    backgroundTaskBadgeEl.style.cssText = "position:absolute; bottom:-4px; right:-6px; font-size:12px; line-height:1; color:#fff; " + "text-shadow:0 0 2px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.9);";
-    taskCenterIconWrap.appendChild(backgroundTaskBadgeEl);
-    const taskCenterLink = document.createElement("a");
-    taskCenterLink.href = "#";
-    taskCenterLink.title = "FuxTools - laufende Aufgaben";
-    taskCenterLink.style.cssText = "display:flex; align-items:center; height:100%; padding:15px 12px;";
-    taskCenterLink.appendChild(taskCenterIconWrap);
-    const taskCenterLi = document.createElement("li");
-    taskCenterLi.id = "vn-task-center-entry";
-    taskCenterLi.role = "presentation";
-    taskCenterLi.className = profileLi.className;
-    taskCenterLi.setAttribute("data-toggle", "modal");
-    taskCenterLi.setAttribute("data-target", `#${modalId}`);
-    taskCenterLi.appendChild(taskCenterLink);
-    profileLi.parentNode.insertBefore(taskCenterLi, profileLi);
-    taskCenterEntryEl = taskCenterLi;
     updateBackgroundTaskBadge();
   }
   let gameVehicles = [];
@@ -3498,9 +3640,11 @@
       recordPendingBuildingLevel(buildingId, reachedLevel, baselineLevel);
       invalidateGameDataCache();
     }
+    const resultSummary = verifyFailed ? `Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht - vermutlich nicht genug ${currency === "coins" ? "Coins" : "Credits"}` : `${builtCount}/${levelsToBuild.length} Stufen gebaut (jetzt Stufe ${reachedLevel})` + (error ? ` - abgebrochen: ${error.message}` : "");
+    const resultStatus = cancelled ? "cancelled" : verifyFailed || error ? "error" : "done";
     await updateHistoryEntry(historyId, {
-      label: verifyFailed ? `Nur Stufe ${reachedLevel} statt ${plannedLevel} erreicht - vermutlich nicht genug ${currency === "coins" ? "Coins" : "Credits"}` : `${builtCount}/${levelsToBuild.length} Stufen gebaut (jetzt Stufe ${reachedLevel})` + (error ? ` - abgebrochen: ${error.message}` : ""),
-      status: cancelled ? "cancelled" : verifyFailed || error ? "error" : "done",
+      label: resultSummary,
+      status: resultStatus,
       cost: spent,
       currency: currency
     });
@@ -3519,7 +3663,7 @@
       verifyFailed: verifyFailed,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, resultSummary, resultStatus);
   }
   function renderBuildLevelsResultScreen({builtCount: builtCount, total: total, reachedLevel: reachedLevel, plannedLevel: plannedLevel, spent: spent, currency: currency, error: error, cancelled: cancelled, verifyFailed: verifyFailed, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3749,7 +3893,7 @@
       failed: failed > 0,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : failed ? "error" : "done");
   }
   function renderBulkActionResultScreen({summary: summary, failed: failed, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -3838,7 +3982,7 @@
       failed: !!error,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : error ? "error" : "done");
   }
   const CLEAR_STORAGE_CONFIRM_WORD = "löschen";
   function renderClearStorageConfirmScreen(goBack) {
@@ -3874,7 +4018,7 @@
     setScreenTitle("Wachenausbau");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Wachen-Daten ...");
     let stations;
     try {
       stations = await loadBuildingsForCheck();
@@ -4258,9 +4402,6 @@
     }
     return byCategory;
   }
-  function pickSchoolForCategory(schoolsByCategory, category) {
-    return (schoolsByCategory[category] || [])[0] || null;
-  }
   async function fetchAllianceSchoolPermissionIds() {
     const res = await fetchWithTimeout("/verband/gebauede", {
       credentials: "same-origin"
@@ -4515,53 +4656,101 @@
       selected: selectedByStation.flatMap(s => s.people)
     };
   }
-  async function planTrainingRun(need, school, mode, isAlliance = false) {
-    const schoolId = school.id;
+  async function planTrainingRun(need, schools, mode, isAlliance = false) {
     const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
-    const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(await fetchSchoolingRuns(), schoolId);
-    const occupied = rawOccupied + getPendingSchoolingRooms(schoolId, rawOccupied);
-    const freeRooms = Math.max(0, school.maxRooms - occupied);
-    if (freeRooms <= 0) {
-      throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
+    const ownSchoolingRuns = isAlliance ? null : await fetchSchoolingRuns();
+    const usableSchools = schools.map(school => {
+      const rawOccupied = isAlliance ? countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings) : countOccupiedRooms(ownSchoolingRuns, school.id);
+      const occupied = rawOccupied + getPendingSchoolingRooms(school.id, rawOccupied);
+      const freeRooms = Math.max(0, school.maxRooms - occupied);
+      return {
+        school: school,
+        rawOccupied: rawOccupied,
+        occupied: occupied,
+        freeRooms: freeRooms
+      };
+    }).filter(entry => entry.freeRooms > 0).sort((a, b) => Number(a.school.id) - Number(b.school.id));
+    if (!usableSchools.length) {
+      throw new Error(schools.length === 1 ? "Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum." : `Keine freien Klassenräume an einer der ${schools.length} Schulen dieser Kategorie - es läuft bereits ein Lehrgang in jedem Raum.`);
     }
-    const {authenticityToken: authenticityToken, educationValue: educationValue, educationLabel: educationLabel} = await fetchSchoolPageInfo(schoolId, occupied, need.slug);
-    const roomsWanted = Math.min(freeRooms, Math.max(1, Math.ceil(totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
-    const capacity = roomsWanted * SCHOOLING_SEATS_PER_ROOM;
+    const totalFreeRooms = usableSchools.reduce((sum, s) => sum + s.freeRooms, 0);
+    const roomsWanted = Math.min(totalFreeRooms, Math.max(1, Math.ceil(totalDeficit / SCHOOLING_SEATS_PER_ROOM)));
+    let remainingRoomsWanted = roomsWanted;
+    const schoolPlansRaw = [];
+    for (const entry of usableSchools) {
+      if (remainingRoomsWanted <= 0) break;
+      const rooms = Math.min(entry.freeRooms, remainingRoomsWanted);
+      let info;
+      try {
+        info = await fetchSchoolPageInfo(entry.school.id, entry.occupied, need.slug);
+      } catch (e) {
+        console.warn(`[FuxTools] Schule "${entry.school.name}" übersprungen: ${e.message}`);
+        continue;
+      }
+      schoolPlansRaw.push({
+        ...entry,
+        roomsAllocated: rooms,
+        ...info
+      });
+      remainingRoomsWanted -= rooms;
+    }
+    if (!schoolPlansRaw.length) {
+      throw new Error("An keiner der verfügbaren Schulen konnte dieser Lehrgang geöffnet werden (Formular/Lehrgang nicht gefunden).");
+    }
+    const totalRoomsSecured = schoolPlansRaw.reduce((sum, p) => sum + p.roomsAllocated, 0);
+    const capacity = totalRoomsSecured * SCHOOLING_SEATS_PER_ROOM;
     const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
       throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung UND ohne jede andere Qualifikation ist als "Verfügbar" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig qualifiziert).');
     }
-    const actualRooms = Math.min(freeRooms, Math.max(1, Math.ceil(selected.length / SCHOOLING_SEATS_PER_ROOM)));
-    const durationDays = parseEducationDurationDays(educationLabel);
+    const remainingPeople = [ ...selected ];
+    const schoolPlans = [];
+    for (const raw of schoolPlansRaw) {
+      if (!remainingPeople.length) break;
+      const peopleForSchool = remainingPeople.splice(0, raw.roomsAllocated * SCHOOLING_SEATS_PER_ROOM);
+      if (!peopleForSchool.length) continue;
+      const actualRooms = Math.min(raw.roomsAllocated, Math.max(1, Math.ceil(peopleForSchool.length / SCHOOLING_SEATS_PER_ROOM)));
+      schoolPlans.push({
+        schoolId: raw.school.id,
+        schoolName: raw.school.name,
+        authenticityToken: raw.authenticityToken,
+        educationValue: raw.educationValue,
+        educationLabel: raw.educationLabel,
+        actualRooms: actualRooms,
+        selected: peopleForSchool,
+        selectedByStation: selectedByStationSubset({
+          selectedByStation: selectedByStation
+        }, peopleForSchool),
+        rawOccupiedBeforeAction: raw.rawOccupied
+      });
+    }
+    const durationDays = parseEducationDurationDays(schoolPlansRaw[0].educationLabel);
     const finishEstimate = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1e3) : null;
     return {
-      schoolId: schoolId,
-      authenticityToken: authenticityToken,
-      educationValue: educationValue,
-      educationLabel: educationLabel,
+      slug: realSlugFor(need.slug),
       durationDays: durationDays,
       finishEstimate: finishEstimate,
-      actualRooms: actualRooms,
+      actualRooms: schoolPlans.reduce((sum, p) => sum + p.actualRooms, 0),
       selectedByStation: selectedByStation,
       selected: selected,
       isAlliance: isAlliance,
-      rawOccupiedBeforeAction: rawOccupied
+      schoolPlans: schoolPlans
     };
   }
   async function planFillOpenRuns(need, runs, mode) {
-    const totalFreeSeats = runs.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
+    const totalFreeSeats = runs.reduce((sum, r) => sum + (r.openSpaces || 0), 0);
     const totalDeficit = mode === "max" ? need.totalMaxDeficit : need.totalMinDeficit;
     const capacity = Math.min(totalFreeSeats, totalDeficit);
     const {selectedByStation: selectedByStation, selected: selected} = await selectPersonnelForNeed(need, mode, capacity);
     if (!selected.length) {
       throw new Error('Kein verfügbares Personal gefunden (niemand ohne diese Ausbildung UND ohne jede andere Qualifikation ist als "Verfügbar" markiert - evtl. schon in Ausbildung, im Einsatz oder bereits anderweitig qualifiziert).');
     }
-    const sortedRuns = [ ...runs ].sort((a, b) => (b.open_spaces || 0) - (a.open_spaces || 0));
+    const sortedRuns = [ ...runs ].sort((a, b) => (b.openSpaces || 0) - (a.openSpaces || 0));
     const remaining = [ ...selected ];
     const assignments = [];
     for (const run of sortedRuns) {
       if (!remaining.length) break;
-      const slice = remaining.splice(0, run.open_spaces || 0);
+      const slice = remaining.splice(0, run.openSpaces || 0);
       if (slice.length) assignments.push({
         run: run,
         people: slice
@@ -4587,32 +4776,27 @@
       names: s.people.map(p => p.name)
     }));
   }
-  async function fetchAllianceSchoolings() {
-    let items = [];
-    let nextPage = "/api/alliance_schoolings";
-    while (nextPage) {
-      const res = await fetchWithTimeout(nextPage, {
-        credentials: "same-origin"
-      });
-      if (!res.ok) throw new Error(`Fehler beim Laden von ${nextPage}: ${res.status}`);
-      const data = await res.json();
-      const pageItems = Array.isArray(data) ? data : Array.isArray(data.result) ? data.result : Object.values(data);
-      items = items.concat(pageItems);
-      nextPage = data.paging?.next_page || null;
-    }
-    return items;
-  }
-  function normalizeEducationText(text) {
-    return text.replace(/\s*\(\d+\s*Tage?\)\s*$/i, "").trim().toLowerCase();
-  }
-  function matchesEducationTitle(label, title) {
-    if (!label || !title) return false;
-    const a = normalizeEducationText(label);
-    const b = normalizeEducationText(title);
-    return !!a && !!b && (a === b || a.includes(b) || b.includes(a));
-  }
-  function matchesPlanEducation(plan, run) {
-    return matchesEducationTitle(plan.educationLabel, run.education_title);
+  async function fetchOpenSchoolingsPage() {
+    const res = await fetchWithTimeout("/schoolings", {
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error(`/schoolings konnte nicht geladen werden (${res.status}).`);
+    const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
+    return [ ...doc.querySelectorAll("#schooling_opened_table tbody tr") ].map(row => {
+      const link = row.querySelector("a[href^='/schoolings/']");
+      const id = link?.getAttribute("href")?.split("/").pop() || null;
+      const cells = row.querySelectorAll("td");
+      const costText = cells[2]?.textContent.trim() || "";
+      const costMatch = costText.match(/(\d+)/);
+      return {
+        id: id,
+        slug: row.dataset.educationKey || null,
+        educationTitle: link?.textContent.trim() || "",
+        openSpaces: parseInt(cells[1]?.textContent.trim(), 10) || 0,
+        costText: costText,
+        costPerDayPerParticipant: costMatch ? Number(costMatch[1]) : null
+      };
+    }).filter(r => r.id);
   }
   async function joinOpenSchoolingRun(runId, personalIds) {
     const csrfToken = getCsrfTokenOrThrow(runId);
@@ -4632,19 +4816,19 @@
       throw new Error(`Personal konnte nicht in den Lehrgang eingetragen werden (HTTP ${res.status}).`);
     }
   }
-  async function submitTrainingRun(plan, onProgress = () => {}) {
+  async function submitTrainingRunForSchool(schoolPlan, planSlug, isAlliance, onProgress) {
     const params = new URLSearchParams;
     params.append("utf8", "✓");
-    params.append("authenticity_token", plan.authenticityToken);
-    params.append("building_rooms_use", String(plan.actualRooms));
-    params.append("education_select", plan.educationValue);
-    params.append("alliance[duration]", plan.isAlliance ? "3600" : "0");
+    params.append("authenticity_token", schoolPlan.authenticityToken);
+    params.append("building_rooms_use", String(schoolPlan.actualRooms));
+    params.append("education_select", schoolPlan.educationValue);
+    params.append("alliance[duration]", isAlliance ? "3600" : "0");
     params.append("alliance[cost]", "0");
-    if (!plan.isAlliance) {
-      plan.selected.forEach(p => params.append("personal_ids[]", p.id));
+    if (!isAlliance) {
+      schoolPlan.selected.forEach(p => params.append("personal_ids[]", p.id));
     }
-    const beforeRunIds = plan.isAlliance ? new Set((await fetchAllianceSchoolings()).filter(r => String(r.building_id) === String(plan.schoolId)).map(r => String(r.id))) : null;
-    const res = await fetchWithTimeout(`/buildings/${plan.schoolId}/education`, {
+    const beforeRunIds = isAlliance ? new Set((await fetchOpenSchoolingsPage()).map(r => r.id)) : null;
+    const res = await fetchWithTimeout(`/buildings/${schoolPlan.schoolId}/education`, {
       method: "POST",
       credentials: "same-origin",
       headers: {
@@ -4653,42 +4837,80 @@
       body: params.toString()
     });
     if (!res.ok || !res.redirected) {
-      throw new Error(`Ausbildung wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
+      throw new Error(`Ausbildung an "${schoolPlan.schoolName}" wurde nicht gestartet (Formular meldet einen Fehler, HTTP ${res.status}).`);
     }
-    if (!plan.isAlliance) return;
-    const maxAttempts = 10;
-    const pollIntervalMs = 2e4;
+    recordPendingSchoolingRooms(schoolPlan.schoolId, schoolPlan.actualRooms, schoolPlan.rawOccupiedBeforeAction);
+    if (!isAlliance) return;
     let candidates = [];
-    for (let attempt = 1; attempt <= maxAttempts && candidates.length < plan.actualRooms; attempt++) {
-      if (allianceTrainingCancelled) break;
-      if (attempt > 1) {
-        onProgress(`Lehrgang noch nicht in der Spiel-API sichtbar - nächste Prüfung in 20 Sekunden (Versuch ${attempt}/${maxAttempts}) ...`);
-        await sleep(pollIntervalMs);
-        if (allianceTrainingCancelled) break;
+    try {
+      const directIdMatch = res.url?.match(/\/schoolings\/(\d+)/);
+      if (directIdMatch) {
+        if (!beforeRunIds.has(directIdMatch[1])) {
+          candidates = [ {
+            id: directIdMatch[1],
+            openSpaces: SCHOOLING_SEATS_PER_ROOM
+          } ];
+        }
+      } else {
+        const html = await res.text();
+        const doc = (new DOMParser).parseFromString(html, "text/html");
+        candidates = [ ...doc.querySelectorAll("a[href^='/schoolings/']") ].map(a => a.getAttribute("href").split("/").pop()).filter(id => id && !beforeRunIds.has(id)).map(id => ({
+          id: id,
+          openSpaces: SCHOOLING_SEATS_PER_ROOM
+        }));
       }
-      const afterRuns = await fetchAllianceSchoolings();
-      candidates = afterRuns.filter(r => String(r.building_id) === String(plan.schoolId) && !beforeRunIds.has(String(r.id)) && matchesPlanEducation(plan, r));
+    } catch (e) {
+      console.warn("[FuxTools] Direkter Lehrgangs-Erkennungsweg fehlgeschlagen, falle auf kurze Nachprüfung zurück:", e);
+    }
+    if (candidates.length < schoolPlan.actualRooms && !allianceTrainingCancelled) {
+      onProgress(`${schoolPlan.schoolName}: Lehrgang noch nicht in der Lehrgangsliste sichtbar - kurze Nachprüfung ...`);
+      await sleep(5e3);
+      if (!allianceTrainingCancelled) {
+        const afterRuns = await fetchOpenSchoolingsPage();
+        const polled = afterRuns.filter(r => !beforeRunIds.has(r.id) && r.slug === planSlug);
+        const existingIds = new Set(candidates.map(c => c.id));
+        for (const r of polled) if (!existingIds.has(r.id)) candidates.push(r);
+      }
     }
     if (allianceTrainingCancelled && !candidates.length) {
-      throw new Error("Abgebrochen, während auf die Bestätigung durch das Spiel gewartet wurde - der Lehrgang wurde an der Schule geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell nachtragen.");
+      throw new Error(`Abgebrochen, während auf die Bestätigung durch das Spiel gewartet wurde - der Lehrgang an "${schoolPlan.schoolName}" wurde geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell nachtragen.`);
     }
     if (!candidates.length) {
-      throw new Error(`Lehrgang wurde an der Verbandschule geöffnet, aber auch nach ${maxAttempts} Versuchen nicht in der Lehrgangsliste (/api/alliance_schoolings) aufgetaucht - Personal wurde NICHT zugewiesen, bitte manuell nachtragen.`);
+      throw new Error(`Lehrgang an "${schoolPlan.schoolName}" wurde geöffnet, aber weder direkt noch bei der Nachprüfung in der Lehrgangsliste (/schoolings) gefunden - Personal wurde NICHT zugewiesen, bitte manuell nachtragen.`);
     }
-    if (candidates.length > plan.actualRooms) {
-      throw new Error(`Es sind ${candidates.length} neue, zur gewaehlten Ausbildung passende Lehrgaenge an dieser Schule aufgetaucht, obwohl nur ${plan.actualRooms} angefordert wurden - vermutlich hat zeitgleich ein anderes Verbandsmitglied denselben Lehrgang geoeffnet. Personal wurde sicherheitshalber NICHT zugewiesen, bitte manuell im Spiel prüfen und zuweisen.`);
+    if (candidates.length > schoolPlan.actualRooms) {
+      throw new Error(`Es sind ${candidates.length} neue, zur gewaehlten Ausbildung passende Lehrgaenge an "${schoolPlan.schoolName}" aufgetaucht, obwohl nur ${schoolPlan.actualRooms} angefordert wurden - vermutlich hat zeitgleich ein anderes Verbandsmitglied denselben Lehrgang geoeffnet. Personal wurde sicherheitshalber NICHT zugewiesen, bitte manuell im Spiel prüfen und zuweisen.`);
     }
     candidates.sort((a, b) => Number(a.id) - Number(b.id));
-    const remaining = [ ...plan.selected ];
+    const remaining = [ ...schoolPlan.selected ];
     for (const run of candidates) {
       if (!remaining.length) break;
-      const capacity = typeof run.open_spaces === "number" ? run.open_spaces : SCHOOLING_SEATS_PER_ROOM;
+      const capacity = typeof run.openSpaces === "number" ? run.openSpaces : SCHOOLING_SEATS_PER_ROOM;
       const slice = remaining.splice(0, capacity);
       if (slice.length) await joinOpenSchoolingRun(run.id, slice.map(p => p.id));
     }
     if (remaining.length) {
-      const err = new Error(`${remaining.length} von ${plan.selected.length} Person(en) konnten nicht mehr zugewiesen werden (nicht genug freie Plätze in den neu geöffneten Lehrgängen) - bitte manuell nachtragen: ${remaining.map(p => p.name).join(", ")}.`);
+      const err = new Error(`"${schoolPlan.schoolName}": ${remaining.length} von ${schoolPlan.selected.length} Person(en) konnten nicht mehr zugewiesen werden (nicht genug freie Plätze in den neu geöffneten Lehrgängen) - bitte manuell nachtragen: ${remaining.map(p => p.name).join(", ")}.`);
       err.unassignedPeople = remaining;
+      throw err;
+    }
+  }
+  async function submitTrainingRun(plan, onProgress = () => {}) {
+    const errorMessages = [];
+    const unassignedPeople = [];
+    for (const [index, schoolPlan] of plan.schoolPlans.entries()) {
+      if (allianceTrainingCancelled) break;
+      if (index > 0) await sleep(1e3);
+      try {
+        await submitTrainingRunForSchool(schoolPlan, plan.slug, plan.isAlliance, onProgress);
+      } catch (e) {
+        errorMessages.push(e.message);
+        unassignedPeople.push(...Array.isArray(e.unassignedPeople) ? e.unassignedPeople : schoolPlan.selected);
+      }
+    }
+    if (errorMessages.length) {
+      const err = new Error(errorMessages.join(" | "));
+      err.unassignedPeople = unassignedPeople;
       throw err;
     }
   }
@@ -4699,16 +4921,20 @@
       people: s.people.filter(p => ids.has(p.id))
     })).filter(s => s.people.length);
   }
-  function executeAllianceTrainingRun(need, school, qualificationName, plan, goBack) {
+  async function executeAllianceTrainingRun(need, qualificationName, plan, goBack) {
     const title = `Verbandslehrgang (${qualificationName})`;
-    runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue), goBack);
+    await recordPendingSchoolingAssignment(plan, need);
+    runOrQueueBackgroundTask(title, viaQueue => runAllianceTrainingRun(need, qualificationName, plan, goBack, title, viaQueue), goBack);
   }
-  async function runAllianceTrainingRun(need, school, qualificationName, plan, goBack, title, viaQueue) {
+  function schoolPlansLabel(schoolPlans) {
+    return schoolPlans.map(sp => sp.schoolName).join(", ");
+  }
+  async function runAllianceTrainingRun(need, qualificationName, plan, goBack, title, viaQueue) {
     allianceTrainingCancelled = false;
     const historyId = await startHistoryEntry({
       type: "schooling_start",
       label: `${qualificationName} (Verbandschule) - wird geöffnet ...`,
-      station: school.name
+      station: schoolPlansLabel(plan.schoolPlans)
     });
     beginBackgroundTask(title, () => {
       allianceTrainingCancelled = true;
@@ -4717,12 +4943,10 @@
         label: "Abbruch angefordert ..."
       });
     }, viaQueue, goBack);
-    await recordPendingSchoolingAssignment(plan, need);
     updateBackgroundTaskProgress(10, "Öffne Lehrgang an der Verbandschule ...");
     let error = null;
     try {
       await submitTrainingRun(plan, message => updateBackgroundTaskProgress(50, message));
-      recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms, plan.rawOccupiedBeforeAction);
     } catch (e) {
       error = e;
       const revertPlan = Array.isArray(e.unassignedPeople) ? {
@@ -4730,38 +4954,40 @@
       } : plan;
       await revertPendingSchoolingAssignment(revertPlan, need);
     }
+    const resultSummary = error ? allianceTrainingCancelled ? "Abgebrochen - Lehrgang wurde ggf. bereits geöffnet, aber Personal wurde NICHT zugewiesen." : `Fehler: ${error.message}` : `Lehrgang gestartet und mit ${plan.selected.length} Person(en) besetzt.`;
+    const resultStatus = error ? allianceTrainingCancelled ? "cancelled" : "error" : "done";
     await updateHistoryEntry(historyId, {
       label: error ? `${qualificationName} (Verbandschule) - Fehler: ${error.message}` : `${qualificationName} (Verbandschule, ${plan.selected.length} Person(en))`,
       personnelByStation: personnelByStationFromPlan(plan),
-      status: error ? allianceTrainingCancelled ? "cancelled" : "error" : "done"
+      status: resultStatus
     });
     if (error && !allianceTrainingCancelled) {
-      reportError(`Verbandslehrgang (${school.name})`, error);
+      reportError(`Verbandslehrgang (${schoolPlansLabel(plan.schoolPlans)})`, error);
     }
     const renderResult = () => renderAllianceTrainingResultScreen({
       qualificationName: qualificationName,
-      school: school,
       plan: plan,
       error: error,
       cancelled: allianceTrainingCancelled,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, resultSummary, resultStatus);
   }
-  function renderAllianceTrainingResultScreen({qualificationName: qualificationName, school: school, plan: plan, error: error, cancelled: cancelled, goBack: goBack}) {
+  function renderAllianceTrainingResultScreen({qualificationName: qualificationName, plan: plan, error: error, cancelled: cancelled, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle(`Verbandslehrgang (${qualificationName})`);
     const body = document.getElementById("vehicle-naming-modal-body");
     const statusHtml = cancelled ? `<span class="text-warning">Abgebrochen - Lehrgang wurde ggf. bereits geöffnet, aber Personal wurde NICHT zugewiesen, bitte manuell prüfen.</span>` : error ? `<span class="text-danger">Fehler: ${escapeHtml(error.message)}</span>` : `<span class="text-success">Lehrgang gestartet und mit ${plan.selected.length} Person(en) besetzt.</span>`;
-    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(schoolPlansLabel(plan.schoolPlans))}</b></p>\n      <p>${statusHtml}</p>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
   }
-  function executeAllianceFillRun(need, qualificationName, plan, goBack) {
+  async function executeAllianceFillRun(need, qualificationName, plan, goBack) {
     const title = `Verbandslehrgang auffüllen (${qualificationName})`;
+    await recordPendingSchoolingAssignment(plan, need);
     runOrQueueBackgroundTask(title, viaQueue => runAllianceFillRun(need, qualificationName, plan, goBack, title, viaQueue), goBack);
   }
   async function runAllianceFillRun(need, qualificationName, plan, goBack, title, viaQueue) {
-    const schoolNames = [ ...new Set(plan.assignments.map(a => a.run.education_title)) ].join(", ");
+    const schoolNames = [ ...new Set(plan.assignments.map(a => a.run.educationTitle)) ].join(", ");
     const historyId = await startHistoryEntry({
       type: "schooling_start",
       label: `${qualificationName} (offener Verbandslehrgang) - wird aufgefüllt ...`,
@@ -4773,7 +4999,6 @@
         label: "Abbruch angefordert ..."
       });
     }, viaQueue, goBack);
-    await recordPendingSchoolingAssignment(plan, need);
     updateBackgroundTaskProgress(30, "Trage Personal in offene Lehrgänge ein ...");
     let error = null;
     try {
@@ -4782,6 +5007,7 @@
       error = e;
       await revertPendingSchoolingAssignment(plan, need);
     }
+    const resultSummary = error ? `Fehler: ${error.message}` : `${plan.selected.length} Person(en) in offene Lehrgänge eingetragen.`;
     await updateHistoryEntry(historyId, {
       label: error ? `${qualificationName} (offener Verbandslehrgang) - Fehler: ${error.message}` : `${qualificationName} (offener Verbandslehrgang aufgefüllt, ${plan.selected.length} Person(en))`,
       personnelByStation: personnelByStationFromPlan(plan),
@@ -4796,7 +5022,7 @@
       error: error,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, resultSummary, error ? "error" : "done");
   }
   function renderAllianceFillResultScreen({qualificationName: qualificationName, plan: plan, error: error, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -4810,26 +5036,30 @@
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const stationRows = plan.selectedByStation.map(s => `\n          <tr>\n            <td>${escapeHtml(s.stationName)}</td>\n            <td>${s.people.length}</td>\n          </tr>\n        `).join("");
-    const runRows = plan.assignments.map(a => `\n          <tr>\n            <td>${escapeHtml(a.run.education_title || "-")}</td>\n            <td>${a.people.length} von ${a.run.open_spaces} freien Plätzen</td>\n          </tr>\n        `).join("");
-    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> - bereits offene Verbandslehrgänge auffüllen</p>\n      <p class="text-muted" style="font-size:12px;">\n        Kein neuer Lehrgang wird geöffnet - es wird nur eigenes Personal in bereits offene,\n        passende Instanzen eingetragen (von einem anderen Mitglied geöffnet, oder selbst ohne\n        Öffnen-Recht im Verband).\n      </p>\n      <p class="text-warning" style="font-size:12px;">\n        <span class="glyphicon glyphicon-warning-sign" aria-hidden="true"></span>\n        Ob dieser Lehrgang vom Ersteller mit Kosten (Credits pro Tag/Teilnehmer) geteilt wurde,\n        lässt sich über die Spiel-API nicht abfragen - bitte vor dem Bestätigen kurz im Spiel\n        unter "Offene Lehrgänge" selbst prüfen.\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Lehrgang</th><th>Belegt</th></tr></thead>\n        <tbody>${runRows}</tbody>\n      </table>\n      <p>Insgesamt <b>${plan.selected.length}</b> Person(en).</p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-fill-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling-fill" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
+    const runRows = plan.assignments.map(a => `\n          <tr>\n            <td>${escapeHtml(a.run.educationTitle || "-")}</td>\n            <td>${a.people.length} von ${a.run.openSpaces} freien Plätzen</td>\n            <td>${escapeHtml(a.run.costText || "-")}</td>\n          </tr>\n        `).join("");
+    const paidAssignments = plan.assignments.filter(a => (a.run.costPerDayPerParticipant || 0) > 0);
+    const costNotice = paidAssignments.length ? `<p class="text-danger" style="font-size:12px;">\n           <span class="glyphicon glyphicon-warning-sign" aria-hidden="true"></span>\n           Achtung: ${paidAssignments.length === plan.assignments.length ? "dieser Lehrgang wurde" : "mindestens einer dieser Lehrgänge wurde"}\n           vom Ersteller NICHT kostenlos geteilt (${escapeHtml(paidAssignments.map(a => a.run.costText).join(", "))}) -\n           beim Bestätigen fallen dafür laufend Kosten an.\n         </p>` : `<p class="text-muted" style="font-size:12px;">\n           Alle betroffenen Lehrgänge wurden kostenlos geteilt (0 Credits/Tag/Teilnehmer).\n         </p>`;
+    body.innerHTML = `\n      <p><b>${escapeHtml(qualificationName)}</b> - bereits offene Verbandslehrgänge auffüllen</p>\n      <p class="text-muted" style="font-size:12px;">\n        Kein neuer Lehrgang wird geöffnet - es wird nur eigenes Personal in bereits offene,\n        passende Instanzen eingetragen (von einem anderen Mitglied geöffnet, oder selbst ohne\n        Öffnen-Recht im Verband).\n      </p>\n      ${costNotice}\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Lehrgang</th><th>Belegt</th><th>Kosten</th></tr></thead>\n        <tbody>${runRows}</tbody>\n      </table>\n      <p>Insgesamt <b>${plan.selected.length}</b> Person(en).</p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n      </p>\n      <div id="vn-schooling-fill-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling-fill" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-confirm-schooling-fill").addEventListener("click", () => {
       executeAllianceFillRun(need, qualificationName, plan, goBack);
     });
   }
-  function renderSchoolingConfirmScreen({need: need, school: school, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
+  function renderSchoolingConfirmScreen({need: need, qualificationName: qualificationName, plan: plan, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
     const body = document.getElementById("vehicle-naming-modal-body");
     const stationRows = plan.selectedByStation.map(s => `\n          <tr>\n            <td>${escapeHtml(s.stationName)}</td>\n            <td>${s.people.length}</td>\n          </tr>\n        `).join("");
+    const schoolRows = plan.schoolPlans.map(sp => `\n          <tr>\n            <td>${escapeHtml(sp.schoolName)}</td>\n            <td>${sp.actualRooms}</td>\n            <td>${sp.selected.length}</td>\n          </tr>\n        `).join("");
+    const schoolTable = plan.schoolPlans.length > 1 ? `\n          <table class="table table-condensed table-striped" style="font-size:12px;">\n            <thead><tr><th>Schule</th><th>Klassenräume</th><th>Personen</th></tr></thead>\n            <tbody>${schoolRows}</tbody>\n          </table>\n        ` : "";
     const finishLabel = plan.finishEstimate ? plan.finishEstimate.toLocaleString("de-DE", {
       dateStyle: "medium",
       timeStyle: "short"
     }) : "unbekannt (Lehrgangsdauer nicht erkannt)";
-    body.innerHTML = `\n      <p>\n        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(school.name)}</b>\n        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}\n      </p>\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <p>\n        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>\n        Klassenraum/-räumen. Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n        ${plan.isAlliance ? "Der Lehrgang wird dabei für 1 Stunde im Verband freigegeben (0 Credits) - reichen die Plätze nicht für unser eigenes Personal, können in dieser Stunde auch andere Mitglieder mitnutzen." : ""}\n      </p>\n      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
+    body.innerHTML = `\n      <p>\n        <b>${escapeHtml(qualificationName)}</b> an <b>${escapeHtml(schoolPlansLabel(plan.schoolPlans))}</b>\n        ${plan.durationDays ? `<span class="text-muted">(${plan.durationDays} Tage)</span>` : ""}\n      </p>\n      ${schoolTable}\n      <table class="table table-condensed table-striped" style="font-size:12px;">\n        <thead><tr><th>Wache</th><th>Personen</th></tr></thead>\n        <tbody>${stationRows}</tbody>\n      </table>\n      <p>\n        Insgesamt <b>${plan.selected.length}</b> Person(en) in <b>${plan.actualRooms}</b>\n        Klassenraum/-räumen${plan.schoolPlans.length > 1 ? ` an <b>${plan.schoolPlans.length} Schulen</b>` : ""}.\n        Voraussichtlich fertig: <b>${escapeHtml(finishLabel)}</b>.\n      </p>\n      <p class="text-muted" style="font-size:12px;">\n        Die Personen stehen währenddessen für Einsätze nicht zur Verfügung.\n        ${plan.isAlliance ? "Der Lehrgang wird dabei für 1 Stunde im Verband freigegeben (0 Credits) - reichen die Plätze nicht für unser eigenes Personal, können in dieser Stunde auch andere Mitglieder mitnutzen." : ""}\n      </p>\n      <div id="vn-schooling-confirm-status" style="margin-top:6px;"></div>\n      <div class="vn-sticky-footer">\n        <button id="vn-btn-back" type="button" class="btn btn-default">\n          <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Abbrechen\n        </button>\n        <button id="vn-btn-confirm-schooling" type="button" class="btn btn-success">\n          <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Bestätigen\n        </button>\n      </div>\n    `;
     document.getElementById("vn-btn-back").addEventListener("click", goBack);
     document.getElementById("vn-btn-confirm-schooling").addEventListener("click", () => {
       if (plan.isAlliance) {
-        executeAllianceTrainingRun(need, school, qualificationName, plan, goBack);
+        executeAllianceTrainingRun(need, qualificationName, plan, goBack);
         return;
       }
       const confirmBtn = document.getElementById("vn-btn-confirm-schooling");
@@ -4843,12 +5073,11 @@
           await submitTrainingRun(plan, message => {
             statusEl.innerHTML = `<em>${escapeHtml(message)}</em>`;
           });
-          recordPendingSchoolingRooms(plan.schoolId, plan.actualRooms, plan.rawOccupiedBeforeAction);
           await recordPendingSchoolingAssignment(plan, need);
           await logHistoryEntry({
             type: "schooling_start",
             label: qualificationName,
-            station: `${school.name} (${plan.selected.length} Person(en))`,
+            station: `${schoolPlansLabel(plan.schoolPlans)} (${plan.selected.length} Person(en))`,
             personnelByStation: personnelByStationFromPlan(plan)
           });
           statusEl.innerHTML = `<span class="text-success">Erfolgreich gestartet.</span>`;
@@ -4856,7 +5085,7 @@
         } catch (e) {
           statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
           const personIds = plan.selected.map(p => p.id).join(", ");
-          logErrorToStorage(`Lehrgang fehlgeschlagen: ${qualificationName} (${school.name}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
+          logErrorToStorage(`Lehrgang fehlgeschlagen: ${qualificationName} (${schoolPlansLabel(plan.schoolPlans)}, Personal-IDs: ${personIds})`, e.message).catch(() => {});
           confirmBtn.disabled = false;
           backBtn.disabled = false;
         }
@@ -4872,7 +5101,7 @@
     setScreenTitle(`${titlePrefix} › Baupläne wählen`);
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Baupläne ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Baupläne ...");
     const blueprints = await getStationBlueprints();
     if (!isCurrentRenderToken(renderToken)) return;
     const entries = Object.values(blueprints).sort((a, b) => a.name.localeCompare(b.name, "de"));
@@ -4919,7 +5148,7 @@
     setScreenTitle(`${isAlliance ? "Verbandslehrgänge" : "Lehrgänge"} › ${blueprintNames} › Wachen wählen`);
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Wachen ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Wachen ...");
     const selectionKey = schoolingSelectionKeyFor(blueprints);
     let allStations, savedSelection;
     try {
@@ -5011,7 +5240,7 @@
     setScreenTitle(`${titlePrefix} › ${blueprintNames}`);
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Bedarf ...</p>`;
+    body.innerHTML = loadingIndicatorHtml(`Lade ${isAlliance ? "Verbandsschulen" : "eigene Schulen"} ...`);
     let schoolsByCategory;
     try {
       schoolsByCategory = isAlliance ? await loadAllianceSchoolsByCategory() : await loadOwnedSchoolsByCategory();
@@ -5022,10 +5251,10 @@
       return;
     }
     if (!isCurrentRenderToken(renderToken)) return;
-    body.innerHTML = `<p>Prüfe letzten Scan ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Prüfe letzten Scan ...");
     await ensureFreshPersonnelScan((done, of) => {
       if (!isCurrentRenderToken(renderToken)) return;
-      body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
+      body.innerHTML = loadingIndicatorHtml(`Scanne Personal ... (${done}/${of})`);
     });
     if (!isCurrentRenderToken(renderToken)) return;
     const requirements = {};
@@ -5040,10 +5269,6 @@
     const qualifications = await getPersonnelQualifications();
     if (!isCurrentRenderToken(renderToken)) return;
     let minStaff = await getPersonnelSchoolingMinStaff();
-    const schoolByCategory = {};
-    for (const category of Object.keys(SCHOOL_BUILDING_TYPE_BY_CATEGORY)) {
-      schoolByCategory[category] = pickSchoolForCategory(schoolsByCategory, category);
-    }
     const capacityBySchoolId = {};
     let schoolingRuns = [];
     try {
@@ -5055,9 +5280,9 @@
     let openAllianceRuns = [];
     if (isAlliance) {
       try {
-        openAllianceRuns = (await fetchAllianceSchoolings()).filter(r => (r.open_spaces || 0) > 0 && !r.running);
+        openAllianceRuns = (await fetchOpenSchoolingsPage()).filter(r => r.openSpaces > 0);
       } catch (e) {
-        console.warn("[FuxTools] /api/alliance_schoolings (offene Lehrgaenge) konnte nicht geladen werden:", e);
+        console.warn("[FuxTools] /schoolings (offene Lehrgaenge) konnte nicht geladen werden:", e);
       }
       if (!isCurrentRenderToken(renderToken)) return;
     }
@@ -5126,7 +5351,7 @@
         byCategory.get(need.category).push(need);
       }
       return CATEGORY_ORDER.filter(cat => byCategory.has(cat)).map(category => {
-        const school = schoolByCategory[category];
+        const hasSchool = (schoolsByCategory[category] || []).length > 0;
         const categoryNeeds = byCategory.get(category).sort((a, b) => qualificationNameFor(qualifications, realSlugFor(a.slug)).localeCompare(qualificationNameFor(qualifications, realSlugFor(b.slug)), "de"));
         const rows = categoryNeeds.map(need => {
           const qualificationName = qualificationNameFor(qualifications, realSlugFor(need.slug));
@@ -5139,10 +5364,10 @@
           const haveBreakdown = need.stations.map(s => `${escapeHtml(s.name)}: ${s.have} vorhanden, Ziel ${s.rangeMin}–${s.rangeMax}` + (s.minDeficit > 0 || s.maxDeficit > 0 ? "" : " ✓ voll")).join("<br>");
           const needKey = `${need.category}::${need.slug}`;
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
-          const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch den laufenden Lehrgang abgedeckt - keine weitere Aktion nötig, sobald dieser fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Lehrgang läuft)\n                       </button>` : "";
-          const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${school ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
-          const fillableRuns = isAlliance ? openAllianceRuns.filter(r => matchesEducationTitle(qualificationName, r.education_title)) : [];
-          const fillableSeatsTotal = fillableRuns.reduce((sum, r) => sum + (r.open_spaces || 0), 0);
+          const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${hasSchool ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch den laufenden Lehrgang abgedeckt - keine weitere Aktion nötig, sobald dieser fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Lehrgang läuft)\n                       </button>` : "";
+          const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${hasSchool ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
+          const fillableRuns = isAlliance ? openAllianceRuns.filter(r => r.slug === realSlugFor(need.slug)) : [];
+          const fillableSeatsTotal = fillableRuns.reduce((sum, r) => sum + (r.openSpaces || 0), 0);
           fillableRunsByKey[needKey] = fillableRuns;
           const fillMinSeats = Math.min(fillableSeatsTotal, need.totalMinDeficit);
           const fillMaxSeats = Math.min(fillableSeatsTotal, need.totalMaxDeficit);
@@ -5187,8 +5412,8 @@
         btn.addEventListener("click", async () => {
           const need = needs.find(n => `${n.category}::${n.slug}` === btn.dataset.key);
           if (!need) return;
-          const school = schoolByCategory[need.category];
-          if (!school) return;
+          const schools = schoolsByCategory[need.category] || [];
+          if (!schools.length) return;
           const mode = btn.dataset.mode === "max" ? "max" : "min";
           const siblingButtons = body.querySelectorAll(`.vn-schooling-start[data-key="${btn.dataset.key}"]`);
           const statusEl = body.querySelector(`.vn-schooling-status[data-key="${btn.dataset.key}"]`);
@@ -5196,10 +5421,9 @@
           siblingButtons.forEach(b => b.disabled = true);
           statusEl.textContent = "Lade Vorschau ...";
           try {
-            const plan = await planTrainingRun(need, school, mode, isAlliance);
+            const plan = await planTrainingRun(need, schools, mode, isAlliance);
             renderSchoolingConfirmScreen({
               need: need,
-              school: school,
               qualificationName: qualificationName,
               plan: plan,
               goBack: () => renderSchoolingScreen(blueprints, stations, goBack, isAlliance)
@@ -5242,12 +5466,382 @@
     if (!isCurrentRenderToken(renderToken)) return;
     render();
   }
+  async function fetchSchoolFormOptions(schoolId) {
+    const res = await fetchWithTimeout(`/buildings/${schoolId}`, {
+      credentials: "same-origin"
+    });
+    if (!res.ok) throw new Error(`Schule (Gebäude ${schoolId}) konnte nicht geladen werden (${res.status}).`);
+    const doc = (new DOMParser).parseFromString(await res.text(), "text/html");
+    const form = doc.querySelector(`form[action="/buildings/${schoolId}/education"]`);
+    if (!form) {
+      throw new Error("Ausbildungs-Formular an dieser Schule nicht gefunden (evtl. gerade kein freier Klassenraum).");
+    }
+    const authenticityToken = form.querySelector('input[name="authenticity_token"]')?.value;
+    if (!authenticityToken) throw new Error("CSRF-Token im Ausbildungs-Formular nicht gefunden.");
+    const optionsOf = selector => [ ...form.querySelectorAll(selector) ].map(o => ({
+      value: o.value,
+      label: o.textContent.trim()
+    })).filter(o => o.value !== "");
+    const rooms = optionsOf("#building_rooms_use option");
+    const courses = optionsOf("#education_select option");
+    const durations = optionsOf('select[name="alliance[duration]"] option');
+    const costs = optionsOf('select[name="alliance[cost]"] option');
+    if (!rooms.length) {
+      throw new Error("Keine freien Klassenräume an dieser Schule - es läuft bereits ein Lehrgang in jedem Raum.");
+    }
+    if (!durations.length || !costs.length) {
+      throw new Error('Freigabe-Optionen ("Im Verband freigeben") an dieser Schule nicht gefunden.');
+    }
+    return {
+      authenticityToken: authenticityToken,
+      rooms: rooms,
+      courses: courses,
+      durations: durations,
+      costs: costs
+    };
+  }
+  async function openEmptyAllianceSchooling({schoolId: schoolId, authenticityToken: authenticityToken, educationValue: educationValue, rooms: rooms, duration: duration, cost: cost}) {
+    const params = new URLSearchParams;
+    params.append("utf8", "✓");
+    params.append("authenticity_token", authenticityToken);
+    params.append("building_rooms_use", String(rooms));
+    params.append("education_select", educationValue);
+    params.append("alliance[duration]", duration);
+    params.append("alliance[cost]", cost);
+    const res = await fetchWithTimeout(`/buildings/${schoolId}/education`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
+    });
+    if (!res.ok || !res.redirected) {
+      throw new Error(`Lehrgang wurde nicht geöffnet (Formular meldet einen Fehler, HTTP ${res.status}).`);
+    }
+  }
+  function computeAllianceCategoryCapacities(schoolsByCategory) {
+    const result = {};
+    for (const [category, schools] of Object.entries(schoolsByCategory)) {
+      let totalMax = 0;
+      let totalFree = 0;
+      let totalPending = 0;
+      let earliestFreeAt = null;
+      for (const school of schools) {
+        const rawOccupied = countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings);
+        const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+        const occupied = rawOccupied + pending;
+        const freeRooms = Math.max(0, school.maxRooms - occupied);
+        totalMax += school.maxRooms;
+        totalFree += freeRooms;
+        totalPending += pending;
+        if (freeRooms <= 0) {
+          const nextFreeAt = earliestEmbeddedSchoolingFinish(school.schoolings);
+          if (nextFreeAt && (earliestFreeAt === null || nextFreeAt < earliestFreeAt)) earliestFreeAt = nextFreeAt;
+        }
+      }
+      result[category] = {
+        schoolCount: schools.length,
+        totalMax: totalMax,
+        totalFree: totalFree,
+        totalPending: totalPending,
+        earliestFreeAt: earliestFreeAt
+      };
+    }
+    return result;
+  }
+  function categoryCapacityBadge(cap) {
+    if (!cap || !cap.schoolCount) {
+      return `<span class="text-muted">Keine Verbandschule mit Lehrgangs-Recht gefunden</span>`;
+    }
+    const schoolCountLabel = `${cap.schoolCount} Schule${cap.schoolCount === 1 ? "" : "n"}`;
+    const freeSeats = cap.totalFree * SCHOOLING_SEATS_PER_ROOM;
+    const untilLabel = cap.earliestFreeAt ? ` (nächster ab ${new Date(cap.earliestFreeAt).toLocaleString("de-DE")})` : "";
+    const pendingHint = cap.totalPending ? ` <span class="glyphicon glyphicon-time" aria-hidden="true" title="${cap.totalPending} Klassenraum/-räume gerade erst gestartet - vorläufig mitgezählt, bis das Spiel es selbst anzeigt"></span>` : "";
+    const statusBadge = cap.totalFree > 0 ? `<span class="label label-success">${cap.totalFree}/${cap.totalMax} Klassenräume frei (${freeSeats} Plätze)${pendingHint}</span>` : `<span class="label label-warning">alle ${cap.totalMax} Klassenräume belegt${escapeHtml(untilLabel)}${pendingHint}</span>`;
+    return `${schoolCountLabel} · ${statusBadge}`;
+  }
+  async function submitEmptyAllianceSchoolingAcrossSchools(schools, courseValue, totalRooms, duration, cost, onProgress, isCancelled) {
+    const usable = schools.map(school => {
+      const rawOccupied = countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings);
+      const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+      const freeRooms = Math.max(0, school.maxRooms - rawOccupied - pending);
+      return {
+        school: school,
+        rawOccupied: rawOccupied,
+        freeRooms: freeRooms
+      };
+    }).filter(entry => entry.freeRooms > 0).sort((a, b) => Number(a.school.id) - Number(b.school.id));
+    if (!usable.length) {
+      throw new Error("Keine freien Klassenräume mehr in dieser Kategorie.");
+    }
+    const slug = courseValue.split(":")[0];
+    let remaining = Math.max(1, totalRooms);
+    const opened = [];
+    const errors = [];
+    for (const [index, entry] of usable.entries()) {
+      if (remaining <= 0) break;
+      if (isCancelled?.()) break;
+      const rooms = Math.min(entry.freeRooms, remaining);
+      onProgress?.(Math.round(index / usable.length * 100), `${entry.school.name}: Formular wird geladen ...`);
+      let formOptions;
+      try {
+        formOptions = await fetchSchoolFormOptions(entry.school.id);
+      } catch (e) {
+        errors.push(`${entry.school.name}: ${e.message}`);
+        continue;
+      }
+      const courseOption = formOptions.courses.find(o => o.value.startsWith(`${slug}:`));
+      if (!courseOption) {
+        errors.push(`${entry.school.name}: Lehrgang wird dort nicht angeboten.`);
+        continue;
+      }
+      onProgress?.(Math.round(index / usable.length * 100), `${entry.school.name}: wird geöffnet (${rooms} Klassenraum/-räume) ...`);
+      try {
+        await openEmptyAllianceSchooling({
+          schoolId: entry.school.id,
+          authenticityToken: formOptions.authenticityToken,
+          educationValue: courseOption.value,
+          rooms: rooms,
+          duration: duration,
+          cost: cost
+        });
+        recordPendingSchoolingRooms(entry.school.id, rooms, entry.rawOccupied);
+        opened.push({
+          schoolId: entry.school.id,
+          schoolName: entry.school.name,
+          rooms: rooms,
+          courseLabel: courseOption.label
+        });
+        remaining -= rooms;
+      } catch (e) {
+        errors.push(`${entry.school.name}: ${e.message}`);
+      }
+    }
+    onProgress?.(100, "Fertig.");
+    return {
+      opened: opened,
+      remaining: remaining,
+      errors: errors
+    };
+  }
+  function renderAllianceSchoolingOpenerScreen(goBack = renderMainMenu) {
+    setModalWidth(MODAL_WIDTH_DEFAULT);
+    setScreenTitle("Lehrgänge öffnen (Helfer)");
+    const renderToken = currentRenderToken();
+    const body = document.getElementById("vehicle-naming-modal-body");
+    body.innerHTML = loadingIndicatorHtml("Lade Verbandsschulen ...");
+    (async () => {
+      let schoolsByCategory;
+      try {
+        schoolsByCategory = await loadAllianceSchoolsByCategory();
+      } catch (e) {
+        if (!isCurrentRenderToken(renderToken)) return;
+        body.innerHTML = `\n          <p class="text-danger">Fehler beim Laden der Verbandsschulen: ${escapeHtml(e.message)}</p>\n          <div class="vn-sticky-footer">\n            <button id="vn-btn-back" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n            </button>\n          </div>\n        `;
+        document.getElementById("vn-btn-back").addEventListener("click", goBack);
+        return;
+      }
+      if (!isCurrentRenderToken(renderToken)) return;
+      const categoriesWithSchools = CATEGORY_ORDER.filter(cat => (schoolsByCategory[cat] || []).length);
+      let log = await getAllianceSchoolingOpenerLog();
+      const savedSettings = await getAllianceSchoolingOpenerSettings();
+      if (!isCurrentRenderToken(renderToken)) return;
+      let bootstrapSchool = null;
+      outer: for (const schools of Object.values(schoolsByCategory)) {
+        for (const school of schools) {
+          const rawOccupied = countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings);
+          const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+          if (school.maxRooms - rawOccupied - pending > 0) {
+            bootstrapSchool = school;
+            break outer;
+          }
+        }
+      }
+      let bootstrapFormOptions = null;
+      if (bootstrapSchool) {
+        try {
+          bootstrapFormOptions = await fetchSchoolFormOptions(bootstrapSchool.id);
+          await saveAllianceSchoolingOpenerSettings({
+            durationOptions: bootstrapFormOptions.durations,
+            costOptions: bootstrapFormOptions.costs
+          });
+        } catch (e) {
+          console.warn("[FuxTools] Dauer/Preis-Vorabfrage fehlgeschlagen:", e);
+        }
+      }
+      if (!isCurrentRenderToken(renderToken)) return;
+      let formOptions = null;
+      let cancelRequested = false;
+      function renderCapacityOverview() {
+        if (!categoriesWithSchools.length) return "";
+        const capacities = computeAllianceCategoryCapacities(schoolsByCategory);
+        const cards = categoriesWithSchools.map(cat => `\n              <div class="vn-settings-card" style="flex:1; min-width:220px;">\n                <b>${escapeHtml(cat)}</b><br>\n                <small>${categoryCapacityBadge(capacities[cat])}</small>\n              </div>\n            `).join("");
+        return `<div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;">${cards}</div>`;
+      }
+      function renderLogTable() {
+        if (!log.length) {
+          return `<p class="text-muted" style="font-size:12px;">Noch keine Lehrgänge über diesen Helfer geöffnet.</p>`;
+        }
+        const rows = log.map(entry => `\n              <tr>\n                <td>${escapeHtml(new Date(entry.timestamp).toLocaleString("de-DE"))}</td>\n                <td><a href="/buildings/${escapeHtml(entry.schoolId)}" target="_blank" rel="noopener">${escapeHtml(entry.schoolName)}</a></td>\n                <td>${escapeHtml(entry.courseLabel)}</td>\n                <td>${entry.rooms}</td>\n                <td>${escapeHtml(entry.durationLabel)}</td>\n                <td>${escapeHtml(entry.costLabel)}</td>\n              </tr>\n            `).join("");
+        return `\n          <table class="table table-condensed table-striped" style="font-size:12px;">\n            <thead><tr><th>Zeitpunkt</th><th>Schule</th><th>Lehrgang</th><th>Räume</th><th>Freigabe</th><th>Preis</th></tr></thead>\n            <tbody>${rows}</tbody>\n          </table>\n        `;
+      }
+      function render() {
+        body.innerHTML = `\n          <p class="text-muted" style="font-size:12px;">\n            Öffnet leere Klassenräume an Verbandschulen, ohne eigenes Personal einzutragen -\n            andere Mitglieder (z.B. ohne eigenes "Unterricht erstellen"-Recht) können sich danach\n            im Spiel selbst eintragen. Reicht der Platz an einer Schule nicht, wird automatisch\n            auf mehrere Schulen derselben Kategorie verteilt.\n          </p>\n          <div id="vn-opener-overview">${renderCapacityOverview()}</div>\n          ${categoriesWithSchools.length ? `\n                <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px;">\n                  <div class="form-group" style="margin-bottom:0;">\n                    <label for="vn-opener-duration" style="display:block;">Im Verband freigeben</label>\n                    <select id="vn-opener-duration" class="form-control" style="width:170px;" disabled>\n                      <option value="">Lädt ...</option>\n                    </select>\n                  </div>\n                  <div class="form-group" style="margin-bottom:0;">\n                    <label for="vn-opener-cost" style="display:block;">Verdienst/Tag/Teiln.</label>\n                    <select id="vn-opener-cost" class="form-control" style="width:150px;" disabled>\n                      <option value="">Lädt ...</option>\n                    </select>\n                  </div>\n                </div>\n                <hr style="border-color: rgba(255,255,255,0.15);">\n                <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px;">\n                  <div class="form-group" style="margin-bottom:0;">\n                    <label for="vn-opener-category" style="display:block;">Schultyp</label>\n                    <select id="vn-opener-category" class="form-control" style="width:180px;">\n                      <option value="">Wähle aus</option>\n                      ${categoriesWithSchools.map(cat => `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`).join("")}\n                    </select>\n                  </div>\n                  <div class="form-group" style="margin-bottom:0;">\n                    <label for="vn-opener-course" style="display:block;">Lehrgang</label>\n                    <select id="vn-opener-course" class="form-control" style="width:240px;" disabled>\n                      <option value="">Zuerst Schultyp wählen</option>\n                    </select>\n                  </div>\n                </div>\n                <div id="vn-opener-fields">\n                  <div class="form-group">\n                    <label for="vn-opener-rooms">Klassenräume</label>\n                    <input type="number" id="vn-opener-rooms" class="form-control" style="width:120px;" min="1" value="1" disabled>\n                    <small id="vn-opener-rooms-hint" class="text-muted"></small>\n                  </div>\n                </div>\n                <div id="vn-opener-progress" style="display:none; margin-top:8px;">\n                  <div class="progress" style="margin-bottom:2px; height:16px;">\n                    <div id="vn-opener-progress-bar" class="progress-bar" style="width:0%;"></div>\n                  </div>\n                  <div id="vn-opener-progress-text" class="text-muted" style="font-size:11px;"></div>\n                </div>\n                <div id="vn-opener-status" style="margin-top:6px;"></div>\n              ` : `<p class="text-muted">Keine Verbandschule mit "Unterricht erstellen"-Recht gefunden.</p>`}\n          <p style="margin-top:14px;"><b>Zuletzt geöffnete Lehrgänge</b></p>\n          <div id="vn-opener-log">${renderLogTable()}</div>\n          <div class="vn-sticky-footer">\n            <button id="vn-btn-back" type="button" class="btn btn-default">\n              <span class="glyphicon glyphicon-arrow-left" aria-hidden="true"></span> Zurück\n            </button>\n            ${categoriesWithSchools.length ? `<button id="vn-btn-open-schooling" type="button" class="btn btn-success" disabled>\n                     <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Lehrgang öffnen\n                   </button>\n                   <button id="vn-btn-cancel-opening" type="button" class="btn btn-danger" style="display:none;">\n                     <span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen\n                   </button>` : ""}\n          </div>\n        `;
+        document.getElementById("vn-btn-back").addEventListener("click", goBack);
+        if (!categoriesWithSchools.length) return;
+        const categorySelect = document.getElementById("vn-opener-category");
+        const durationSelect = document.getElementById("vn-opener-duration");
+        const costSelect = document.getElementById("vn-opener-cost");
+        const courseSelect = document.getElementById("vn-opener-course");
+        const roomsInput = document.getElementById("vn-opener-rooms");
+        const roomsHint = document.getElementById("vn-opener-rooms-hint");
+        const openBtn = document.getElementById("vn-btn-open-schooling");
+        const cancelBtn = document.getElementById("vn-btn-cancel-opening");
+        const statusEl = document.getElementById("vn-opener-status");
+        const progressWrap = document.getElementById("vn-opener-progress");
+        const progressBar = document.getElementById("vn-opener-progress-bar");
+        const progressText = document.getElementById("vn-opener-progress-text");
+        const updateOpenButtonState = () => {
+          openBtn.disabled = !formOptions || !courseSelect.value || !durationSelect.value || !costSelect.value || !(Number(roomsInput.value) > 0);
+        };
+        function populateSelectOptions(select, options, preferredValue) {
+          select.innerHTML = options.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("");
+          if (preferredValue && options.some(o => o.value === preferredValue)) select.value = preferredValue;
+          select.disabled = false;
+        }
+        const initialDurations = bootstrapFormOptions?.durations || savedSettings.durationOptions;
+        const initialCosts = bootstrapFormOptions?.costs || savedSettings.costOptions;
+        if (initialDurations?.length && initialCosts?.length) {
+          populateSelectOptions(durationSelect, initialDurations, savedSettings.duration);
+          populateSelectOptions(costSelect, initialCosts, savedSettings.cost);
+        }
+        durationSelect.addEventListener("change", () => saveAllianceSchoolingOpenerSettings({
+          duration: durationSelect.value
+        }));
+        costSelect.addEventListener("change", () => saveAllianceSchoolingOpenerSettings({
+          cost: costSelect.value
+        }));
+        categorySelect.addEventListener("change", async () => {
+          courseSelect.disabled = true;
+          courseSelect.innerHTML = `<option value="">Zuerst Schultyp wählen</option>`;
+          roomsInput.disabled = true;
+          roomsHint.textContent = "";
+          formOptions = null;
+          statusEl.innerHTML = "";
+          openBtn.disabled = true;
+          const category = categorySelect.value;
+          if (!category) return;
+          const schools = schoolsByCategory[category] || [];
+          const usable = schools.map(school => {
+            const rawOccupied = countOccupiedRoomsFromEmbeddedSchoolings(school.schoolings);
+            const pending = getPendingSchoolingRooms(school.id, rawOccupied);
+            return {
+              school: school,
+              freeRooms: Math.max(0, school.maxRooms - rawOccupied - pending)
+            };
+          }).filter(entry => entry.freeRooms > 0).sort((a, b) => Number(a.school.id) - Number(b.school.id));
+          if (!usable.length) {
+            courseSelect.innerHTML = `<option value="">Keine Schule mit freiem Raum</option>`;
+            statusEl.innerHTML = `<span class="text-danger">Aktuell keine Schule dieser Kategorie mit freiem Klassenraum.</span>`;
+            return;
+          }
+          statusEl.innerHTML = `<em>Lade Lehrgangs-Formular ...</em>`;
+          try {
+            formOptions = await fetchSchoolFormOptions(usable[0].school.id);
+          } catch (e) {
+            formOptions = null;
+            courseSelect.innerHTML = `<option value="">Lehrgänge konnten nicht geladen werden</option>`;
+            statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+            return;
+          }
+          statusEl.innerHTML = "";
+          courseSelect.innerHTML = `<option value="">Wähle einen Lehrgang aus</option>${formOptions.courses.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join("")}`;
+          courseSelect.disabled = false;
+          roomsInput.disabled = false;
+          if (durationSelect.disabled) populateSelectOptions(durationSelect, formOptions.durations, savedSettings.duration);
+          if (costSelect.disabled) populateSelectOptions(costSelect, formOptions.costs, savedSettings.cost);
+          saveAllianceSchoolingOpenerSettings({
+            durationOptions: formOptions.durations,
+            costOptions: formOptions.costs
+          }).catch(() => {});
+          const totalFree = usable.reduce((sum, entry) => sum + entry.freeRooms, 0);
+          roomsInput.max = String(totalFree);
+          roomsInput.value = "1";
+          roomsHint.textContent = `Insgesamt ${totalFree} Klassenraum/-räume frei in dieser Kategorie (${totalFree * SCHOOLING_SEATS_PER_ROOM} Plätze) - reicht eine Schule nicht, wird automatisch verteilt.`;
+          updateOpenButtonState();
+        });
+        courseSelect.addEventListener("change", updateOpenButtonState);
+        roomsInput.addEventListener("input", updateOpenButtonState);
+        cancelBtn.addEventListener("click", () => {
+          cancelRequested = true;
+          cancelBtn.disabled = true;
+          cancelBtn.innerHTML = `<span class="glyphicon glyphicon-hourglass" aria-hidden="true"></span> Wird beendet ...`;
+        });
+        openBtn.addEventListener("click", async () => {
+          if (!formOptions || !courseSelect.value) return;
+          const schools = schoolsByCategory[categorySelect.value] || [];
+          const courseLabel = courseSelect.options[courseSelect.selectedIndex].textContent;
+          const durationLabel = durationSelect.options[durationSelect.selectedIndex].textContent;
+          const costLabel = costSelect.options[costSelect.selectedIndex].textContent;
+          const rooms = Math.max(1, Number(roomsInput.value) || 1);
+          cancelRequested = false;
+          const controls = [ categorySelect, durationSelect, costSelect, courseSelect, roomsInput, openBtn ];
+          controls.forEach(el => el.disabled = true);
+          cancelBtn.disabled = false;
+          cancelBtn.innerHTML = `<span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Abbrechen`;
+          cancelBtn.style.display = "";
+          progressWrap.style.display = "";
+          progressBar.style.width = "0%";
+          progressText.textContent = "";
+          statusEl.innerHTML = "";
+          try {
+            const result = await submitEmptyAllianceSchoolingAcrossSchools(schools, courseSelect.value, rooms, durationSelect.value, costSelect.value, (percent, text) => {
+              progressBar.style.width = `${percent}%`;
+              progressText.textContent = text;
+            }, () => cancelRequested);
+            for (const entry of result.opened) {
+              log = await recordAllianceSchoolingOpenerLogEntry({
+                schoolId: entry.schoolId,
+                schoolName: entry.schoolName,
+                courseLabel: entry.courseLabel || courseLabel,
+                rooms: entry.rooms,
+                durationLabel: durationLabel,
+                costLabel: costLabel
+              });
+              await logHistoryEntry({
+                type: "schooling_start",
+                label: `${courseLabel} - leere Plätze für Verband geöffnet`,
+                station: `${entry.schoolName} (${entry.rooms} Klassenraum/-räume, ${durationLabel}, ${costLabel})`
+              });
+            }
+            document.getElementById("vn-opener-log").innerHTML = renderLogTable();
+            document.getElementById("vn-opener-overview").innerHTML = renderCapacityOverview();
+            const openedRooms = result.opened.reduce((sum, o) => sum + o.rooms, 0);
+            if (result.opened.length && !result.errors.length && result.remaining <= 0) {
+              statusEl.innerHTML = `<span class="text-success">Erfolgreich geöffnet (${openedRooms} Klassenraum/-räume an ${result.opened.length} Schule${result.opened.length === 1 ? "" : "n"}).</span>`;
+            } else if (result.opened.length) {
+              statusEl.innerHTML = `<span class="text-warning">Teilweise geöffnet (${openedRooms} von ${rooms} Klassenraum/-räumen) - ${escapeHtml(result.errors.join(" | ") || "nicht genug freie Räume mehr gefunden")}.</span>`;
+            } else {
+              statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(result.errors.join(" | ") || "nichts geöffnet")}</span>`;
+            }
+          } catch (e) {
+            statusEl.innerHTML = `<span class="text-danger">Fehler: ${escapeHtml(e.message)}</span>`;
+          }
+          progressWrap.style.display = "none";
+          cancelBtn.style.display = "none";
+          controls.forEach(el => el.disabled = false);
+          updateOpenButtonState();
+        });
+      }
+      render();
+    })();
+  }
   async function renderStationStatisticsScreen() {
     setModalWidth(MODAL_WIDTH_WIDE);
     setScreenTitle("Statistik");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Wachen-Daten ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Wachen-Daten ...");
     let allStations, vehicles;
     try {
       [allStations, vehicles] = await Promise.all([ loadBuildingsForCheck(), loadGameData().then(d => d.vehicles) ]);
@@ -5258,10 +5852,10 @@
       return;
     }
     if (!isCurrentRenderToken(renderToken)) return;
-    body.innerHTML = `<p>Prüfe letzten Personal-Scan ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Prüfe letzten Personal-Scan ...");
     await ensureFreshPersonnelScan((done, of) => {
       if (!isCurrentRenderToken(renderToken)) return;
-      body.innerHTML = `<p>Scanne Personal ... (${done}/${of})</p>`;
+      body.innerHTML = loadingIndicatorHtml(`Scanne Personal ... (${done}/${of})`);
     });
     if (!isCurrentRenderToken(renderToken)) return;
     const scanData = await getPersonnelScanData();
@@ -5715,7 +6309,7 @@
     setModalWidth(MODAL_WIDTH_COMPACT);
     setScreenTitle("Fahrzeug-Besatzung › Leitstelle wählen");
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p><em>Lade Fahrzeuge ...</em></p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Fahrzeuge ...");
     let allVehicles;
     try {
       allVehicles = await loadCrewCheckVehicles();
@@ -5754,7 +6348,7 @@
     const body = document.getElementById("vehicle-naming-modal-body");
     let allVehicles = allVehiclesFull;
     if (!allVehicles) {
-      body.innerHTML = `<p>Lade Fahrzeuge ...</p>`;
+      body.innerHTML = loadingIndicatorHtml("Lade Fahrzeuge ...");
       try {
         allVehicles = await loadCrewCheckVehicles();
       } catch (e) {
@@ -5990,6 +6584,7 @@
           runningCategoryRuns.set(category, state);
           activeCrewCategoryRunCount++;
           updateBackgroundTaskBadge();
+          if (!taskPanelOpen) openTaskPanel();
           setCategoryRunningUI(category, true);
           let done = 0;
           let ok = 0;
@@ -6079,7 +6674,7 @@
           updateBackgroundTaskBadge();
           tryStartNextQueuedBackgroundTask();
           setCategoryRunningUI(category, false);
-          refreshTaskCenterIfVisible();
+          refreshTaskPanel();
         });
       });
     }
@@ -6162,7 +6757,7 @@
       cancelled: cancelled,
       goBack: goBack
     });
-    finishBackgroundTask(title, renderResult);
+    finishBackgroundTask(title, renderResult, summary, cancelled ? "cancelled" : failed ? "error" : "done");
   }
   function renderUnassignAllResultScreen({summary: summary, cancelled: cancelled, goBack: goBack}) {
     setModalWidth(MODAL_WIDTH_COMPACT);
@@ -6268,7 +6863,7 @@
     setScreenTitle("Wachen-Bauplaner");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Baupläne ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Baupläne ...");
     const blueprints = await getStationBlueprints();
     let allStations = [];
     try {
@@ -6383,7 +6978,7 @@
     setScreenTitle("Wachen-Bauplaner › Bearbeiten");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade ...");
     const blueprints = await getStationBlueprints();
     const existing = blueprintId ? blueprints[blueprintId] : null;
     const id = existing?.id || generateBlueprintId();
@@ -6542,7 +7137,7 @@
     setScreenTitle("Wachen-Check › Bauplan wählen");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Baupläne ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Baupläne ...");
     const blueprints = await getStationBlueprints();
     if (!isCurrentRenderToken(renderToken)) return;
     const entries = Object.values(blueprints).sort((a, b) => a.name.localeCompare(b.name, "de"));
@@ -6568,7 +7163,7 @@
     setScreenTitle(`Wachen-Check › ${blueprint.name} › Wachen wählen`);
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade Wachen ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade Wachen ...");
     let allStations, savedSelection;
     try {
       [allStations, savedSelection] = await Promise.all([ loadBuildingsForCheck(), getStationCheckSelection(blueprint.id) ]);
@@ -6655,7 +7250,7 @@
     setScreenTitle("Wachen-Check");
     const renderToken = currentRenderToken();
     const body = document.getElementById("vehicle-naming-modal-body");
-    body.innerHTML = `<p>Lade ...</p>`;
+    body.innerHTML = loadingIndicatorHtml("Lade ...");
     const blueprints = await getStationBlueprints();
     if (!isCurrentRenderToken(renderToken)) return;
     const blueprint = blueprints[blueprintId];
