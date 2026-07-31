@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.4.2
+// @version     1.4.3
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
@@ -4402,7 +4402,7 @@
       const req = requirementRanges[station.pseudoId] || {};
       for (const [slug, range] of Object.entries(req)) {
         const realSlug = realSlugFor(slug);
-        const have = scan.counts[realSlug] || 0;
+        const have = scan.counts[slug] || scan.counts[realSlug] || 0;
         const inTraining = scan.inTrainingCounts?.[slug] || scan.inTrainingCounts?.[realSlug] || 0;
         const minDeficit = Math.max(0, range.min - have - inTraining);
         const maxDeficit = Math.max(0, range.max - have - inTraining);
@@ -4651,7 +4651,7 @@
     const durationDays = parseEducationDurationDays(schoolPlansRaw[0].educationLabel);
     const finishEstimate = durationDays ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1e3) : null;
     return {
-      slug: realSlugFor(need.slug),
+      slug: need.slug,
       durationDays: durationDays,
       finishEstimate: finishEstimate,
       actualRooms: schoolPlans.reduce((sum, p) => sum + p.actualRooms, 0),
@@ -5252,7 +5252,7 @@
           const minCoveredByRunningSchooling = need.totalMinDeficit <= 0 && need.totalInTraining > 0;
           const minBtn = need.totalMinDeficit > 0 ? `<button type="button" class="btn btn-primary btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="min" ${hasSchool ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Minimum\n                     </button>` : minCoveredByRunningSchooling ? `<button type="button" class="btn btn-default btn-sm" disabled\n                               title="Minimum ist bereits durch den laufenden Lehrgang abgedeckt - keine weitere Aktion nötig, sobald dieser fertig ist.">\n                         <span class="glyphicon glyphicon-ok" aria-hidden="true"></span> Minimum erreicht (Lehrgang läuft)\n                       </button>` : "";
           const maxBtn = need.totalMaxDeficit > 0 ? `<button type="button" class="btn btn-default btn-sm vn-schooling-start" data-key="${escapeHtml(needKey)}" data-mode="max" ${hasSchool ? "" : "disabled"}>\n                       <span class="glyphicon glyphicon-education" aria-hidden="true"></span> Ausbilden Maximum\n                     </button>` : "";
-          const fillableRuns = isAlliance ? openAllianceRuns.filter(r => r.slug === realSlugFor(need.slug)) : [];
+          const fillableRuns = isAlliance ? openAllianceRuns.filter(r => r.slug === need.slug) : [];
           const fillableSeatsTotal = fillableRuns.reduce((sum, r) => sum + (r.openSpaces || 0), 0);
           fillableRunsByKey[needKey] = fillableRuns;
           const fillMinSeats = Math.min(fillableSeatsTotal, need.totalMinDeficit);
@@ -6030,12 +6030,13 @@
     });
     if (!res.ok) throw new Error(`FMS-Status konnte nicht auf ${fmsStatus} gesetzt werden (${res.status}).`);
   }
-  function isVehicleFullyStaffed(assignmentPage, vehicle) {
+  function isVehicleFullyStaffed(assignmentPage, vehicle, softRequirementFull) {
     const assignedPeople = assignmentPage.people.filter(p => p.assignedHere);
     if (assignedPeople.length < (Number(vehicle.staffMin) || 0)) return false;
     return vehicle.requirements.every(req => {
       if (req.min === null) return assignedPeople.length > 0 && assignedPeople.every(p => p.slugs.includes(req.slug));
       if (req.min === 0) {
+        if (!softRequirementFull) return true;
         return assignedPeople.filter(p => p.slugs.includes(req.slug)).length >= vehicle.staffMax;
       }
       return assignedPeople.filter(p => p.slugs.includes(req.slug)).length >= req.min;
@@ -6131,7 +6132,7 @@
     const overallTarget = staffingMode === "full" ? vehicle.staffMax : vehicle.staffMin;
     return await assignAnyPersonnelToVehicle(vehicle.id, overallTarget, vehicle.staffMax, false);
   }
-  async function finalizeVehicleCrew(vehicle, staffingMode, trimEnabled, autoSetFms, phase1) {
+  async function finalizeVehicleCrew(vehicle, staffingMode, trimEnabled, autoSetFms, phase1, softRequirementFull) {
     const {targetByRequirement: targetByRequirement, hasFullRequirement: hasFullRequirement} = phase1;
     const fmsBefore = await fetchVehicleFmsReal(vehicle.id);
     if (fmsBefore == null) throw new Error("FMS-Status nicht ermittelbar - sicherheitshalber abgebrochen.");
@@ -6142,7 +6143,7 @@
       await trimVehicleCrewToStaffMin(vehicle);
     }
     const after = await fetchVehicleAssignmentPage(vehicle.id);
-    const fullyStaffed = isVehicleFullyStaffed(after, vehicle);
+    const fullyStaffed = isVehicleFullyStaffed(after, vehicle, softRequirementFull);
     const assignedCount = after.people.filter(p => p.assignedHere).length;
     const assignedPeople = after.people.filter(p => p.assignedHere);
     let requiredPersonnel = 0;
@@ -6530,7 +6531,7 @@
                 const phase1 = phase1ByVehicleId.get(vehicle.id);
                 try {
                   if (phase1.error) throw phase1.error;
-                  const result = await finalizeVehicleCrew(vehicle, staffingMode, trimEnabled, autoFmsEnabled, phase1);
+                  const result = await finalizeVehicleCrew(vehicle, staffingMode, trimEnabled, autoFmsEnabled, phase1, softRequirementFull);
                   if (result.fullyStaffed) {
                     ok++;
                     problemsById.delete(vehicle.id);
@@ -7228,7 +7229,7 @@
       let personnelDeficit = scan ? 0 : -1;
       if (scan) {
         for (const [slug, range] of requiredPersonnel) {
-          const have = scan.counts[realSlugFor(slug)] || 0;
+          const have = scan.counts[slug] || scan.counts[realSlugFor(slug)] || 0;
           if (have < range.min) personnelDeficit += range.min - have;
         }
       }
