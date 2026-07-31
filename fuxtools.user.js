@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        * FuxTools
 // @namespace   custom.leitstellenspiel.de
-// @version     1.4
+// @version     1.4.2
 // @author      Fuxaro
 // @license     CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
 // @description FuxTools - Wachen- und Fahrzeugverwaltung für leitstellenspiel.de: Wache(n) auswählen, pro Fahrzeugtyp einen Namen vergeben, automatisch durchnummeriert umbenennen oder zurücksetzen.
